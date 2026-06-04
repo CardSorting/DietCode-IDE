@@ -18,8 +18,15 @@
 #include <string>
 #include <set>
 #include <map>
+#include <iomanip>
 
 namespace {
+static const NSUInteger kMaxRequestBytes = 1024 * 1024;
+static const NSUInteger kMaxResponseBytes = 4 * 1024 * 1024;
+static const NSInteger kMaxGrepResults = 500;
+static const NSUInteger kMaxFileTextBytes = 1024 * 1024;
+static const NSUInteger kMaxPatchBytesBeforeConfirmation = 10 * 1024;
+
 NSString* NSStringFromStdString(const std::string& value) {
     return [NSString stringWithUTF8String:value.c_str()] ?: @"";
 }
@@ -35,6 +42,112 @@ NSString* AbsolutePathForRPCPath(NSString* path, NSString* workspace) {
     if (path.length == 0) return path;
     if ([path isAbsolutePath] || workspace.length == 0) return path;
     return [workspace stringByAppendingPathComponent:path];
+}
+
+BOOL PathIsInsideWorkspace(NSString* path, NSString* workspace) {
+    if (path.length == 0 || workspace.length == 0) return NO;
+    std::error_code ec;
+    std::filesystem::path pathAbs = std::filesystem::weakly_canonical(std::filesystem::path(StdStringFromNSString(path)), ec);
+    if (ec) return NO;
+    std::filesystem::path wsAbs = std::filesystem::weakly_canonical(std::filesystem::path(StdStringFromNSString(workspace)), ec);
+    if (ec) return NO;
+    auto rel = std::filesystem::relative(pathAbs, wsAbs, ec);
+    if (ec) return NO;
+    std::string relStr = rel.string();
+    return relStr == "." || (relStr.rfind("..", 0) != 0 && !rel.is_absolute());
+}
+
+NSArray<NSDictionary*>* HunkSummariesFromPatch(NSString* patch) {
+    NSMutableArray* hunks = [NSMutableArray array];
+    NSError* regErr = nil;
+    NSRegularExpression* hunkRegex = [NSRegularExpression regularExpressionWithPattern:@"^@@ -(\\d+),?(\\d*) \\+(\\d+),?(\\d*) @@" options:0 error:&regErr];
+    NSArray<NSString*>* lines = [patch componentsSeparatedByString:@"\n"];
+    NSMutableDictionary* current = nil;
+    NSInteger added = 0;
+    NSInteger removed = 0;
+
+    for (NSString* line in lines) {
+        NSTextCheckingResult* match = [hunkRegex firstMatchInString:line options:0 range:NSMakeRange(0, line.length)];
+        if (match) {
+            if (current) {
+                current[@"addedLines"] = @(added);
+                current[@"removedLines"] = @(removed);
+                [hunks addObject:current];
+            }
+            NSString* oldStart = [line substringWithRange:[match rangeAtIndex:1]];
+            NSString* oldCount = [match rangeAtIndex:2].location == NSNotFound ? @"" : [line substringWithRange:[match rangeAtIndex:2]];
+            NSString* newStart = [line substringWithRange:[match rangeAtIndex:3]];
+            NSString* newCount = [match rangeAtIndex:4].location == NSNotFound ? @"" : [line substringWithRange:[match rangeAtIndex:4]];
+            current = [@{
+                @"oldStart": @([oldStart integerValue]),
+                @"oldLines": @(oldCount.length > 0 ? [oldCount integerValue] : 1),
+                @"newStart": @([newStart integerValue]),
+                @"newLines": @(newCount.length > 0 ? [newCount integerValue] : 1),
+                @"header": line
+            } mutableCopy];
+            added = 0;
+            removed = 0;
+        } else if (current) {
+            if ([line hasPrefix:@"+"] && ![line hasPrefix:@"+++"]) added++;
+            else if ([line hasPrefix:@"-"] && ![line hasPrefix:@"---"]) removed++;
+        }
+    }
+
+    if (current) {
+        current[@"addedLines"] = @(added);
+        current[@"removedLines"] = @(removed);
+        [hunks addObject:current];
+    }
+    return hunks;
+}
+
+NSArray<NSNumber*>* ModifiedNewLinesFromPatch(NSString* patch) {
+    NSMutableArray<NSNumber*>* linesOut = [NSMutableArray array];
+    NSError* regErr = nil;
+    NSRegularExpression* hunkRegex = [NSRegularExpression regularExpressionWithPattern:@"^@@ -(\\d+),?(\\d*) \\+(\\d+),?(\\d*) @@" options:0 error:&regErr];
+    NSInteger currentNewLine = 0;
+    for (NSString* line in [patch componentsSeparatedByString:@"\n"]) {
+        NSTextCheckingResult* match = [hunkRegex firstMatchInString:line options:0 range:NSMakeRange(0, line.length)];
+        if (match) {
+            currentNewLine = [[line substringWithRange:[match rangeAtIndex:3]] integerValue];
+            continue;
+        }
+        if (currentNewLine <= 0) continue;
+        if ([line hasPrefix:@"+"] && ![line hasPrefix:@"+++"]) {
+            [linesOut addObject:@(currentNewLine)];
+            currentNewLine++;
+        } else if ([line hasPrefix:@"-"] && ![line hasPrefix:@"---"]) {
+            [linesOut addObject:@(currentNewLine)];
+        } else if ([line hasPrefix:@" "]) {
+            currentNewLine++;
+        }
+    }
+    return linesOut;
+}
+
+NSArray<NSString*>* AffectedSymbolsForPatch(NSString* patch, NSArray<NSDictionary*>* symbols) {
+    NSArray<NSNumber*>* modifiedLines = ModifiedNewLinesFromPatch(patch);
+    NSMutableSet<NSString*>* names = [NSMutableSet set];
+    for (NSDictionary* sym in symbols ?: @[]) {
+        NSInteger startLine = [sym[@"line"] integerValue];
+        NSInteger endLine = [sym[@"endLine"] integerValue];
+        for (NSNumber* line in modifiedLines) {
+            NSInteger value = [line integerValue];
+            if (value >= startLine && value <= endLine && [sym[@"name"] length] > 0) {
+                [names addObject:sym[@"name"]];
+                break;
+            }
+        }
+    }
+    return [[names allObjects] sortedArrayUsingSelector:@selector(compare:)];
+}
+
+NSInteger ChangedLineCountFromHunks(NSArray<NSDictionary*>* hunks) {
+    NSInteger count = 0;
+    for (NSDictionary* hunk in hunks) {
+        count += [hunk[@"addedLines"] integerValue] + [hunk[@"removedLines"] integerValue];
+    }
+    return count;
 }
 
 NSArray<NSString*>* DirtyFilePathsFromTabs(NSArray* tabs) {
@@ -131,6 +244,7 @@ NSArray<NSString*>* ContextLines(const std::vector<std::string>& lines, NSIntege
 @implementation DietCodeControlServer {
     int _serverFd;
     NSThread* _acceptThread;
+    NSString* _lastVerifyCommand;
 }
 
 - (instancetype)initWithWindowController:(DietCodeWindowController*)controller {
@@ -233,6 +347,11 @@ NSArray<NSString*>* ContextLines(const std::vector<std::string>& lines, NSIntege
         if (bytes <= 0) break;
         
         buffer.append(readBuf, bytes);
+        if (buffer.size() > kMaxRequestBytes) {
+            [self sendError:@"unknown" code:@"request_too_large" message:@"Request exceeds maximum allowed size." clientFd:clientFd];
+            buffer.clear();
+            break;
+        }
         
         size_t newlinePos;
         while ((newlinePos = buffer.find('\n')) != std::string::npos) {
@@ -240,6 +359,10 @@ NSArray<NSString*>* ContextLines(const std::vector<std::string>& lines, NSIntege
             buffer.erase(0, newlinePos + 1);
             
             if (line.empty()) continue;
+            if (line.size() > kMaxRequestBytes) {
+                [self sendError:@"unknown" code:@"request_too_large" message:@"Request exceeds maximum allowed size." clientFd:clientFd];
+                continue;
+            }
             [self processRequest:line clientFd:clientFd];
         }
     }
@@ -248,6 +371,11 @@ NSArray<NSString*>* ContextLines(const std::vector<std::string>& lines, NSIntege
 
 - (void)processRequest:(const std::string&)requestStr clientFd:(int)clientFd {
     auto startTime = std::chrono::high_resolution_clock::now();
+    if (requestStr.size() > kMaxRequestBytes) {
+        [self sendError:@"unknown" code:@"request_too_large" message:@"Request exceeds maximum allowed size." clientFd:clientFd];
+        [self logAuditMethod:@"invalid" caller:@"unknown" permission:@"none" duration:0 result:@"request_too_large" paths:@""];
+        return;
+    }
     
     NSData* reqData = [NSData dataWithBytes:requestStr.data() length:requestStr.size()];
     NSError* jsonErr = nil;
@@ -331,27 +459,237 @@ NSArray<NSString*>* ContextLines(const std::vector<std::string>& lines, NSIntege
     }
 }
 
+- (NSArray<NSDictionary*>*)rpcMethodDescriptions {
+    static NSArray<NSDictionary*>* methods = nil;
+    static dispatch_once_t onceToken;
+    dispatch_once(&onceToken, ^{
+        methods = @[
+            @{ @"name": @"rpc.ping", @"permission": @"Read", @"params": @{}, @"returns": @{ @"pong": @"boolean", @"server": @"string" } },
+            @{ @"name": @"rpc.methods", @"permission": @"Read", @"params": @{}, @"returns": @{ @"methods": @"array" } },
+            @{ @"name": @"rpc.describe", @"permission": @"Read", @"params": @{ @"method": @"string optional" }, @"returns": @{ @"methods": @"array" } },
+            @{ @"name": @"workspace.getRoot", @"permission": @"Read", @"params": @{}, @"returns": @{ @"path": @"string" } },
+            @{ @"name": @"workspace.openFolder", @"permission": @"Destructive", @"params": @{ @"path": @"directory path" }, @"returns": @{ @"opened": @"boolean" } },
+            @{ @"name": @"workspace.listFiles", @"permission": @"Read", @"params": @{}, @"returns": @{ @"files": @"array" } },
+            @{ @"name": @"workspace.grep", @"permission": @"Read", @"params": @{ @"query": @"string", @"maxResults": @"number <= 500 optional" }, @"returns": @{ @"matches": @"array with contextBefore/contextAfter" } },
+            @{ @"name": @"workspace.openFile", @"permission": @"Read", @"params": @{ @"path": @"string" }, @"returns": @{ @"opened": @"boolean" } },
+            @{ @"name": @"workspace.getRecentFiles", @"permission": @"Read", @"params": @{}, @"returns": @{ @"files": @"array" } },
+            @{ @"name": @"editor.getActiveFile", @"permission": @"Read", @"params": @{}, @"returns": @{ @"path": @"string" } },
+            @{ @"name": @"editor.getOpenFiles", @"permission": @"Read", @"params": @{}, @"returns": @{ @"files": @"array" } },
+            @{ @"name": @"editor.getText", @"permission": @"Read", @"params": @{ @"path": @"string optional" }, @"returns": @{ @"text": @"string" } },
+            @{ @"name": @"editor.getSelection", @"permission": @"Read", @"params": @{}, @"returns": @{ @"text": @"string", @"start": @"number", @"end": @"number" } },
+            @{ @"name": @"editor.setSelection", @"permission": @"Edit", @"params": @{ @"start": @"number", @"end": @"number" }, @"returns": @{ @"success": @"boolean" } },
+            @{ @"name": @"editor.insertText", @"permission": @"Edit", @"params": @{ @"text": @"string" }, @"returns": @{ @"inserted": @"boolean" } },
+            @{ @"name": @"editor.replaceSelection", @"permission": @"Edit", @"params": @{ @"text": @"string" }, @"returns": @{ @"replaced": @"boolean" } },
+            @{ @"name": @"editor.replaceRange", @"permission": @"Edit", @"params": @{ @"path": @"string optional", @"start": @"number", @"end": @"number", @"text": @"string" }, @"returns": @{ @"replaced": @"boolean" } },
+            @{ @"name": @"editor.applyPatch", @"permission": @"Edit/Destructive", @"params": @{ @"path": @"string", @"patch": @"unified diff", @"confirm": @"boolean optional" }, @"returns": @{ @"patched": @"boolean", @"validation": @"object" } },
+            @{ @"name": @"editor.saveFile", @"permission": @"Edit", @"params": @{ @"path": @"string optional" }, @"returns": @{ @"saved": @"boolean" } },
+            @{ @"name": @"editor.closeFile", @"permission": @"Edit", @"params": @{ @"path": @"string optional" }, @"returns": @{ @"closed": @"boolean" } },
+            @{ @"name": @"editor.goto", @"permission": @"Read", @"params": @{ @"path": @"string optional", @"line": @"number", @"column": @"number optional" }, @"returns": @{ @"navigated": @"boolean" } },
+            @{ @"name": @"analysis.workspaceSummary", @"permission": @"Read", @"params": @{}, @"returns": @{ @"root": @"string", @"languages": @"object" } },
+            @{ @"name": @"analysis.searchRanked", @"permission": @"Read", @"params": @{ @"query": @"string", @"maxResults": @"number <= 500 optional" }, @"returns": @{ @"results": @"array" } },
+            @{ @"name": @"analysis.fileSummary", @"permission": @"Read", @"params": @{ @"path": @"string optional" }, @"returns": @{ @"path": @"string", @"symbolCount": @"number" } },
+            @{ @"name": @"analysis.relatedFiles", @"permission": @"Read", @"params": @{ @"path": @"string optional" }, @"returns": @{ @"files": @"array" } },
+            @{ @"name": @"symbols.document", @"permission": @"Read", @"params": @{ @"path": @"string optional" }, @"returns": @{ @"symbols": @"array" } },
+            @{ @"name": @"symbols.outline", @"permission": @"Read", @"params": @{ @"path": @"string optional" }, @"returns": @{ @"symbols": @"array" } },
+            @{ @"name": @"symbols.activeDocument", @"permission": @"Read", @"params": @{}, @"returns": @{ @"symbols": @"array" } },
+            @{ @"name": @"symbols.references", @"permission": @"Read", @"params": @{ @"symbol": @"string" }, @"returns": @{ @"references": @"array" } },
+            @{ @"name": @"symbols.atCursor", @"permission": @"Read", @"params": @{}, @"returns": @{ @"symbol": @"object" } },
+            @{ @"name": @"diff.validatePatch", @"permission": @"Read", @"params": @{ @"path": @"string", @"patch": @"unified diff", @"currentText": @"string optional" }, @"returns": @{ @"ok": @"boolean", @"patchAppliesCleanly": @"boolean", @"requiresConfirmation": @"boolean" } },
+            @{ @"name": @"diff.applyPatchPreview", @"permission": @"Read", @"params": @{ @"path": @"string", @"patch": @"unified diff" }, @"returns": @{ @"validation": @"object" } },
+            @{ @"name": @"diff.workspaceInfo", @"permission": @"Read", @"params": @{}, @"returns": @{ @"files": @"array", @"totalAdded": @"number", @"totalDeleted": @"number" } },
+            @{ @"name": @"diff.stats", @"permission": @"Read", @"params": @{}, @"returns": @{ @"files": @"array", @"totalAdded": @"number", @"totalDeleted": @"number" } },
+            @{ @"name": @"diff.file", @"permission": @"Read", @"params": @{ @"path": @"string" }, @"returns": @{ @"diff": @"string" } },
+            @{ @"name": @"diff.previewPatch", @"permission": @"Read", @"params": @{ @"path": @"string", @"patch": @"unified diff" }, @"returns": @{ @"ok": @"boolean", @"risk": @"string" } },
+            @{ @"name": @"buffers.snapshot", @"permission": @"Read", @"params": @{}, @"returns": @{ @"buffers": @"array" } },
+            @{ @"name": @"buffers.dirty", @"permission": @"Read", @"params": @{}, @"returns": @{ @"files": @"array" } },
+            @{ @"name": @"buffers.active", @"permission": @"Read", @"params": @{}, @"returns": @{ @"path": @"string", @"selection": @"object" } },
+            @{ @"name": @"buffers.unsavedDiff", @"permission": @"Read", @"params": @{ @"path": @"string optional" }, @"returns": @{ @"diff": @"string" } },
+            @{ @"name": @"changes.current", @"permission": @"Read", @"params": @{}, @"returns": @{ @"modifiedFiles": @"array", @"unsavedBuffers": @"array", @"stagedFiles": @"array", @"unstagedFiles": @"array" } },
+            @{ @"name": @"changes.summary", @"permission": @"Read", @"params": @{}, @"returns": @{ @"summary": @"object" } },
+            @{ @"name": @"changes.revertFile", @"permission": @"Destructive", @"params": @{ @"path": @"string" }, @"returns": @{ @"reverted": @"boolean" } },
+            @{ @"name": @"verify.run", @"permission": @"Execute", @"params": @{ @"command": @"make test | make app | git diff --check" }, @"returns": @{ @"started": @"boolean" } },
+            @{ @"name": @"verify.last", @"permission": @"Read", @"params": @{}, @"returns": @{ @"command": @"string", @"status": @"object" } },
+            @{ @"name": @"verify.status", @"permission": @"Read", @"params": @{}, @"returns": @{ @"status": @"object" } },
+            @{ @"name": @"diagnostics.list", @"permission": @"Read", @"params": @{}, @"returns": @{ @"diagnostics": @"array with stable id" } },
+            @{ @"name": @"diagnostics.summary", @"permission": @"Read", @"params": @{}, @"returns": @{ @"errors": @"number", @"warnings": @"number" } },
+            @{ @"name": @"diagnostics.cluster", @"permission": @"Read", @"params": @{}, @"returns": @{ @"clusters": @"array" } },
+            @{ @"name": @"diagnostics.forFile", @"permission": @"Read", @"params": @{ @"path": @"string optional" }, @"returns": @{ @"diagnostics": @"array" } },
+            @{ @"name": @"problems.list", @"permission": @"Read", @"params": @{}, @"returns": @{ @"problems": @"array with stable id" } },
+            @{ @"name": @"problems.open", @"permission": @"Edit", @"params": @{ @"id": @"stable diagnostic id" }, @"returns": @{ @"opened": @"boolean" } },
+            @{ @"name": @"problems.clearSource", @"permission": @"Edit", @"params": @{ @"source": @"string" }, @"returns": @{ @"cleared": @"boolean" } },
+            @{ @"name": @"terminal.run", @"permission": @"Execute", @"params": @{ @"command": @"string", @"cwd": @"string optional", @"show": @"boolean optional" }, @"returns": @{ @"run": @"boolean" } },
+            @{ @"name": @"terminal.stop", @"permission": @"Execute", @"params": @{}, @"returns": @{ @"stopped": @"boolean" } },
+            @{ @"name": @"terminal.getOutput", @"permission": @"Execute", @"params": @{}, @"returns": @{ @"output": @"string" } },
+            @{ @"name": @"terminal.clear", @"permission": @"Execute", @"params": @{}, @"returns": @{ @"cleared": @"boolean" } },
+            @{ @"name": @"terminal.status", @"permission": @"Execute", @"params": @{}, @"returns": @{ @"pid": @"number", @"running": @"boolean" } },
+            @{ @"name": @"terminal.jobs", @"permission": @"Execute", @"params": @{}, @"returns": @{ @"jobs": @"array" } },
+            @{ @"name": @"terminal.history", @"permission": @"Execute", @"params": @{}, @"returns": @{ @"commands": @"array" } },
+            @{ @"name": @"git.status", @"permission": @"Read", @"params": @{}, @"returns": @{ @"branch": @"string", @"staged": @"array", @"modified": @"array", @"untracked": @"array" } },
+            @{ @"name": @"git.diff", @"permission": @"Read", @"params": @{ @"path": @"string optional" }, @"returns": @{ @"diff": @"string" } },
+            @{ @"name": @"git.stage", @"permission": @"Edit", @"params": @{ @"path": @"string" }, @"returns": @{ @"staged": @"boolean" } },
+            @{ @"name": @"git.unstage", @"permission": @"Edit", @"params": @{ @"path": @"string" }, @"returns": @{ @"unstaged": @"boolean" } },
+            @{ @"name": @"git.discard", @"permission": @"Destructive", @"params": @{ @"path": @"string" }, @"returns": @{ @"discarded": @"boolean" } },
+            @{ @"name": @"git.commit", @"permission": @"Destructive", @"params": @{ @"message": @"string" }, @"returns": @{ @"committed": @"boolean" } },
+            @{ @"name": @"language.diagnostics", @"permission": @"Read", @"params": @{ @"path": @"string optional" }, @"returns": @{ @"diagnostics": @"array" } },
+            @{ @"name": @"language.format", @"permission": @"Execute", @"params": @{ @"path": @"string optional" }, @"returns": @{ @"formatted": @"boolean" } },
+            @{ @"name": @"language.lint", @"permission": @"Execute", @"params": @{ @"path": @"string optional" }, @"returns": @{ @"linted": @"boolean" } },
+            @{ @"name": @"language.gotoDefinition", @"permission": @"Read", @"params": @{}, @"returns": @{ @"action_triggered": @"boolean" } },
+            @{ @"name": @"session.info", @"permission": @"Read", @"params": @{}, @"returns": @{ @"workspace": @"string", @"activeFile": @"string" } },
+            @{ @"name": @"session.workflowState", @"permission": @"Read", @"params": @{}, @"returns": @{ @"workspace": @"string", @"activeFile": @"string" } },
+            @{ @"name": @"session.recentCommands", @"permission": @"Read", @"params": @{}, @"returns": @{ @"commands": @"array" } },
+            @{ @"name": @"session.lastSearches", @"permission": @"Read", @"params": @{}, @"returns": @{ @"searches": @"array" } },
+            @{ @"name": @"session.clearHistory", @"permission": @"Read", @"params": @{}, @"returns": @{ @"cleared": @"boolean" } }
+        ];
+    });
+    return methods;
+}
+
+- (NSDictionary*)descriptionForRPCMethod:(NSString*)method {
+    for (NSDictionary* desc in [self rpcMethodDescriptions]) {
+        if ([desc[@"name"] isEqualToString:method]) {
+            return desc;
+        }
+    }
+    return @{};
+}
+
+- (NSDictionary*)validatePatchAtPath:(NSString*)path patch:(NSString*)patch currentText:(NSString*)currentTextOverride {
+    NSString* ws = [_windowController workspacePath];
+    NSString* targetPath = AbsolutePathForRPCPath(path, ws);
+    BOOL insideWorkspace = ws.length > 0 && PathIsInsideWorkspace(targetPath, ws);
+    BOOL targetExists = targetPath.length > 0 && [[NSFileManager defaultManager] fileExistsAtPath:targetPath];
+    NSArray* hunks = HunkSummariesFromPatch(patch ?: @"");
+    NSInteger changedLineCount = ChangedLineCountFromHunks(hunks);
+    BOOL requiresConfirmation = (patch.length > kMaxPatchBytesBeforeConfirmation) || changedLineCount > 200;
+
+    NSMutableDictionary* result = [@{
+        @"ok": @NO,
+        @"targetFileExists": @(targetExists),
+        @"insideWorkspace": @(insideWorkspace),
+        @"patchAppliesCleanly": @NO,
+        @"changedLineCount": @(changedLineCount),
+        @"affectedHunks": hunks,
+        @"affectedSymbols": @[],
+        @"requiresConfirmation": @(requiresConfirmation),
+        @"rejectedReason": @""
+    } mutableCopy];
+
+    if (!insideWorkspace) {
+        result[@"rejectedReason"] = @"Target file is outside workspace.";
+        return result;
+    }
+    if (!targetExists) {
+        result[@"rejectedReason"] = @"Target file does not exist.";
+        return result;
+    }
+    if (patch.length == 0) {
+        result[@"rejectedReason"] = @"Patch is empty.";
+        return result;
+    }
+
+    NSString* currentText = currentTextOverride ?: [_windowController textForFileAtPath:targetPath];
+    if (!currentText) {
+        result[@"rejectedReason"] = @"Target file is not readable.";
+        return result;
+    }
+
+    NSArray* symbols = [DietCodeSymbolIndexService symbolsForFileContent:currentText extension:[[targetPath pathExtension] lowercaseString]];
+    NSDictionary* preview = [DietCodeDiffAnalysisService previewPatchAtPath:targetPath patch:patch currentText:currentText symbols:symbols];
+    BOOL clean = [preview[@"ok"] boolValue];
+    result[@"patchAppliesCleanly"] = @(clean);
+    result[@"affectedSymbols"] = AffectedSymbolsForPatch(patch, symbols);
+    result[@"preview"] = preview;
+
+    if (!clean) {
+        result[@"rejectedReason"] = preview[@"error"] ?: @"Patch does not apply cleanly.";
+        return result;
+    }
+    if ([preview[@"syntaxDanger"] boolValue]) {
+        result[@"rejectedReason"] = preview[@"syntaxErrors"] ?: @"Patch introduces syntax risk.";
+        return result;
+    }
+
+    result[@"ok"] = @YES;
+    result[@"rejectedReason"] = @"";
+    return result;
+}
+
+- (NSDictionary*)currentChangesInfo {
+    NSString* ws = [_windowController workspacePath] ?: @"";
+    NSDictionary* git = [_windowController gitStatusInfo] ?: @{};
+    NSDictionary* diffInfo = ws.length > 0 ? [DietCodeDiffAnalysisService workspaceDiffInfo:ws] : @{};
+    NSMutableArray* files = [NSMutableArray array];
+
+    for (NSDictionary* file in diffInfo[@"files"] ?: @[]) {
+        NSString* relPath = file[@"path"] ?: @"";
+        NSString* absPath = AbsolutePathForRPCPath(relPath, ws);
+        NSString* text = [_windowController textForFileAtPath:absPath] ?: @"";
+        NSArray* symbols = text.length > 0 ? [DietCodeSymbolIndexService symbolsForFileContent:text extension:[[absPath pathExtension] lowercaseString]] : @[];
+        NSString* diff = [_windowController gitDiffForFile:absPath] ?: @"";
+        NSMutableDictionary* enriched = [file mutableCopy];
+        enriched[@"absolutePath"] = absPath ?: @"";
+        enriched[@"affectedSymbols"] = AffectedSymbolsForPatch(diff, symbols);
+        [files addObject:enriched];
+    }
+
+    NSArray* dirtyFiles = DirtyFilePathsFromTabs(_windowController.openTabs ?: @[]);
+    NSMutableArray* unsaved = [NSMutableArray array];
+    for (NSString* dirtyPath in dirtyFiles) {
+        [unsaved addObject:@{ @"path": dirtyPath }];
+    }
+
+    return @{
+        @"modifiedFiles": files,
+        @"unsavedBuffers": unsaved,
+        @"stagedFiles": git[@"staged"] ?: @[],
+        @"unstagedFiles": git[@"modified"] ?: @[],
+        @"untrackedFiles": git[@"untracked"] ?: @[],
+        @"totalAdded": diffInfo[@"totalAdded"] ?: @0,
+        @"totalDeleted": diffInfo[@"totalDeleted"] ?: @0
+    };
+}
+
+- (NSDictionary*)verificationStatus {
+    NSString* output = [_windowController terminalOutput] ?: @"";
+    NSString* command = _lastVerifyCommand ?: @"";
+    NSString* markerPrefix = [NSString stringWithFormat:@"[DietCode verify] command=%@ exit=", command];
+    NSRange range = [output rangeOfString:markerPrefix options:NSBackwardsSearch];
+    if (range.location == NSNotFound) {
+        return @{
+            @"command": command,
+            @"state": command.length > 0 ? @"running_or_unknown" : @"idle",
+            @"exitCode": [NSNull null],
+            @"passed": @NO
+        };
+    }
+    NSUInteger start = NSMaxRange(range);
+    NSUInteger end = start;
+    while (end < output.length) {
+        unichar c = [output characterAtIndex:end];
+        if (c < '0' || c > '9') break;
+        end++;
+    }
+    NSInteger exitCode = [[output substringWithRange:NSMakeRange(start, end - start)] integerValue];
+    return @{
+        @"command": command,
+        @"state": @"complete",
+        @"exitCode": @(exitCode),
+        @"passed": @(exitCode == 0)
+    };
+}
+
 - (NSString*)permissionLevelForMethod:(NSString*)method params:(NSDictionary*)params {
-    if ([method isEqualToString:@"git.discard"] || 
-        [method isEqualToString:@"git.commit"] || 
+    if ([method isEqualToString:@"git.discard"] ||
+        [method isEqualToString:@"git.commit"] ||
+        [method isEqualToString:@"changes.revertFile"] ||
         [method isEqualToString:@"workspace.openFolder"]) {
         return @"Destructive";
     }
     
     if ([method isEqualToString:@"editor.applyPatch"]) {
-        NSString* patchStr = params[@"patch"];
         BOOL confirmParam = [params[@"confirm"] boolValue];
-        if (confirmParam || patchStr.length > 10 * 1024) {
+        if (confirmParam) {
             return @"Destructive";
-        }
-        NSString* path = params[@"path"];
-        if (path) {
-            NSString* currentText = [_windowController textForFileAtPath:path];
-            if (currentText && currentText.length > 0) {
-                if (patchStr.length > (currentText.length * 0.3)) {
-                    return @"Destructive";
-                }
-            }
         }
     }
     
@@ -371,8 +709,9 @@ NSArray<NSString*>* ContextLines(const std::vector<std::string>& lines, NSIntege
         return @"Execute";
     }
     
-    if ([method hasPrefix:@"terminal."] || 
-        [method isEqualToString:@"language.lint"] || 
+    if ([method hasPrefix:@"terminal."] ||
+        [method isEqualToString:@"verify.run"] ||
+        [method isEqualToString:@"language.lint"] ||
         [method isEqualToString:@"language.format"]) {
         return @"Execute";
     }
@@ -401,15 +740,48 @@ NSArray<NSString*>* ContextLines(const std::vector<std::string>& lines, NSIntege
              outPaths:(NSString**)outPaths {
     
     NSString* path = params[@"path"];
-    if (path && ![method isEqualToString:@"workspace.openFolder"]) {
+    if (path &&
+        ![method isEqualToString:@"workspace.openFolder"] &&
+        ![method isEqualToString:@"diff.validatePatch"] &&
+        ![method isEqualToString:@"diff.applyPatchPreview"]) {
         NSString* ws = [_windowController workspacePath];
         NSString* checkedPath = AbsolutePathForRPCPath(path, ws);
         *outPaths = checkedPath;
-        if (ws && ![checkedPath hasPrefix:ws]) {
-            *outErrCode = @"permission_denied";
+        if (ws && !PathIsInsideWorkspace(checkedPath, ws)) {
+            *outErrCode = @"outside_workspace";
             *outErrMsg = @"Target path is outside active workspace folder.";
             return;
         }
+    }
+
+    if ([method isEqualToString:@"rpc.ping"]) {
+        *outResult = @{ @"pong": @YES, @"server": @"DietCodeControlServer", @"version": @"1.3" };
+        return;
+    }
+
+    if ([method isEqualToString:@"rpc.methods"]) {
+        NSMutableArray* names = [NSMutableArray array];
+        for (NSDictionary* desc in [self rpcMethodDescriptions]) {
+            [names addObject:desc[@"name"]];
+        }
+        *outResult = @{ @"methods": names };
+        return;
+    }
+
+    if ([method isEqualToString:@"rpc.describe"]) {
+        NSString* targetMethod = params[@"method"];
+        if (targetMethod.length > 0) {
+            NSDictionary* desc = [self descriptionForRPCMethod:targetMethod];
+            if (desc.count == 0) {
+                *outErrCode = @"method_not_found";
+                *outErrMsg = [NSString stringWithFormat:@"The method '%@' is not defined.", targetMethod];
+                return;
+            }
+            *outResult = @{ @"methods": @[desc] };
+        } else {
+            *outResult = @{ @"methods": [self rpcMethodDescriptions] };
+        }
+        return;
     }
     
     if ([method isEqualToString:@"workspace.openFolder"]) {
@@ -499,6 +871,11 @@ NSArray<NSString*>* ContextLines(const std::vector<std::string>& lines, NSIntege
         NSArray* excludePatterns = params[@"exclude"] ?: @[];
         BOOL caseSensitive = [params[@"caseSensitive"] boolValue];
         NSInteger maxResults = params[@"maxResults"] ? [params[@"maxResults"] integerValue] : 200;
+        if (maxResults > kMaxGrepResults) {
+            *outErrCode = @"response_too_large";
+            *outErrMsg = [NSString stringWithFormat:@"maxResults exceeds limit of %ld.", (long)kMaxGrepResults];
+            return;
+        }
         
         std::string folder = StdStringFromNSString(ws);
         std::string stdQuery = StdStringFromNSString(query);
@@ -623,6 +1000,12 @@ NSArray<NSString*>* ContextLines(const std::vector<std::string>& lines, NSIntege
             *outErrMsg = @"File is not open and is not in workspace.";
             return;
         }
+        NSUInteger textBytes = [text lengthOfBytesUsingEncoding:NSUTF8StringEncoding];
+        if (textBytes > kMaxFileTextBytes && ![params[@"allowLarge"] boolValue]) {
+            *outErrCode = @"response_too_large";
+            *outErrMsg = @"File text exceeds maximum RPC response size; pass allowLarge=true only when needed.";
+            return;
+        }
         *outResult = @{ @"text": text };
         return;
     }
@@ -714,6 +1097,17 @@ NSArray<NSString*>* ContextLines(const std::vector<std::string>& lines, NSIntege
             *outErrMsg = @"path and patch parameters required.";
             return;
         }
+        NSDictionary* validation = [self validatePatchAtPath:targetPath patch:patchStr currentText:nil];
+        if (![validation[@"ok"] boolValue]) {
+            *outErrCode = @"patch_failed";
+            *outErrMsg = validation[@"rejectedReason"] ?: @"Patch validation failed.";
+            return;
+        }
+        if ([validation[@"requiresConfirmation"] boolValue] && ![params[@"confirm"] boolValue]) {
+            *outErrCode = @"confirmation_required";
+            *outErrMsg = @"Patch is large or high impact; call diff.validatePatch and retry with confirm=true after review.";
+            return;
+        }
         NSString* errStr = nil;
         BOOL ok = [_windowController applyPatchAtPath:targetPath patchString:patchStr errorOut:&errStr];
         if (!ok) {
@@ -721,7 +1115,7 @@ NSArray<NSString*>* ContextLines(const std::vector<std::string>& lines, NSIntege
             *outErrMsg = errStr ?: @"Unknown patch application error.";
             return;
         }
-        *outResult = @{ @"patched": @YES };
+        *outResult = @{ @"patched": @YES, @"validation": validation };
         return;
     }
     
@@ -807,6 +1201,12 @@ NSArray<NSString*>* ContextLines(const std::vector<std::string>& lines, NSIntege
             }
         }
 
+        NSInteger requestedMax = params[@"maxResults"] ? [params[@"maxResults"] integerValue] : kMaxGrepResults;
+        if (requestedMax > kMaxGrepResults) {
+            *outErrCode = @"response_too_large";
+            *outErrMsg = [NSString stringWithFormat:@"maxResults exceeds limit of %ld.", (long)kMaxGrepResults];
+            return;
+        }
         NSArray* ranked = [DietCodeWorkspaceAnalysisService searchRankedForQuery:query
                                                                        workspace:ws
                                                                        openFiles:[_windowController openFilePaths]
@@ -814,7 +1214,7 @@ NSArray<NSString*>* ContextLines(const std::vector<std::string>& lines, NSIntege
                                                                          include:params[@"include"] ?: @[]
                                                                          exclude:params[@"exclude"] ?: @[]
                                                                    caseSensitive:[params[@"caseSensitive"] boolValue]];
-        NSInteger maxResults = params[@"maxResults"] ? [params[@"maxResults"] integerValue] : ranked.count;
+        NSInteger maxResults = MIN(requestedMax, (NSInteger)ranked.count);
         if (maxResults >= 0 && maxResults < (NSInteger)ranked.count) {
             ranked = [ranked subarrayWithRange:NSMakeRange(0, (NSUInteger)maxResults)];
         }
@@ -960,6 +1360,20 @@ NSArray<NSString*>* ContextLines(const std::vector<std::string>& lines, NSIntege
         return;
     }
 
+    if ([method isEqualToString:@"diff.validatePatch"] || [method isEqualToString:@"diff.applyPatchPreview"]) {
+        NSString* ws = [_windowController workspacePath];
+        NSString* targetPath = AbsolutePathForRPCPath(params[@"path"] ?: [_windowController activeFilePath], ws);
+        NSString* patchStr = params[@"patch"];
+        if (!targetPath || patchStr.length == 0) {
+            *outErrCode = @"invalid_params";
+            *outErrMsg = @"path and patch parameters required.";
+            return;
+        }
+        NSDictionary* validation = [self validatePatchAtPath:targetPath patch:patchStr currentText:params[@"currentText"]];
+        *outResult = @{ @"validation": validation };
+        return;
+    }
+
     if ([method isEqualToString:@"diff.previewPatch"]) {
         NSString* ws = [_windowController workspacePath];
         NSString* targetPath = AbsolutePathForRPCPath(params[@"path"] ?: [_windowController activeFilePath], ws);
@@ -1050,6 +1464,47 @@ NSArray<NSString*>* ContextLines(const std::vector<std::string>& lines, NSIntege
         return;
     }
 
+    // Change set commands
+    if ([method isEqualToString:@"changes.current"]) {
+        *outResult = [self currentChangesInfo];
+        return;
+    }
+
+    if ([method isEqualToString:@"changes.summary"]) {
+        NSDictionary* changes = [self currentChangesInfo];
+        *outResult = @{
+            @"summary": @{
+                @"modifiedFileCount": @([changes[@"modifiedFiles"] count]),
+                @"unsavedBufferCount": @([changes[@"unsavedBuffers"] count]),
+                @"stagedFileCount": @([changes[@"stagedFiles"] count]),
+                @"unstagedFileCount": @([changes[@"unstagedFiles"] count]),
+                @"untrackedFileCount": @([changes[@"untrackedFiles"] count]),
+                @"totalAdded": changes[@"totalAdded"] ?: @0,
+                @"totalDeleted": changes[@"totalDeleted"] ?: @0
+            },
+            @"changes": changes
+        };
+        return;
+    }
+
+    if ([method isEqualToString:@"changes.revertFile"]) {
+        NSString* ws = [_windowController workspacePath];
+        NSString* targetPath = AbsolutePathForRPCPath(params[@"path"], ws);
+        if (!targetPath) {
+            *outErrCode = @"invalid_params";
+            *outErrMsg = @"path parameter required.";
+            return;
+        }
+        BOOL ok = [_windowController gitDiscardFile:targetPath];
+        if (!ok) {
+            *outErrCode = @"git_failed";
+            *outErrMsg = @"Failed to revert file.";
+            return;
+        }
+        *outResult = @{ @"reverted": @YES, @"path": targetPath };
+        return;
+    }
+
     // Session workflow commands
     if ([method isEqualToString:@"session.info"] || [method isEqualToString:@"session.workflowState"]) {
         NSString* ws = [_windowController workspacePath] ?: @"";
@@ -1081,6 +1536,28 @@ NSArray<NSString*>* ContextLines(const std::vector<std::string>& lines, NSIntege
         [_windowController.sessionRecentCommands removeAllObjects];
         [_windowController.sessionLastSearches removeAllObjects];
         *outResult = @{ @"cleared": @YES };
+        return;
+    }
+
+    // Verification commands
+    if ([method isEqualToString:@"verify.run"]) {
+        NSString* command = params[@"command"] ?: @"";
+        NSSet* allowed = [NSSet setWithArray:@[@"make test", @"make app", @"git diff --check"]];
+        if (![allowed containsObject:command]) {
+            *outErrCode = @"invalid_params";
+            *outErrMsg = @"verify.run command must be one of: make test, make app, git diff --check.";
+            return;
+        }
+        _lastVerifyCommand = [command copy];
+        NSString* shellCommand = [NSString stringWithFormat:@"%@; printf '\\n[DietCode verify] command=%@ exit=%%s\\n' \"$?\"", command, command];
+        [_windowController runTerminalCommand:shellCommand cwd:[_windowController workspacePath] show:YES];
+        *outResult = @{ @"started": @YES, @"command": command, @"visible": @YES, @"stoppable": @YES };
+        return;
+    }
+
+    if ([method isEqualToString:@"verify.last"] || [method isEqualToString:@"verify.status"]) {
+        NSDictionary* status = [self verificationStatus];
+        *outResult = @{ @"command": _lastVerifyCommand ?: @"", @"status": status };
         return;
     }
 
@@ -1331,6 +1808,18 @@ NSArray<NSString*>* ContextLines(const std::vector<std::string>& lines, NSIntege
     NSError* err = nil;
     NSData* data = [NSJSONSerialization dataWithJSONObject:responseObj options:0 error:&err];
     if (err || !data) return;
+    if (data.length > kMaxResponseBytes && [responseObj[@"ok"] boolValue]) {
+        NSDictionary* limitResp = @{
+            @"id": responseObj[@"id"] ?: @"unknown",
+            @"ok": @NO,
+            @"error": @{
+                @"code": @"response_too_large",
+                @"message": @"Response exceeds maximum allowed size."
+            }
+        };
+        data = [NSJSONSerialization dataWithJSONObject:limitResp options:0 error:&err];
+        if (err || !data) return;
+    }
     
     NSMutableData* lineData = [data mutableCopy];
     [lineData appendBytes:"\n" length:1];

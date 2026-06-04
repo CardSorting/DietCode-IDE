@@ -562,6 +562,28 @@ bool isPathExcluded(const std::filesystem::path& path) {
     return false;
 }
 
+NSString* StableMessageHash(NSString* value) {
+    uint64_t hash = 1469598103934665603ULL;
+    NSData* data = [value dataUsingEncoding:NSUTF8StringEncoding] ?: [NSData data];
+    const unsigned char* bytes = (const unsigned char*)data.bytes;
+    for (NSUInteger i = 0; i < data.length; i++) {
+        hash ^= bytes[i];
+        hash *= 1099511628211ULL;
+    }
+    char buffer[17];
+    snprintf(buffer, sizeof(buffer), "%016llx", (unsigned long long)hash);
+    return [NSString stringWithUTF8String:buffer];
+}
+
+NSString* StableDiagnosticId(NSString* source, NSString* path, NSNumber* line, NSNumber* column, NSString* message) {
+    return [NSString stringWithFormat:@"%@:%@:%@:%@:%@",
+            source ?: @"unknown",
+            path ?: @"",
+            line ?: @(1),
+            column ?: @(1),
+            StableMessageHash(message ?: @"")];
+}
+
 } // namespace
 
 @implementation DietCodeWindowController {
@@ -5850,21 +5872,24 @@ static NSString* FindBinaryPath(NSString* name, NSString* fallback) {
 // Problems
 - (NSArray<NSDictionary*>*)problemsList {
     NSMutableArray* list = [NSMutableArray array];
-    int idx = 0;
     for (NSDictionary* d in self.unifiedDiagnostics) {
         NSString* relPath = d[@"path"];
         if (self.openedFolderPath && [relPath hasPrefix:self.openedFolderPath]) {
             relPath = [relPath substringFromIndex:self.openedFolderPath.length];
             if ([relPath hasPrefix:@"/"]) relPath = [relPath substringFromIndex:1];
         }
+        NSString* source = d[@"source"] ?: @"unknown";
+        NSNumber* line = d[@"line"] ?: @(1);
+        NSNumber* column = d[@"column"] ?: @(1);
+        NSString* message = d[@"message"] ?: @"";
         [list addObject:@{
-            @"id": [NSString stringWithFormat:@"diag-%03d", idx++],
-            @"source": d[@"source"] ?: @"unknown",
+            @"id": StableDiagnosticId(source, relPath, line, column, message),
+            @"source": source,
             @"severity": d[@"severity"] ?: @"info",
             @"path": relPath,
-            @"line": d[@"line"] ?: @(1),
-            @"column": d[@"column"] ?: @(1),
-            @"message": d[@"message"] ?: @""
+            @"line": line,
+            @"column": column,
+            @"message": message
         }];
     }
     return list;
@@ -5876,6 +5901,16 @@ static NSString* FindBinaryPath(NSString* name, NSString* fallback) {
         if (idx >= 0 && idx < (NSInteger)self.unifiedDiagnostics.count) {
             NSDictionary* diag = self.unifiedDiagnostics[idx];
             [self openFileAtPath:diag[@"path"] line:[diag[@"line"] integerValue] column:[diag[@"column"] integerValue]];
+        }
+    }
+    for (NSDictionary* problem in [self problemsList]) {
+        if ([problem[@"id"] isEqualToString:problemId]) {
+            NSString* path = problem[@"path"];
+            if (self.openedFolderPath && path.length > 0 && ![path isAbsolutePath]) {
+                path = [self.openedFolderPath stringByAppendingPathComponent:path];
+            }
+            [self openFileAtPath:path line:[problem[@"line"] integerValue] column:[problem[@"column"] integerValue]];
+            return;
         }
     }
 }
