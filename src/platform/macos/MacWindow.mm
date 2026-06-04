@@ -141,6 +141,8 @@ extern char** environ;
 
 // Diagnostics properties
 @property(nonatomic, strong) NSMutableDictionary<NSString*, NSMutableArray<NSDictionary*>*>* diagnosticsDict;
+@property(nonatomic, strong) NSMutableArray<NSDictionary*>* unifiedDiagnostics;
+@property(nonatomic, assign) BOOL forceLargeFileModeForNextOpen;
 
 - (NSString*)detectLanguage:(NSString*)path;
 - (dietcode::lsp::LSPClient*)lspClientForLanguage:(NSString*)language;
@@ -178,8 +180,20 @@ extern char** environ;
 
 // Navigation
 - (void)navigateFromProblemsOrSearchText:(NSString*)line sender:(id)sender;
+- (void)navigateFromProblemsLineIndex:(NSNumber*)lineIndexObj sender:(id)sender;
 - (void)openFileAtPath:(NSString*)path line:(NSInteger)line column:(NSInteger)column;
 - (void)jumpToLine:(NSInteger)line column:(NSInteger)column;
+
+// New helper methods for Product Gravity
+- (void)ensureTerminalProcess;
+- (void)openSettingsAction:(id)sender;
+- (BOOL)checkAndPromptLSPForLanguage:(NSString*)language filePath:(NSString*)filePath;
+- (BOOL)isLanguageFeaturesEnabledForPath:(NSString*)filePath language:(NSString*)language;
+
+// Compiler diagnostics parser & helpers
+- (NSArray*)parseCompilerOutput:(NSString*)output;
+- (void)clearCompilerDiagnostics;
+- (void)addCompilerDiagnostics:(NSArray*)diags;
 
 @end
 
@@ -370,8 +384,8 @@ extern char** environ;
 
 // --- Tab State Helper Class ---
 @interface DietCodeTabState : NSObject
-@property (nonatomic, copy) NSString* path;
-@property (nonatomic, copy) NSString* title;
+@property (nonatomic, strong) NSString* path;
+@property (nonatomic, strong) NSString* title;
 @property (nonatomic, strong) NSScrollView* scrollView;
 @property (nonatomic, strong) NSTextView* textView;
 @property (nonatomic, assign) BOOL dirty;
@@ -379,6 +393,7 @@ extern char** environ;
 @property (nonatomic, strong) NSDate* lastModifiedDate;
 @property (nonatomic, assign) BOOL isReadOnly;
 @property (nonatomic, assign) BOOL isDiff;
+@property (nonatomic, assign) BOOL isLargeFile;
 @end
 
 @implementation DietCodeTabState
@@ -409,7 +424,19 @@ extern char** environ;
             NSRange lineRange = [self.string lineRangeForRange:NSMakeRange(charIndex, 0)];
             NSString *line = [self.string substringWithRange:lineRange];
             line = [line stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
-            if (self.navigationTarget && [self.navigationTarget respondsToSelector:@selector(navigateFromProblemsOrSearchText:sender:)]) {
+            
+            // Calculate line index
+            NSUInteger lineIndex = 0;
+            NSString* str = self.string;
+            for (NSUInteger i = 0; i < charIndex; i++) {
+                if ([str characterAtIndex:i] == '\n') {
+                    lineIndex++;
+                }
+            }
+            
+            if (self.navigationTarget && [self.navigationTarget respondsToSelector:@selector(navigateFromProblemsLineIndex:sender:)]) {
+                [self.navigationTarget performSelector:@selector(navigateFromProblemsLineIndex:sender:) withObject:@(lineIndex) withObject:self];
+            } else if (self.navigationTarget && [self.navigationTarget respondsToSelector:@selector(navigateFromProblemsOrSearchText:sender:)]) {
                 [self.navigationTarget performSelector:@selector(navigateFromProblemsOrSearchText:sender:) withObject:line withObject:self];
             }
         }
@@ -582,6 +609,7 @@ static NSString* FindBinaryPath(NSString* name, NSString* fallback) {
         _gitChanges = [NSMutableArray array];
         _gitChangesDict = [NSMutableDictionary dictionary];
         _diagnosticsDict = [NSMutableDictionary dictionary];
+        _unifiedDiagnostics = [NSMutableArray array];
         
         // Load Settings from NSUserDefaults
         NSUserDefaults* defaults = [NSUserDefaults standardUserDefaults];
@@ -607,10 +635,10 @@ static NSString* FindBinaryPath(NSString* name, NSString* fallback) {
         _eslintPath = [defaults stringForKey:@"EslintPath"] ?: FindBinaryPath(@"eslint", @"/opt/homebrew/bin/eslint");
         
         [self buildInterface];
+        [[self window] setAutorecalculatesKeyViewLoop:YES];
         [self showWelcome:nil];
         [self selectActivity:@"files"];
         [self updateWindowTitleAndStatus];
-        [self setupTerminalProcess];
         [self setupCommandPalette];
         [self checkForRecoverableFiles];
         if (self.openTabs.count == 0) {
@@ -653,8 +681,7 @@ static NSString* FindBinaryPath(NSString* name, NSString* fallback) {
         @{@"id": @"files", @"label": @"Files"},
         @{@"id": @"search", @"label": @"Search"},
         @{@"id": @"git", @"label": @"Git"},
-        @{@"id": @"run", @"label": @"Run"},
-        @{@"id": @"settings", @"label": @"Settings"}
+        @{@"id": @"run", @"label": @"Run"}
     ];
     for (NSDictionary* act in activities) {
         NSButton* item = [NSButton buttonWithTitle:act[@"label"] target:self action:@selector(activityButtonClicked:)];
@@ -662,6 +689,7 @@ static NSString* FindBinaryPath(NSString* name, NSString* fallback) {
         [item setControlSize:NSControlSizeRegular];
         [item setToolTip:act[@"label"]];
         [item setIdentifier:act[@"id"]];
+        [item setAccessibilityLabel:[NSString stringWithFormat:@"%@ sidebar tab button", act[@"label"]]];
         [self.activityBar addArrangedSubview:item];
     }
     [mainHorizontal addArrangedSubview:self.activityBar];
@@ -766,13 +794,13 @@ static NSString* FindBinaryPath(NSString* name, NSString* fallback) {
     NSArray<NSDictionary*>* bottomTabs = @[
         @{@"id": @"terminal", @"label": @"Terminal"},
         @{@"id": @"output", @"label": @"Output"},
-        @{@"id": @"errors", @"label": @"Problems"},
-        @{@"id": @"search", @"label": @"Search Results"}
+        @{@"id": @"errors", @"label": @"Problems"}
     ];
     for (NSDictionary* bt in bottomTabs) {
         NSButton* btn = [NSButton buttonWithTitle:bt[@"label"] target:self action:@selector(bottomTabButtonClicked:)];
         [btn setBezelStyle:NSBezelStyleRecessed];
         [btn setIdentifier:bt[@"id"]];
+        [btn setAccessibilityLabel:[NSString stringWithFormat:@"%@ bottom panel tab button", bt[@"label"]]];
         if ([bt[@"id"] isEqualToString:@"terminal"]) {
             [btn setHighlighted:YES];
         }
@@ -798,6 +826,7 @@ static NSString* FindBinaryPath(NSString* name, NSString* fallback) {
     [self.statusLabel setFont:[NSFont systemFontOfSize:12]];
     [self.statusLabel setTextColor:[NSColor secondaryLabelColor]];
     [self.statusLabel setTranslatesAutoresizingMaskIntoConstraints:NO];
+    [self.statusLabel setAccessibilityLabel:@"Status bar info"];
 
     NSView* statusBar = [[NSView alloc] init];
     [statusBar setWantsLayer:YES];
@@ -845,6 +874,7 @@ static NSString* FindBinaryPath(NSString* name, NSString* fallback) {
     [self.terminalTextView setEditable:YES];
     [self.terminalTextView setRichText:NO];
     [self.terminalTextView setFont:[NSFont monospacedSystemFontOfSize:12 weight:NSFontWeightRegular]];
+    [self.terminalTextView setAccessibilityLabel:@"Terminal input and output"];
     [termScroll setDocumentView:self.terminalTextView];
     
     NSTabViewItem* termItem = [[NSTabViewItem alloc] initWithIdentifier:@"terminal"];
@@ -859,6 +889,7 @@ static NSString* FindBinaryPath(NSString* name, NSString* fallback) {
     [self.outputTextView setEditable:NO];
     [self.outputTextView setRichText:NO];
     [self.outputTextView setFont:[NSFont monospacedSystemFontOfSize:12 weight:NSFontWeightRegular]];
+    [self.outputTextView setAccessibilityLabel:@"Run and build output log"];
     [outScroll setDocumentView:self.outputTextView];
     [self addPlaceholder:@"No output yet.\nRun a file to see output here." toTextView:self.outputTextView];
     [self updatePlaceholderVisibility:self.outputTextView];
@@ -876,6 +907,7 @@ static NSString* FindBinaryPath(NSString* name, NSString* fallback) {
     [self.errorsTextView setEditable:NO];
     [self.errorsTextView setRichText:NO];
     [self.errorsTextView setFont:[NSFont monospacedSystemFontOfSize:12 weight:NSFontWeightRegular]];
+    [self.errorsTextView setAccessibilityLabel:@"Problems and diagnostics list"];
     [errScroll setDocumentView:self.errorsTextView];
     [self addPlaceholder:@"No compiler errors.\nRun a file to check for problems." toTextView:self.errorsTextView];
     [self updatePlaceholderVisibility:self.errorsTextView];
@@ -885,22 +917,6 @@ static NSString* FindBinaryPath(NSString* name, NSString* fallback) {
     [errItem setView:errScroll];
     [self.bottomTabView addTabViewItem:errItem];
 
-    // Search Results Tab
-    NSScrollView* searchScroll = [[NSScrollView alloc] init];
-    [searchScroll setHasVerticalScroller:YES];
-    self.searchResultsTextView = [[DietCodeNavigationTextView alloc] initWithFrame:searchScroll.bounds];
-    [(DietCodeNavigationTextView*)self.searchResultsTextView setNavigationTarget:self];
-    [self.searchResultsTextView setEditable:NO];
-    [self.searchResultsTextView setRichText:NO];
-    [self.searchResultsTextView setFont:[NSFont monospacedSystemFontOfSize:12 weight:NSFontWeightRegular]];
-    [searchScroll setDocumentView:self.searchResultsTextView];
-    [self addPlaceholder:@"No search results.\nEnter a term in the Search sidebar and click Search." toTextView:self.searchResultsTextView];
-    [self updatePlaceholderVisibility:self.searchResultsTextView];
-    
-    NSTabViewItem* searchItem = [[NSTabViewItem alloc] initWithIdentifier:@"search"];
-    [searchItem setLabel:@"Search"];
-    [searchItem setView:searchScroll];
-    [self.bottomTabView addTabViewItem:searchItem];
 }
 
 - (void)bottomTabButtonClicked:(NSButton*)sender {
@@ -910,6 +926,9 @@ static NSString* FindBinaryPath(NSString* name, NSString* fallback) {
     }
     [sender setHighlighted:YES];
     [self.bottomTabView selectTabViewItemWithIdentifier:identifier];
+    if ([identifier isEqualToString:@"terminal"]) {
+        [self ensureTerminalProcess];
+    }
 }
 
 - (void)prepareSidebarPanels {
@@ -966,6 +985,7 @@ static NSString* FindBinaryPath(NSString* name, NSString* fallback) {
     [self.fileTreeView setDataSource:self];
     [self.fileTreeView setDelegate:self];
     [self.fileTreeView setAutoresizesOutlineColumn:YES];
+    [self.fileTreeView setAccessibilityLabel:@"Workspace Files Tree"];
     
     // Set Double Click to open file or toggle folder
     [self.fileTreeView setDoubleAction:@selector(fileTreeDoubleClicked:)];
@@ -1029,22 +1049,18 @@ static NSString* FindBinaryPath(NSString* name, NSString* fallback) {
     [searchStack setTranslatesAutoresizingMaskIntoConstraints:NO];
     [self.searchSidebarView addSubview:searchStack];
 
-    [NSLayoutConstraint activateConstraints:@[
-        [searchStack.leadingAnchor constraintEqualToAnchor:self.searchSidebarView.leadingAnchor],
-        [searchStack.trailingAnchor constraintEqualToAnchor:self.searchSidebarView.trailingAnchor],
-        [searchStack.topAnchor constraintEqualToAnchor:self.searchSidebarView.topAnchor]
-    ]];
-
     [searchStack addArrangedSubview:MakeLabel(@"SEARCH WORKSPACE", 13, NSFontWeightBold)];
     
     NSTextField* searchField = [[NSTextField alloc] init];
     [searchField setPlaceholderString:@"Search term..."];
     [searchField setIdentifier:@"SearchInput"];
+    [searchField setAccessibilityLabel:@"Workspace search query input"];
     [searchStack addArrangedSubview:searchField];
 
     NSButton* caseCheck = [NSButton buttonWithTitle:@"Case Sensitive" target:nil action:nil];
     [caseCheck setButtonType:NSButtonTypeSwitch];
     [caseCheck setIdentifier:@"CaseSensitive"];
+    [caseCheck setAccessibilityLabel:@"Search case sensitivity checkbox"];
     [searchStack addArrangedSubview:caseCheck];
 
     NSStackView* searchButtons = [[NSStackView alloc] init];
@@ -1053,11 +1069,38 @@ static NSString* FindBinaryPath(NSString* name, NSString* fallback) {
     
     NSButton* startSearchBtn = [NSButton buttonWithTitle:@"Search" target:self action:@selector(startWorkspaceSearch:)];
     [startSearchBtn setBezelStyle:NSBezelStyleRounded];
+    [startSearchBtn setAccessibilityLabel:@"Start search button"];
     NSButton* cancelSearchBtn = [NSButton buttonWithTitle:@"Cancel" target:self action:@selector(cancelWorkspaceSearch:)];
     [cancelSearchBtn setBezelStyle:NSBezelStyleRounded];
+    [cancelSearchBtn setAccessibilityLabel:@"Cancel search button"];
     [searchButtons addArrangedSubview:startSearchBtn];
     [searchButtons addArrangedSubview:cancelSearchBtn];
     [searchStack addArrangedSubview:searchButtons];
+
+    // Search Results Scroll View directly in Search Sidebar
+    NSScrollView* searchScroll = [[NSScrollView alloc] init];
+    [searchScroll setHasVerticalScroller:YES];
+    [searchScroll setHasHorizontalScroller:YES];
+    [searchScroll setTranslatesAutoresizingMaskIntoConstraints:NO];
+    
+    self.searchResultsTextView = [[DietCodeNavigationTextView alloc] initWithFrame:searchScroll.bounds];
+    [(DietCodeNavigationTextView*)self.searchResultsTextView setNavigationTarget:self];
+    [self.searchResultsTextView setEditable:NO];
+    [self.searchResultsTextView setRichText:NO];
+    [self.searchResultsTextView setFont:[NSFont monospacedSystemFontOfSize:11 weight:NSFontWeightRegular]];
+    [searchScroll setDocumentView:self.searchResultsTextView];
+    [self addPlaceholder:@"No search results.\nEnter a term above and click Search." toTextView:self.searchResultsTextView];
+    [self updatePlaceholderVisibility:self.searchResultsTextView];
+    
+    [searchStack addArrangedSubview:searchScroll];
+
+    [NSLayoutConstraint activateConstraints:@[
+        [searchStack.leadingAnchor constraintEqualToAnchor:self.searchSidebarView.leadingAnchor],
+        [searchStack.trailingAnchor constraintEqualToAnchor:self.searchSidebarView.trailingAnchor],
+        [searchStack.topAnchor constraintEqualToAnchor:self.searchSidebarView.topAnchor],
+        [searchStack.bottomAnchor constraintEqualToAnchor:self.searchSidebarView.bottomAnchor],
+        [searchScroll.widthAnchor constraintEqualToAnchor:searchStack.widthAnchor]
+    ]];
 
     // 3. Run Panel
     self.runSidebarView = [[NSView alloc] initWithFrame:self.sidebarView.bounds];
@@ -1121,11 +1164,13 @@ static NSString* FindBinaryPath(NSString* name, NSString* fallback) {
     
     self.gitBranchLabel = MakeLabel(@"Branch: unknown", 12, NSFontWeightRegular);
     [self.gitBranchLabel setTextColor:[NSColor secondaryLabelColor]];
+    [self.gitBranchLabel setAccessibilityLabel:@"Git current branch label"];
     [branchRow addArrangedSubview:self.gitBranchLabel];
     
     NSButton* gitRefreshBtn = [NSButton buttonWithTitle:@"Refresh" target:self action:@selector(gitRefreshClicked:)];
     [gitRefreshBtn setBezelStyle:NSBezelStyleRecessed];
     [gitRefreshBtn setControlSize:NSControlSizeSmall];
+    [gitRefreshBtn setAccessibilityLabel:@"Refresh git changes list"];
     [branchRow addArrangedSubview:gitRefreshBtn];
     
     [gitStack addArrangedSubview:branchRow];
@@ -1146,6 +1191,7 @@ static NSString* FindBinaryPath(NSString* name, NSString* fallback) {
     [self.gitChangesTableView setDelegate:self];
     [self.gitChangesTableView setDoubleAction:@selector(gitChangesDoubleClicked:)];
     [self.gitChangesTableView setTarget:self];
+    [self.gitChangesTableView setAccessibilityLabel:@"Git changes list"];
     [gitScroll setDocumentView:self.gitChangesTableView];
 
     NSMenu* gitCtxMenu = [[NSMenu alloc] initWithTitle:@"GitActions"];
@@ -1160,9 +1206,11 @@ static NSString* FindBinaryPath(NSString* name, NSString* fallback) {
     [self.gitCommitMessageField setPlaceholderString:@"Commit message..."];
     [self.gitCommitMessageField setFont:[NSFont systemFontOfSize:12]];
     [self.gitCommitMessageField setTranslatesAutoresizingMaskIntoConstraints:NO];
+    [self.gitCommitMessageField setAccessibilityLabel:@"Git commit message input"];
     [gitStack addArrangedSubview:self.gitCommitMessageField];
 
     NSButton* commitBtn = MakeButton(@"Commit Changes", self, @selector(gitCommitClicked:));
+    [commitBtn setAccessibilityLabel:@"Commit changed files button"];
     [gitStack addArrangedSubview:commitBtn];
 
     self.gitEmptyStateView = [[NSView alloc] init];
@@ -1544,6 +1592,18 @@ static NSString* FindBinaryPath(NSString* name, NSString* fallback) {
             height = 180;
         }
         [self.verticalSplit setPosition:self.verticalSplit.bounds.size.height - height ofDividerAtIndex:0];
+        // Also switch to terminal tab in bottom panel
+        [self.bottomTabView selectTabViewItemWithIdentifier:@"terminal"];
+        for (NSView* sub in [self.bottomPanel subviews]) {
+            if ([sub isKindOfClass:[NSStackView class]]) {
+                for (NSButton* btn in [((NSStackView*)sub) arrangedSubviews]) {
+                    if ([btn isKindOfClass:[NSButton class]]) {
+                        [btn setHighlighted:[btn.identifier isEqualToString:@"terminal"]];
+                    }
+                }
+            }
+        }
+        [self ensureTerminalProcess];
     } else {
         [self.bottomPanel setHidden:YES];
     }
@@ -1574,6 +1634,13 @@ static NSString* FindBinaryPath(NSString* name, NSString* fallback) {
     tab.dirty = isDirty;
     tab.isReadOnly = NO;
     tab.isDiff = NO;
+    tab.isLargeFile = NO;
+    
+    if (self.forceLargeFileModeForNextOpen) {
+        tab.isLargeFile = YES;
+        tab.isReadOnly = YES;
+        self.forceLargeFileModeForNextOpen = NO; // reset
+    }
     
     if (path && [path hasPrefix:@"[Diff]"]) {
         tab.isReadOnly = YES;
@@ -1594,7 +1661,7 @@ static NSString* FindBinaryPath(NSString* name, NSString* fallback) {
     [editor setHorizontallyResizable:YES];
     [editor setAutoresizingMask:NSViewWidthSizable | NSViewHeightSizable];
     [editor.textContainer setContainerSize:NSMakeSize(CGFLOAT_MAX, CGFLOAT_MAX)];
-    [editor.textContainer setWidthTracksTextView:self.currentWordWrap];
+    [editor.textContainer setWidthTracksTextView:tab.isLargeFile ? NO : self.currentWordWrap];
     [editor setFont:[NSFont monospacedSystemFontOfSize:self.currentFontSize weight:NSFontWeightRegular]];
     [editor setRichText:NO];
     [editor setAutomaticQuoteSubstitutionEnabled:NO];
@@ -1603,6 +1670,7 @@ static NSString* FindBinaryPath(NSString* name, NSString* fallback) {
     [editor setAllowsUndo:YES];
     [editor setDelegate:self];
     [editor setEditable:!tab.isReadOnly];
+    [editor setAccessibilityLabel:[NSString stringWithFormat:@"Editor for %@", tab.title]];
     
     self.loadingDocument = YES;
     [editor setString:text ?: @""];
@@ -1615,10 +1683,14 @@ static NSString* FindBinaryPath(NSString* name, NSString* fallback) {
     [scrollView setDocumentView:editor];
     
     // Add vertical line numbers ruler view
-    [scrollView setHasVerticalRuler:YES];
-    [scrollView setRulersVisible:YES];
-    DietCodeLineNumberRulerView* ruler = [[DietCodeLineNumberRulerView alloc] initWithScrollView:scrollView];
-    [scrollView setVerticalRulerView:ruler];
+    if (tab.isLargeFile) {
+        [scrollView setRulersVisible:NO];
+    } else {
+        [scrollView setHasVerticalRuler:YES];
+        [scrollView setRulersVisible:YES];
+        DietCodeLineNumberRulerView* ruler = [[DietCodeLineNumberRulerView alloc] initWithScrollView:scrollView];
+        [scrollView setVerticalRulerView:ruler];
+    }
 
     tab.scrollView = scrollView;
     tab.textView = editor;
@@ -1773,6 +1845,8 @@ static NSString* FindBinaryPath(NSString* name, NSString* fallback) {
     [[self window] makeFirstResponder:tab.textView];
     [self updateTabHeaderLayout];
     [self updateWindowTitleAndStatus];
+    
+    [self checkExternalStatusForTab:tab];
 }
 
 - (void)updateTabHeaderLayout {
@@ -1874,31 +1948,27 @@ static NSString* FindBinaryPath(NSString* name, NSString* fallback) {
         }
     }
     
-    // Update outline view border
-    NSView* fileTreeScroll = [self.fileTreeView superview].superview;
-    if ([fileTreeScroll isKindOfClass:[NSScrollView class]]) {
-        [fileTreeScroll setWantsLayer:YES];
-        if (responder == self.fileTreeView) {
-            [fileTreeScroll.layer setBorderColor:[activeBorder CGColor]];
-            [fileTreeScroll.layer setBorderWidth:isHighContrast ? 2.0 : 1.5];
-        } else {
-            [fileTreeScroll.layer setBorderColor:[normalBorder CGColor]];
-            [fileTreeScroll.layer setBorderWidth:isHighContrast ? 1.0 : 0.0];
+    // Helper to update border for any scroll view containing a specific document view
+    auto updateBorderForDocView = ^(NSView* docView) {
+        if (!docView) return;
+        NSView* scroll = [docView superview].superview;
+        if ([scroll isKindOfClass:[NSScrollView class]]) {
+            [scroll setWantsLayer:YES];
+            if (responder == docView) {
+                [scroll.layer setBorderColor:[activeBorder CGColor]];
+                [scroll.layer setBorderWidth:isHighContrast ? 2.0 : 1.5];
+            } else {
+                [scroll.layer setBorderColor:[normalBorder CGColor]];
+                [scroll.layer setBorderWidth:isHighContrast ? 1.0 : 0.0];
+            }
         }
-    }
+    };
     
-    // Update terminal border
-    NSView* termScroll = [self.terminalTextView superview].superview;
-    if ([termScroll isKindOfClass:[NSScrollView class]]) {
-        [termScroll setWantsLayer:YES];
-        if (responder == self.terminalTextView) {
-            [termScroll.layer setBorderColor:[activeBorder CGColor]];
-            [termScroll.layer setBorderWidth:isHighContrast ? 2.0 : 1.5];
-        } else {
-            [termScroll.layer setBorderColor:[normalBorder CGColor]];
-            [termScroll.layer setBorderWidth:isHighContrast ? 1.0 : 0.0];
-        }
-    }
+    updateBorderForDocView(self.fileTreeView);
+    updateBorderForDocView(self.terminalTextView);
+    updateBorderForDocView(self.outputTextView);
+    updateBorderForDocView(self.errorsTextView);
+    updateBorderForDocView(self.searchResultsTextView);
 }
 
 - (void)cancelOperation:(id)sender {
@@ -2047,7 +2117,7 @@ static NSString* FindBinaryPath(NSString* name, NSString* fallback) {
 }
 
 - (void)checkExternalStatusForTab:(DietCodeTabState*)tab {
-    if (tab.path == nil) return;
+    if (tab.path == nil || tab.isDiff) return;
     
     BOOL isDir = NO;
     if (![[NSFileManager defaultManager] fileExistsAtPath:tab.path isDirectory:&isDir]) {
@@ -2128,11 +2198,16 @@ static NSString* FindBinaryPath(NSString* name, NSString* fallback) {
     for (NSString* path in paths) {
         BOOL isDir = NO;
         if ([[NSFileManager defaultManager] fileExistsAtPath:path isDirectory:&isDir] && !isDir) {
+            NSDictionary* attrs = [[NSFileManager defaultManager] attributesOfItemAtPath:path error:nil];
+            unsigned long long fileSize = [attrs fileSize];
+            if (fileSize >= 50 * 1024 * 1024) {
+                self.forceLargeFileModeForNextOpen = YES;
+            }
+            
             const auto result = fileService_.readTextFile(std::filesystem::path(StdStringFromNSString(path)));
             if (result.ok) {
                 [self showEditorWithText:NSStringFromStdString(result.contents) path:path dirty:NO];
                 
-                NSDictionary* attrs = [[NSFileManager defaultManager] attributesOfItemAtPath:path error:nil];
                 self.activeTab.lastModifiedDate = attrs.fileModificationDate;
                 
                 if ([path isEqualToString:activePath]) {
@@ -2422,7 +2497,9 @@ static NSString* FindBinaryPath(NSString* name, NSString* fallback) {
     }
     
     // Format on Save
-    if (self.currentFormatOnSave && !tab.isReadOnly && !tab.isDiff) {
+    NSString* language = [self detectLanguage:tab.path];
+    BOOL lspEnabled = [self isLanguageFeaturesEnabledForPath:tab.path language:language];
+    if (self.currentFormatOnSave && !tab.isReadOnly && !tab.isDiff && lspEnabled) {
         [self formatTab:tab];
     }
     
@@ -2451,12 +2528,11 @@ static NSString* FindBinaryPath(NSString* name, NSString* fallback) {
     
     // Lint on Save & LSP didSave
     if (!tab.isReadOnly && !tab.isDiff) {
-        if (self.currentLintOnSave) {
+        if (self.currentLintOnSave && lspEnabled) {
             [self runLinterForTab:tab];
         }
         
-        NSString* language = [self detectLanguage:tab.path];
-        if (language) {
+        if (language && lspEnabled) {
             dietcode::lsp::LSPClient* client = [self lspClientForLanguage:language];
             if (client && client->isRunning()) {
                 client->didSave(StdStringFromNSString(tab.path));
@@ -2689,7 +2765,7 @@ static NSString* FindBinaryPath(NSString* name, NSString* fallback) {
     // Live update editor font & wrap
     for (DietCodeTabState* tab in self.openTabs) {
         [tab.textView setFont:[NSFont monospacedSystemFontOfSize:self.currentFontSize weight:NSFontWeightRegular]];
-        [tab.textView.textContainer setWidthTracksTextView:self.currentWordWrap];
+        [tab.textView.textContainer setWidthTracksTextView:tab.isLargeFile ? NO : self.currentWordWrap];
         [self updateDiagnosticsHighlightsForTab:tab];
     }
     
@@ -3003,8 +3079,6 @@ static NSString* FindBinaryPath(NSString* name, NSString* fallback) {
     self.searchCancelled = NO;
     
     [self selectActivity:@"search"];
-    [self.bottomTabView selectTabViewItemWithIdentifier:@"search"];
-    [self.bottomPanel setHidden:NO];
     
     [self appendSearchResult:[NSString stringWithFormat:@"Searching for '%@' in %@...\n\n", query, self.openedFolderPath]];
 
@@ -3152,18 +3226,33 @@ static NSString* FindBinaryPath(NSString* name, NSString* fallback) {
             NSString* errText = [[NSString alloc] initWithData:errData encoding:NSUTF8StringEncoding];
             
             dispatch_async(dispatch_get_main_queue(), ^{
+                // Always write raw compile logs to Output tab
+                [self appendOutputText:errText];
+                
+                // Clear and parse compiler errors
+                [self clearCompilerDiagnostics];
+                NSArray* parsedDiags = [self parseCompilerOutput:errText];
+                [self addCompilerDiagnostics:parsedDiags];
+                
                 if (compileTask.terminationStatus == 0) {
                     // Success compile! Now run
                     [self executeTask:outPath arguments:@[]];
                 } else {
-                    [self appendErrorText:errText];
                     [self updateRunStatus:@"Compilation Failed" success:NO];
                     [self.bottomTabView selectTabViewItemWithIdentifier:@"errors"];
                 }
             });
         } @catch (NSException* exception) {
             dispatch_async(dispatch_get_main_queue(), ^{
-                [self appendErrorText:@"Could not launch compiler /usr/bin/clang++\n"];
+                [self clearCompilerDiagnostics];
+                if (self.activeTab && self.activeTab.path) {
+                    [self handleDiagnostics:@[@{
+                        @"line": @(1),
+                        @"column": @(1),
+                        @"severity": @"error",
+                        @"message": @"Could not launch compiler /usr/bin/clang++"
+                    }] forFile:self.activeTab.path source:@"compiler"];
+                }
                 [self updateRunStatus:@"Compiler not found" success:NO];
             });
         }
@@ -3484,6 +3573,45 @@ static NSString* FindBinaryPath(NSString* name, NSString* fallback) {
     return 0;
 }
 
+- (BOOL)tableView:(NSTableView *)tableView isGroupRow:(NSInteger)row {
+    if (tableView == self.gitChangesTableView) {
+        NSDictionary* item = self.gitChanges[row];
+        return [item[@"isHeader"] boolValue];
+    }
+    return NO;
+}
+
+- (BOOL)tableView:(NSTableView *)tableView shouldSelectRow:(NSInteger)row {
+    if (tableView == self.gitChangesTableView) {
+        NSDictionary* item = self.gitChanges[row];
+        return ![item[@"isHeader"] boolValue];
+    }
+    return YES;
+}
+
+- (BOOL)validateMenuItem:(NSMenuItem *)menuItem {
+    SEL action = menuItem.action;
+    if (action == @selector(gitStageSelected:) || 
+        action == @selector(gitUnstageSelected:) || 
+        action == @selector(gitDiscardSelected:) || 
+        action == @selector(gitDiffSelected:)) {
+        
+        NSInteger row = [self.gitChangesTableView selectedRow];
+        if (row < 0 || row >= (NSInteger)self.gitChanges.count) return NO;
+        NSDictionary* item = self.gitChanges[row];
+        if ([item[@"isHeader"] boolValue]) return NO;
+        
+        BOOL staged = [item[@"staged"] boolValue];
+        if (action == @selector(gitStageSelected:)) {
+            return !staged;
+        }
+        if (action == @selector(gitUnstageSelected:)) {
+            return staged;
+        }
+    }
+    return YES;
+}
+
 - (NSView *)tableView:(NSTableView *)tableView viewForTableColumn:(NSTableColumn *)tableColumn row:(NSInteger)row {
     if (tableView == self.paletteTableView) {
         NSTableCellView* view = [tableView makeViewWithIdentifier:@"CommandCell" owner:self];
@@ -3503,6 +3631,25 @@ static NSString* FindBinaryPath(NSString* name, NSString* fallback) {
     }
     
     if (tableView == self.gitChangesTableView) {
+        NSDictionary* item = self.gitChanges[row];
+        if ([item[@"isHeader"] boolValue]) {
+            NSTableCellView* view = [tableView makeViewWithIdentifier:@"GitHeaderCell" owner:self];
+            if (view == nil) {
+                view = [[NSTableCellView alloc] initWithFrame:NSMakeRect(0, 0, 240, 24)];
+                view.identifier = @"GitHeaderCell";
+                NSTextField* tf = [[NSTextField alloc] initWithFrame:NSMakeRect(8, 2, 224, 20)];
+                [tf setBordered:NO];
+                [tf setDrawsBackground:NO];
+                [tf setEditable:NO];
+                [tf setFont:[NSFont boldSystemFontOfSize:11]];
+                [tf setTextColor:[NSColor secondaryLabelColor]];
+                view.textField = tf;
+                [view addSubview:tf];
+            }
+            view.textField.stringValue = [item[@"title"] uppercaseString];
+            return view;
+        }
+        
         NSTableCellView* view = [tableView makeViewWithIdentifier:@"GitChangeCell" owner:self];
         if (view == nil) {
             view = [[NSTableCellView alloc] initWithFrame:NSMakeRect(0, 0, 240, 30)];
@@ -3531,7 +3678,6 @@ static NSString* FindBinaryPath(NSString* name, NSString* fallback) {
             [view setAccessibilityRole:NSAccessibilityRowRole];
         }
         
-        NSDictionary* item = self.gitChanges[row];
         NSString* status = item[@"status"];
         NSString* path = item[@"path"];
         BOOL staged = [item[@"staged"] boolValue];
@@ -3738,12 +3884,15 @@ static NSString* FindBinaryPath(NSString* name, NSString* fallback) {
 
     NSButton* openFolderBtn = MakeButton(@"Open Folder", self, @selector(openFolder:));
     [openFolderBtn setToolTip:@"Browse and open a full workspace directory."];
+    [openFolderBtn setAccessibilityLabel:@"Open folder workspace"];
     
     NSButton* openButton = MakeButton(@"Open File", self, @selector(openFile:));
     [openButton setToolTip:@"Edit an existing file."];
+    [openButton setAccessibilityLabel:@"Open single file"];
     
     NSButton* newButton = MakeButton(@"New File", self, @selector(newFile:));
     [newButton setToolTip:@"Start with a blank file."];
+    [newButton setAccessibilityLabel:@"Create new blank file"];
 
     [welcome addArrangedSubview:title];
     [welcome addArrangedSubview:subtitle];
@@ -3785,6 +3934,7 @@ static NSString* FindBinaryPath(NSString* name, NSString* fallback) {
             [btn setBezelStyle:NSBezelStyleRecessed];
             [btn setToolTip:folder];
             [btn setIdentifier:folder];
+            [btn setAccessibilityLabel:[NSString stringWithFormat:@"Open recent project %@", [folder lastPathComponent]]];
             [rightCol addArrangedSubview:btn];
         }
     } else {
@@ -4018,17 +4168,55 @@ static NSString* FindBinaryPath(NSString* name, NSString* fallback) {
     NSString* key = [NSString stringWithFormat:@"%@:%@", targetFolder, language];
     NSString* choice = lspSettings[key];
     
-    if (choice) {
-        if ([choice isEqualToString:@"enable"]) {
-            [self startLSPForLanguage:language];
-        }
-        return;
+    if ([choice isEqualToString:@"enable"]) {
+        [self startLSPForLanguage:language];
+    }
+}
+
+- (BOOL)isLanguageFeaturesEnabledForPath:(NSString*)filePath language:(NSString*)language {
+    if (!language) return NO;
+    NSString* targetFolder = nil;
+    if (self.openedFolderPath && [filePath hasPrefix:self.openedFolderPath]) {
+        targetFolder = self.openedFolderPath;
+    } else {
+        targetFolder = [filePath stringByDeletingLastPathComponent];
+    }
+    if (!targetFolder) return NO;
+    
+    NSUserDefaults* defaults = [NSUserDefaults standardUserDefaults];
+    NSDictionary* lspSettings = [defaults dictionaryForKey:@"LspSettings"] ?: @{};
+    NSString* key = [NSString stringWithFormat:@"%@:%@", targetFolder, language];
+    return [lspSettings[key] isEqualToString:@"enable"];
+}
+
+- (BOOL)checkAndPromptLSPForLanguage:(NSString*)language filePath:(NSString*)filePath {
+    NSString* targetFolder = nil;
+    if (self.openedFolderPath && [filePath hasPrefix:self.openedFolderPath]) {
+        targetFolder = self.openedFolderPath;
+    } else {
+        targetFolder = [filePath stringByDeletingLastPathComponent];
+    }
+    if (!targetFolder) return NO;
+    
+    NSUserDefaults* defaults = [NSUserDefaults standardUserDefaults];
+    NSDictionary* lspSettings = [defaults dictionaryForKey:@"LspSettings"] ?: @{};
+    
+    NSString* key = [NSString stringWithFormat:@"%@:%@", targetFolder, language];
+    NSString* choice = lspSettings[key];
+    
+    if ([choice isEqualToString:@"enable"]) {
+        [self startLSPForLanguage:language];
+        return YES;
+    } else if ([choice isEqualToString:@"disable"]) {
+        [self logOutput:[NSString stringWithFormat:@"[Language Features] Disabled for this folder. Enable in Settings to run.\n"]];
+        return NO;
     }
     
+    // Choice is nil or "not_now" -> Prompt the user
     NSAlert* alert = [[NSAlert alloc] init];
     NSString* langName = [language isEqualToString:@"cpp"] ? @"C++" : ([language isEqualToString:@"python"] ? @"Python" : @"JavaScript/TypeScript");
     [alert setMessageText:[NSString stringWithFormat:@"Enable %@ Language Features?", langName]];
-    [alert setInformativeText:[NSString stringWithFormat:@"Would you like to enable autocompletion, diagnostics, and definition lookup for %@ files in this folder?\n\nFolder: %@", langName, targetFolder]];
+    [alert setInformativeText:[NSString stringWithFormat:@"Would you like to enable autocompletion, diagnostics, formatting, and definition lookup for %@ files in this folder?\n\nFolder: %@", langName, targetFolder]];
     [alert addButtonWithTitle:@"Enable"];
     [alert addButtonWithTitle:@"Not Now"];
     [alert addButtonWithTitle:@"Disable for this Folder"];
@@ -4036,9 +4224,11 @@ static NSString* FindBinaryPath(NSString* name, NSString* fallback) {
     NSInteger response = [alert runModal];
     
     NSMutableDictionary* newLspSettings = [lspSettings mutableCopy];
+    BOOL enabled = NO;
     if (response == NSAlertFirstButtonReturn) {
         newLspSettings[key] = @"enable";
         [self startLSPForLanguage:language];
+        enabled = YES;
     } else if (response == NSAlertSecondButtonReturn) {
         newLspSettings[key] = @"not_now";
     } else {
@@ -4047,6 +4237,17 @@ static NSString* FindBinaryPath(NSString* name, NSString* fallback) {
     
     [defaults setObject:newLspSettings forKey:@"LspSettings"];
     [defaults synchronize];
+    return enabled;
+}
+
+- (void)ensureTerminalProcess {
+    if (terminalPid_ == -1) {
+        [self setupTerminalProcess];
+    }
+}
+
+- (void)openSettingsAction:(id)sender {
+    [self selectActivity:@"settings"];
 }
 
 - (void)handleDiagnostics:(NSArray*)newDiags forFile:(NSString*)filePath source:(NSString*)source {
@@ -4095,7 +4296,7 @@ static NSString* FindBinaryPath(NSString* name, NSString* fallback) {
 }
 
 - (void)updateDiagnosticsHighlightsForTab:(DietCodeTabState*)tab {
-    if (!tab || !tab.textView || !tab.path) return;
+    if (!tab || !tab.textView || !tab.path || tab.isLargeFile) return;
     
     NSTextStorage* storage = tab.textView.textStorage;
     NSLayoutManager* lm = tab.textView.layoutManager;
@@ -4168,21 +4369,56 @@ static NSString* FindBinaryPath(NSString* name, NSString* fallback) {
 }
 
 - (void)rebuildProblemsPanel {
+    [self.unifiedDiagnostics removeAllObjects];
     NSMutableString* problemText = [NSMutableString string];
     NSUInteger totalProblems = 0;
     
-    for (NSString* filePath in self.diagnosticsDict) {
+    NSMutableSet* seenProblems = [NSMutableSet set];
+    
+    NSArray* filePaths = [[self.diagnosticsDict allKeys] sortedArrayUsingSelector:@selector(compare:)];
+    
+    for (NSString* filePath in filePaths) {
         NSArray* fileDiags = self.diagnosticsDict[filePath];
         if (fileDiags.count == 0) continue;
         
         for (NSDictionary* diag in fileDiags) {
-            totalProblems++;
             NSInteger line = [diag[@"line"] integerValue];
             NSInteger col = [diag[@"column"] integerValue];
             NSString* msg = diag[@"message"];
             NSString* severity = diag[@"severity"];
             
-            [problemText appendFormat:@"%@:%ld:%ld: %@: %@\n", filePath, (long)line, (long)col, severity, msg];
+            NSString* dupKey = [NSString stringWithFormat:@"%@:%ld:%@", filePath, (long)line, msg];
+            if ([seenProblems containsObject:dupKey]) {
+                continue;
+            }
+            [seenProblems addObject:dupKey];
+            
+            totalProblems++;
+            
+            NSString* prefix = @"[INFO]";
+            if ([severity isEqualToString:@"error"]) {
+                prefix = @"[ERROR]";
+            } else if ([severity isEqualToString:@"warning"]) {
+                prefix = @"[WARNING]";
+            }
+            
+            NSString* displayPath = filePath;
+            if (self.openedFolderPath && [filePath hasPrefix:self.openedFolderPath]) {
+                displayPath = [filePath substringFromIndex:self.openedFolderPath.length];
+                if ([displayPath hasPrefix:@"/"]) {
+                    displayPath = [displayPath substringFromIndex:1];
+                }
+            }
+            
+            [problemText appendFormat:@"%@ %@:%ld:%ld - %@\n", prefix, displayPath, (long)line, (long)col, msg];
+            
+            [self.unifiedDiagnostics addObject:@{
+                @"path": filePath,
+                @"line": @(line),
+                @"column": @(col),
+                @"severity": severity,
+                @"message": msg
+            }];
         }
     }
     
@@ -4197,6 +4433,99 @@ static NSString* FindBinaryPath(NSString* name, NSString* fallback) {
                 item.label = @"Problems";
             }
             break;
+        }
+    }
+}
+
+- (NSArray*)parseCompilerOutput:(NSString*)output {
+    NSMutableArray* parsed = [NSMutableArray array];
+    if (output.length == 0) return parsed;
+    
+    NSError* error = nil;
+    NSRegularExpression* regex = [NSRegularExpression regularExpressionWithPattern:@"^([^:\\n]+):([0-9]+):(?:([0-9]+):)? (error|warning|info|note): (.*)$"
+                                                                           options:NSRegularExpressionAnchorsMatchLines
+                                                                             error:&error];
+    if (error) {
+        return parsed;
+    }
+    
+    NSArray* matches = [regex matchesInString:output options:0 range:NSMakeRange(0, output.length)];
+    for (NSTextCheckingResult* match in matches) {
+        if (match.numberOfRanges >= 6) {
+            NSString* file = [output substringWithRange:[match rangeAtIndex:1]];
+            NSString* lineStr = [output substringWithRange:[match rangeAtIndex:2]];
+            
+            NSString* colStr = @"1";
+            if ([match rangeAtIndex:3].location != NSNotFound) {
+                colStr = [output substringWithRange:[match rangeAtIndex:3]];
+            }
+            
+            NSString* severity = [output substringWithRange:[match rangeAtIndex:4]];
+            NSString* msg = [output substringWithRange:[match rangeAtIndex:5]];
+            
+            if ([severity isEqualToString:@"note"]) {
+                severity = @"info";
+            }
+            
+            NSString* absPath = file;
+            if (![file isAbsolutePath] && self.openedFolderPath) {
+                absPath = [self.openedFolderPath stringByAppendingPathComponent:file];
+            }
+            
+            [parsed addObject:@{
+                @"path": absPath,
+                @"line": @([lineStr integerValue]),
+                @"column": @([colStr integerValue]),
+                @"severity": severity,
+                @"message": msg
+            }];
+        }
+    }
+    return parsed;
+}
+
+- (void)clearCompilerDiagnostics {
+    for (NSString* key in [self.diagnosticsDict allKeys]) {
+        NSMutableArray* list = self.diagnosticsDict[key];
+        NSMutableArray* toRemove = [NSMutableArray array];
+        for (NSDictionary* d in list) {
+            if ([d[@"source"] isEqualToString:@"compiler"]) {
+                [toRemove addObject:d];
+            }
+        }
+        [list removeObjectsInArray:toRemove];
+    }
+    [self rebuildProblemsPanel];
+}
+
+- (void)addCompilerDiagnostics:(NSArray*)diags {
+    NSMutableDictionary* grouped = [NSMutableDictionary dictionary];
+    for (NSDictionary* d in diags) {
+        NSString* path = d[@"path"];
+        NSMutableArray* list = grouped[path];
+        if (!list) {
+            list = [NSMutableArray array];
+            grouped[path] = list;
+        }
+        [list addObject:d];
+    }
+    for (NSString* path in grouped) {
+        [self handleDiagnostics:grouped[path] forFile:path source:@"compiler"];
+    }
+}
+
+- (void)navigateFromProblemsLineIndex:(NSNumber*)lineIndexObj sender:(id)sender {
+    NSUInteger lineIndex = [lineIndexObj unsignedIntegerValue];
+    if (sender == self.errorsTextView) {
+        if (lineIndex < self.unifiedDiagnostics.count) {
+            NSDictionary* diag = self.unifiedDiagnostics[lineIndex];
+            NSString* filePath = diag[@"path"];
+            NSInteger lineNum = [diag[@"line"] integerValue];
+            NSInteger colNum = [diag[@"column"] integerValue];
+            
+            if ([[NSFileManager defaultManager] fileExistsAtPath:filePath]) {
+                [self openFileAtPath:filePath line:lineNum column:colNum];
+            }
         }
     }
 }
@@ -4486,7 +4815,8 @@ static NSString* FindBinaryPath(NSString* name, NSString* fallback) {
         self.gitBranchLabel.stringValue = @"Branch: none (not a git repo)";
     }
     
-    NSMutableArray* changesArray = [NSMutableArray array];
+    NSMutableArray* staged = [NSMutableArray array];
+    NSMutableArray* unstaged = [NSMutableArray array];
     NSMutableDictionary* changesMap = [NSMutableDictionary dictionary];
     for (const auto& c : result.changes) {
         NSString* statusStr = NSStringFromStdString(c.status);
@@ -4496,24 +4826,36 @@ static NSString* FindBinaryPath(NSString* name, NSString* fallback) {
             @"path": relPath,
             @"staged": @(c.staged)
         };
-        [changesArray addObject:dict];
+        if (c.staged) {
+            [staged addObject:dict];
+        } else {
+            [unstaged addObject:dict];
+        }
         changesMap[relPath] = dict;
     }
     
-    [changesArray sortUsingComparator:^NSComparisonResult(id obj1, id obj2) {
-        BOOL s1 = [obj1[@"staged"] boolValue];
-        BOOL s2 = [obj2[@"staged"] boolValue];
-        if (s1 != s2) {
-            return s1 ? NSOrderedAscending : NSOrderedDescending;
-        }
+    [staged sortUsingComparator:^NSComparisonResult(id obj1, id obj2) {
+        return [obj1[@"path"] compare:obj2[@"path"]];
+    }];
+    [unstaged sortUsingComparator:^NSComparisonResult(id obj1, id obj2) {
         return [obj1[@"path"] compare:obj2[@"path"]];
     }];
     
-    self.gitChanges = changesArray;
+    NSMutableArray* combined = [NSMutableArray array];
+    if (staged.count > 0) {
+        [combined addObject:@{@"isHeader": @YES, @"title": @"Staged Changes"}];
+        [combined addObjectsFromArray:staged];
+    }
+    if (unstaged.count > 0) {
+        [combined addObject:@{@"isHeader": @YES, @"title": @"Changes"}];
+        [combined addObjectsFromArray:unstaged];
+    }
+    
+    self.gitChanges = combined;
     self.gitChangesDict = changesMap;
     [self.gitChangesTableView reloadData];
     
-    self.gitEmptyStateView.hidden = (self.gitChanges.count > 0);
+    self.gitEmptyStateView.hidden = (staged.count > 0 || unstaged.count > 0);
 }
 
 - (void)gitRefreshClicked:(id)sender {
@@ -4524,6 +4866,7 @@ static NSString* FindBinaryPath(NSString* name, NSString* fallback) {
     NSInteger row = [self.gitChangesTableView selectedRow];
     if (row >= 0 && row < (NSInteger)self.gitChanges.count) {
         NSDictionary* item = self.gitChanges[row];
+        if ([item[@"isHeader"] boolValue]) return;
         NSString* relPath = item[@"path"];
         std::string workspace = StdStringFromNSString(self.openedFolderPath);
         std::string file = StdStringFromNSString(relPath);
@@ -4539,6 +4882,7 @@ static NSString* FindBinaryPath(NSString* name, NSString* fallback) {
     NSInteger row = [self.gitChangesTableView selectedRow];
     if (row >= 0 && row < (NSInteger)self.gitChanges.count) {
         NSDictionary* item = self.gitChanges[row];
+        if ([item[@"isHeader"] boolValue]) return;
         NSString* relPath = item[@"path"];
         std::string workspace = StdStringFromNSString(self.openedFolderPath);
         std::string file = StdStringFromNSString(relPath);
@@ -4554,6 +4898,7 @@ static NSString* FindBinaryPath(NSString* name, NSString* fallback) {
     NSInteger row = [self.gitChangesTableView selectedRow];
     if (row >= 0 && row < (NSInteger)self.gitChanges.count) {
         NSDictionary* item = self.gitChanges[row];
+        if ([item[@"isHeader"] boolValue]) return;
         NSString* relPath = item[@"path"];
         
         NSAlert* alert = [[NSAlert alloc] init];
@@ -4594,6 +4939,7 @@ static NSString* FindBinaryPath(NSString* name, NSString* fallback) {
     NSInteger row = [self.gitChangesTableView selectedRow];
     if (row >= 0 && row < (NSInteger)self.gitChanges.count) {
         NSDictionary* item = self.gitChanges[row];
+        if ([item[@"isHeader"] boolValue]) return;
         NSString* relPath = item[@"path"];
         BOOL staged = [item[@"staged"] boolValue];
         
@@ -4627,6 +4973,11 @@ static NSString* FindBinaryPath(NSString* name, NSString* fallback) {
 }
 
 - (void)gitChangesDoubleClicked:(id)sender {
+    NSInteger row = [self.gitChangesTableView selectedRow];
+    if (row >= 0 && row < (NSInteger)self.gitChanges.count) {
+        NSDictionary* item = self.gitChanges[row];
+        if ([item[@"isHeader"] boolValue]) return;
+    }
     [self gitDiffSelected:sender];
 }
 
@@ -4684,21 +5035,37 @@ static NSString* FindBinaryPath(NSString* name, NSString* fallback) {
 // --- Menu Actions ---
 
 - (void)formatCurrentFile:(id)sender {
-    if (self.activeTab) {
+    if (self.activeTab && !self.activeTab.isLargeFile) {
+        NSString* language = [self detectLanguage:self.activeTab.path];
+        if (language) {
+            if (![self checkAndPromptLSPForLanguage:language filePath:self.activeTab.path]) {
+                return;
+            }
+        }
         [self formatTab:self.activeTab];
     }
 }
 
 - (void)runLinter:(id)sender {
-    if (self.activeTab) {
+    if (self.activeTab && !self.activeTab.isLargeFile) {
+        NSString* language = [self detectLanguage:self.activeTab.path];
+        if (language) {
+            if (![self checkAndPromptLSPForLanguage:language filePath:self.activeTab.path]) {
+                return;
+            }
+        }
         [self runLinterForTab:self.activeTab];
     }
 }
 
 - (void)goToDefinitionClicked:(id)sender {
-    if (!self.activeTab || !self.activeTab.path || !self.textView) return;
+    if (!self.activeTab || !self.activeTab.path || !self.textView || self.activeTab.isLargeFile) return;
     NSString* language = [self detectLanguage:self.activeTab.path];
     if (!language) return;
+    
+    if (![self checkAndPromptLSPForLanguage:language filePath:self.activeTab.path]) {
+        return;
+    }
     
     dietcode::lsp::LSPClient* client = [self lspClientForLanguage:language];
     if (!client || !client->isRunning()) return;
@@ -4736,6 +5103,10 @@ static NSString* FindBinaryPath(NSString* name, NSString* fallback) {
 // --- Mouse Hover / Tooltip Helper ---
 
 - (void)handleMouseHoverInTextView:(NSTextView*)textView atPoint:(NSPoint)point {
+    if (self.activeTab && self.activeTab.isLargeFile) {
+        [textView setToolTip:nil];
+        return;
+    }
     NSLayoutManager *layoutManager = textView.layoutManager;
     NSTextContainer *textContainer = textView.textContainer;
     NSPoint containerPoint = NSMakePoint(point.x - textView.textContainerOrigin.x, point.y - textView.textContainerOrigin.y);
@@ -4899,18 +5270,47 @@ static NSString* FindBinaryPath(NSString* name, NSString* fallback) {
     }
     
     if (!found) {
+        NSError* err = nil;
+        NSDictionary* attrs = [[NSFileManager defaultManager] attributesOfItemAtPath:path error:&err];
+        unsigned long long fileSize = [attrs fileSize];
+        BOOL useLargeFileMode = NO;
+        
+        if (fileSize >= 50 * 1024 * 1024) {
+            NSAlert* alert = [[NSAlert alloc] init];
+            [alert setMessageText:@"Large File Warning"];
+            [alert setInformativeText:[NSString stringWithFormat:@"The file '%@' is %.1f MB. Opening large files normally can cause the editor to become laggy and unresponsive.\n\nWould you like to open it in Large File Mode (Read-Only) to keep scrolling responsive?", [path lastPathComponent], (double)fileSize / (1024.0 * 1024.0)]];
+            [alert addButtonWithTitle:@"Open in Large File Mode (Recommended)"];
+            [alert addButtonWithTitle:@"Open Normally"];
+            [alert addButtonWithTitle:@"Cancel"];
+            [alert setAlertStyle:NSAlertStyleWarning];
+            
+            NSModalResponse res = [alert runModal];
+            if (res == NSAlertThirdButtonReturn) {
+                return; // Cancel opening
+            }
+            if (res == NSAlertFirstButtonReturn) {
+                useLargeFileMode = YES;
+            }
+        }
+        
+        if (useLargeFileMode) {
+            self.forceLargeFileModeForNextOpen = YES;
+        }
+        
         const auto result = fileService_.readTextFile(std::filesystem::path(StdStringFromNSString(path)));
         if (!result.ok) {
+            self.forceLargeFileModeForNextOpen = NO; // reset in case of error
             return;
         }
         [self showEditorWithText:NSStringFromStdString(result.contents) path:path dirty:NO];
         
-        NSDictionary* attrs = [[NSFileManager defaultManager] attributesOfItemAtPath:path error:nil];
         if (attrs) {
             self.activeTab.lastModifiedDate = attrs.fileModificationDate;
         }
         [self addToRecentFiles:path];
-        [self promptLanguageFeaturesIfNeeded:path];
+        if (!useLargeFileMode) {
+            [self promptLanguageFeaturesIfNeeded:path];
+        }
     }
     
     if (self.textView) {
@@ -4956,7 +5356,7 @@ static NSString* FindBinaryPath(NSString* name, NSString* fallback) {
 // --- Autocomplete & Context Menu Delegate Methods ---
 
 - (NSArray<NSString *> *)textView:(NSTextView *)textView completions:(NSArray<NSString *> *)words forPartialWordRange:(NSRange)charRange indexOfSelectedItem:(NSInteger *)index {
-    if (!self.activeTab || !self.activeTab.path) return words;
+    if (!self.activeTab || !self.activeTab.path || self.activeTab.isLargeFile) return words;
     NSString* language = [self detectLanguage:self.activeTab.path];
     if (!language) return words;
     

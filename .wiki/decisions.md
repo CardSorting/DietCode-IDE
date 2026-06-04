@@ -70,3 +70,18 @@ Orphan processes (e.g. interactive PTY terminals or background build runner task
 
 To provide a visible focus indicator for screen readers and keyboard users, active panels are enclosed in high contrast borders. Rather than injecting custom layout containers, we hook into window update events to draw dynamic overlays or toggle custom view layer borders.
 
+## Decision: Lazy Terminal Process Initialization
+
+To comply with the product gravity rule of "no terminal startup on launch" and "never launch invisibly", the terminal shell process (PTY fork) is initialized lazily. It is spawned only when the terminal bottom panel is toggled/expanded or the terminal tab is active.
+
+## Decision: Relocate Workspace Search Results to the Sidebar
+
+To keep the bottom panel focused strictly on terminal, output, and problems (errors), the workspace search results are rendered directly inside the Search sidebar below the search controls rather than occupying a bottom tab.
+
+## Decision: Settings Menu Handler and Sidebar Gravity
+
+To comply with the rule that the sidebar only has files, search, Git, and run, the "Settings" button was removed from the Activity Bar. Settings are loaded temporarily into the sidebar when triggered by the App menu (Cmd+,) or Command Palette.
+
+## Decision: On-Demand Language Feature Prompts
+
+To prevent blocking modal prompts on file open or session restoration, the first-use prompts are deferred until the user explicitly runs a language feature command (e.g. Format Document, Run Linter, Go to Definition). Save-triggered formatting/linting only runs if features were previously enabled, and never prompts the user.
