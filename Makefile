@@ -6,6 +6,7 @@ APP_NAME := DietCode
 APP_BUNDLE := $(BUILD_DIR)/$(APP_NAME).app
 APP_CONTENTS := $(APP_BUNDLE)/Contents
 APP_MACOS := $(APP_CONTENTS)/MacOS
+APP_RESOURCES := $(APP_CONTENTS)/Resources
 TEST_BIN := $(BUILD_DIR)/test_editor
 
 CORE_CPP := \
@@ -35,8 +36,12 @@ $(BUILD_DIR):
 $(APP_MACOS):
 	mkdir -p $(APP_MACOS)
 
-app: $(APP_MACOS)
+$(APP_RESOURCES):
+	mkdir -p $(APP_RESOURCES)
+
+app: $(APP_MACOS) $(APP_RESOURCES)
 	cp resources/Info.plist $(APP_CONTENTS)/Info.plist
+	if [ -f resources/AppIcon.icns ]; then cp resources/AppIcon.icns $(APP_RESOURCES)/AppIcon.icns; fi
 	$(CXX) $(OBJCXXFLAGS) $(CORE_CPP) $(MACOS_MM) -framework Cocoa -o $(APP_MACOS)/$(APP_NAME)
 
 run: app

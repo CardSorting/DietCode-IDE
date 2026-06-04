@@ -35,7 +35,7 @@
     [fileMenu addItem:[self itemWithTitle:@"Save" action:@selector(saveFile:) key:@"s" modifiers:NSEventModifierFlagCommand target:target]];
     [fileMenu addItem:[self itemWithTitle:@"Save As…" action:@selector(saveFileAs:) key:@"S" modifiers:NSEventModifierFlagCommand | NSEventModifierFlagShift target:target]];
     [fileMenu addItem:[NSMenuItem separatorItem]];
-    [fileMenu addItem:[self itemWithTitle:@"Close Tab" action:@selector(performClose:) key:@"w" modifiers:NSEventModifierFlagCommand target:nil]];
+    [fileMenu addItem:[self itemWithTitle:@"Close Tab" action:@selector(closeActiveTabAction:) key:@"w" modifiers:NSEventModifierFlagCommand target:target]];
     [fileMenuItem setSubmenu:fileMenu];
 
     NSMenuItem* editMenuItem = [[NSMenuItem alloc] init];

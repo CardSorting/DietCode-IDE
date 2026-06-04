@@ -1719,6 +1719,7 @@ static NSString* FindBinaryPath(NSString* name, NSString* fallback) {
             }
         }
     }
+    [self saveOpenTabsState];
 }
 
 - (void)createTabHeaderButton:(DietCodeTabState*)tab {
@@ -1772,6 +1773,14 @@ static NSString* FindBinaryPath(NSString* name, NSString* fallback) {
     }
     if (targetTab) {
         [self closeTab:targetTab];
+    }
+}
+
+- (void)closeActiveTabAction:(id)sender {
+    if (self.activeTab != nil) {
+        [self closeTab:self.activeTab];
+    } else {
+        [[self window] close];
     }
 }
 
@@ -3950,6 +3959,10 @@ static NSString* FindBinaryPath(NSString* name, NSString* fallback) {
     }
     if (terminalPid_ > 0) {
         kill(terminalPid_, SIGHUP);
+    }
+    if (terminalMasterFd_ > 0) {
+        close(terminalMasterFd_);
+        terminalMasterFd_ = -1;
     }
     if (cppLspClient_) {
         cppLspClient_->stop();

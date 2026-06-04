@@ -24,6 +24,8 @@
 - (void)nextTab:(id)sender;
 - (void)previousTab:(id)sender;
 - (void)cleanupProcesses;
+- (void)openFileAtPath:(NSString*)path line:(NSInteger)line column:(NSInteger)column;
+- (void)closeActiveTabAction:(id)sender;
 
 @end
 
