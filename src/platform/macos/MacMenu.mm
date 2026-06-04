@@ -1,5 +1,5 @@
-#include "platform/macos/MacMenu.hpp"
-#include "platform/macos/MacWindow.hpp"
+#include "MacMenu.hpp"
+#include "MacWindow.hpp"
 
 #import <Cocoa/Cocoa.h>
 
@@ -30,7 +30,7 @@
     NSMenu* fileMenu = [[NSMenu alloc] initWithTitle:@"File"];
     [fileMenu addItem:[self itemWithTitle:@"New File" action:@selector(newFile:) key:@"n" modifiers:NSEventModifierFlagCommand target:target]];
     [fileMenu addItem:[self itemWithTitle:@"Open File…" action:@selector(openFile:) key:@"o" modifiers:NSEventModifierFlagCommand target:target]];
-    [fileMenu addItem:[self itemWithTitle:@"Open Folder… (Phase 2)" action:nil key:@"" modifiers:0 target:nil]];
+    [fileMenu addItem:[self itemWithTitle:@"Open Folder…" action:@selector(openFolder:) key:@"o" modifiers:NSEventModifierFlagCommand | NSEventModifierFlagOption target:target]];
     [fileMenu addItem:[NSMenuItem separatorItem]];
     [fileMenu addItem:[self itemWithTitle:@"Save" action:@selector(saveFile:) key:@"s" modifiers:NSEventModifierFlagCommand target:target]];
     [fileMenu addItem:[self itemWithTitle:@"Save As…" action:@selector(saveFileAs:) key:@"S" modifiers:NSEventModifierFlagCommand | NSEventModifierFlagShift target:target]];
@@ -61,33 +61,36 @@
     [mainMenu addItem:viewMenuItem];
     NSMenu* viewMenu = [[NSMenu alloc] initWithTitle:@"View"];
     [viewMenu addItem:[self itemWithTitle:@"Open Welcome" action:@selector(showWelcome:) key:@"" modifiers:0 target:target]];
-    [viewMenu addItemWithTitle:@"Command Palette… (Phase 2)" action:nil keyEquivalent:@""];
-    [viewMenu addItemWithTitle:@"Toggle Sidebar (Phase 1B)" action:nil keyEquivalent:@"b"];
+    [viewMenu addItem:[self itemWithTitle:@"Command Palette…" action:@selector(showCommandPalette:) key:@"p" modifiers:NSEventModifierFlagCommand | NSEventModifierFlagShift target:target]];
+    [viewMenu addItem:[self itemWithTitle:@"Toggle Sidebar" action:@selector(toggleSidebar:) key:@"b" modifiers:NSEventModifierFlagCommand target:target]];
     [viewMenuItem setSubmenu:viewMenu];
 
     NSMenuItem* goMenuItem = [[NSMenuItem alloc] init];
     [mainMenu addItem:goMenuItem];
     NSMenu* goMenu = [[NSMenu alloc] initWithTitle:@"Go"];
-    [goMenu addItemWithTitle:@"Go to Line… (Phase 2)" action:nil keyEquivalent:@"g"];
+    [goMenu addItem:[self itemWithTitle:@"Go to Line…" action:@selector(goToLine:) key:@"g" modifiers:NSEventModifierFlagCommand target:target]];
+    [goMenu addItem:[NSMenuItem separatorItem]];
+    [goMenu addItem:[self itemWithTitle:@"Next Tab" action:@selector(nextTab:) key:@"\t" modifiers:NSEventModifierFlagControl target:target]];
+    [goMenu addItem:[self itemWithTitle:@"Previous Tab" action:@selector(previousTab:) key:@"\t" modifiers:NSEventModifierFlagControl | NSEventModifierFlagShift target:target]];
     [goMenuItem setSubmenu:goMenu];
 
     NSMenuItem* runMenuItem = [[NSMenuItem alloc] init];
     [mainMenu addItem:runMenuItem];
     NSMenu* runMenu = [[NSMenu alloc] initWithTitle:@"Run"];
-    [runMenu addItemWithTitle:@"Run Current File (Phase 3)" action:nil keyEquivalent:@"r"];
+    [runMenu addItem:[self itemWithTitle:@"Run Current File" action:@selector(runCurrentFile:) key:@"r" modifiers:NSEventModifierFlagCommand target:target]];
     [runMenuItem setSubmenu:runMenu];
 
     NSMenuItem* terminalMenuItem = [[NSMenuItem alloc] init];
     [mainMenu addItem:terminalMenuItem];
     NSMenu* terminalMenu = [[NSMenu alloc] initWithTitle:@"Terminal"];
-    [terminalMenu addItemWithTitle:@"Toggle Terminal (Phase 3)" action:nil keyEquivalent:@"`"];
+    [terminalMenu addItem:[self itemWithTitle:@"Toggle Terminal" action:@selector(toggleTerminal:) key:@"`" modifiers:NSEventModifierFlagCommand target:target]];
     [terminalMenuItem setSubmenu:terminalMenu];
 
     NSMenuItem* helpMenuItem = [[NSMenuItem alloc] init];
     [mainMenu addItem:helpMenuItem];
     NSMenu* helpMenu = [[NSMenu alloc] initWithTitle:@"Help"];
     [helpMenu addItem:[self itemWithTitle:@"Open Welcome" action:@selector(showWelcome:) key:@"" modifiers:0 target:target]];
-    [helpMenu addItemWithTitle:@"Learn DietCode Basics (Phase 4)" action:nil keyEquivalent:@""];
+    [helpMenu addItemWithTitle:@"Learn DietCode Basics" action:nil keyEquivalent:@""];
     [helpMenuItem setSubmenu:helpMenu];
 
     [NSApp setMainMenu:mainMenu];

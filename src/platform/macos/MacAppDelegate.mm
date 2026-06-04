@@ -1,7 +1,6 @@
-#include "platform/macos/MacAppDelegate.hpp"
-
-#include "platform/macos/MacMenu.hpp"
-#include "platform/macos/MacWindow.hpp"
+#include "MacAppDelegate.hpp"
+#include "MacMenu.hpp"
+#include "MacWindow.hpp"
 
 #import <Cocoa/Cocoa.h>
 
@@ -21,6 +20,9 @@
 - (NSApplicationTerminateReply)applicationShouldTerminate:(NSApplication*)sender {
     if (self.windowController != nil && ![self.windowController confirmCloseIfNeeded]) {
         return NSTerminateCancel;
+    }
+    if (self.windowController != nil) {
+        [self.windowController cleanupProcesses];
     }
     return NSTerminateNow;
 }

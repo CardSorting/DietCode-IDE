@@ -1,4 +1,4 @@
-#include "platform/macos/MacFileDialog.hpp"
+#include "MacFileDialog.hpp"
 
 #import <Cocoa/Cocoa.h>
 

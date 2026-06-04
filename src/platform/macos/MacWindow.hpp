@@ -2,9 +2,7 @@
 
 #import <Cocoa/Cocoa.h>
 
-@class DietCodeEditorViewDelegate;
-
-@interface DietCodeWindowController : NSWindowController <NSWindowDelegate, NSTextViewDelegate>
+@interface DietCodeWindowController : NSWindowController <NSWindowDelegate, NSTextViewDelegate, NSTextFieldDelegate, NSSplitViewDelegate, NSOutlineViewDataSource, NSOutlineViewDelegate, NSTableViewDataSource, NSTableViewDelegate>
 
 - (instancetype)init;
 - (void)newFile:(id)sender;
@@ -15,4 +13,17 @@
 - (BOOL)hasUnsavedChanges;
 - (BOOL)confirmCloseIfNeeded;
 
+// Actions for vNext features
+- (void)openFolder:(id)sender;
+- (void)toggleSidebar:(id)sender;
+- (void)toggleTerminal:(id)sender;
+- (void)runCurrentFile:(id)sender;
+- (void)stopCurrentFile:(id)sender;
+- (void)showCommandPalette:(id)sender;
+- (void)goToLine:(id)sender;
+- (void)nextTab:(id)sender;
+- (void)previousTab:(id)sender;
+- (void)cleanupProcesses;
+
 @end
+

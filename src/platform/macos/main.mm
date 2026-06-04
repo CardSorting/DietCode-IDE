@@ -1,4 +1,4 @@
-#include "platform/macos/MacAppDelegate.hpp"
+#include "MacAppDelegate.hpp"
 
 #import <Cocoa/Cocoa.h>
 

@@ -1,4 +1,4 @@
-#include "platform/macos/MacClipboard.hpp"
+#include "MacClipboard.hpp"
 
 #import <Cocoa/Cocoa.h>
 
