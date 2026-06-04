@@ -23,6 +23,11 @@ MACOS_MM := \
 	src/platform/macos/MacFileDialog.mm \
 	src/platform/macos/MacClipboard.mm \
 	src/platform/macos/MacTextRendering.mm \
+	src/platform/macos/MacControlServer.mm \
+	src/platform/macos/SymbolIndexService.mm \
+	src/platform/macos/DiffAnalysisService.mm \
+	src/platform/macos/WorkspaceAnalysisService.mm \
+	src/platform/macos/BufferStateService.mm \
 	src/filesystem/GitService.mm \
 	src/core/LSPClient.mm
 

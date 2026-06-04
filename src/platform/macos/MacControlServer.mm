@@ -1,5 +1,9 @@
 #import "MacControlServer.hpp"
 #import "MacWindow.hpp"
+#import "SymbolIndexService.hpp"
+#import "DiffAnalysisService.hpp"
+#import "WorkspaceAnalysisService.hpp"
+#import "BufferStateService.hpp"
 
 #include <sys/socket.h>
 #include <sys/un.h>
@@ -12,6 +16,8 @@
 #include <filesystem>
 #include <vector>
 #include <string>
+#include <set>
+#include <map>
 
 namespace {
 NSString* NSStringFromStdString(const std::string& value) {
@@ -23,6 +29,102 @@ std::string StdStringFromNSString(NSString* value) {
         return {};
     }
     return std::string([value UTF8String]);
+}
+
+NSString* AbsolutePathForRPCPath(NSString* path, NSString* workspace) {
+    if (path.length == 0) return path;
+    if ([path isAbsolutePath] || workspace.length == 0) return path;
+    return [workspace stringByAppendingPathComponent:path];
+}
+
+NSArray<NSString*>* DirtyFilePathsFromTabs(NSArray* tabs) {
+    NSMutableArray* paths = [NSMutableArray array];
+    for (id tab in tabs) {
+        BOOL dirty = [[tab valueForKey:@"dirty"] boolValue];
+        NSString* path = [tab valueForKey:@"path"];
+        if (dirty && path.length > 0) {
+            [paths addObject:path];
+        }
+    }
+    return paths;
+}
+
+NSDictionary* DiagnosticsSummaryFromProblems(NSArray<NSDictionary*>* problems) {
+    NSInteger errors = 0;
+    NSInteger warnings = 0;
+    NSInteger infos = 0;
+    NSMutableSet* files = [NSMutableSet set];
+
+    for (NSDictionary* problem in problems) {
+        NSString* severity = [problem[@"severity"] lowercaseString] ?: @"info";
+        if ([severity isEqualToString:@"error"]) errors++;
+        else if ([severity isEqualToString:@"warning"] || [severity isEqualToString:@"warn"]) warnings++;
+        else infos++;
+
+        NSString* path = problem[@"path"];
+        if (path.length > 0) {
+            [files addObject:path];
+        }
+    }
+
+    return @{
+        @"errors": @(errors),
+        @"warnings": @(warnings),
+        @"infos": @(infos),
+        @"files": @([files count]),
+        @"total": @(problems.count)
+    };
+}
+
+NSArray<NSDictionary*>* ClusterDiagnostics(NSArray<NSDictionary*>* problems) {
+    NSMutableDictionary<NSString*, NSMutableDictionary*>* clusters = [NSMutableDictionary dictionary];
+
+    for (NSDictionary* problem in problems) {
+        NSString* path = problem[@"path"] ?: @"";
+        NSMutableDictionary* cluster = clusters[path];
+        if (!cluster) {
+            cluster = [@{
+                @"path": path,
+                @"errors": @0,
+                @"warnings": @0,
+                @"infos": @0,
+                @"problems": [NSMutableArray array]
+            } mutableCopy];
+            clusters[path] = cluster;
+        }
+
+        NSString* severity = [problem[@"severity"] lowercaseString] ?: @"info";
+        if ([severity isEqualToString:@"error"]) {
+            cluster[@"errors"] = @([cluster[@"errors"] integerValue] + 1);
+        } else if ([severity isEqualToString:@"warning"] || [severity isEqualToString:@"warn"]) {
+            cluster[@"warnings"] = @([cluster[@"warnings"] integerValue] + 1);
+        } else {
+            cluster[@"infos"] = @([cluster[@"infos"] integerValue] + 1);
+        }
+        [cluster[@"problems"] addObject:problem];
+    }
+
+    NSMutableArray* result = [[clusters allValues] mutableCopy];
+    [result sortUsingComparator:^NSComparisonResult(NSDictionary* a, NSDictionary* b) {
+        NSInteger scoreA = [a[@"errors"] integerValue] * 100 + [a[@"warnings"] integerValue] * 10 + [a[@"infos"] integerValue];
+        NSInteger scoreB = [b[@"errors"] integerValue] * 100 + [b[@"warnings"] integerValue] * 10 + [b[@"infos"] integerValue];
+        if (scoreA == scoreB) {
+            return [a[@"path"] compare:b[@"path"]];
+        }
+        return scoreA > scoreB ? NSOrderedAscending : NSOrderedDescending;
+    }];
+    return result;
+}
+
+NSArray<NSString*>* ContextLines(const std::vector<std::string>& lines, NSInteger start, NSInteger end) {
+    NSMutableArray* context = [NSMutableArray array];
+    if (lines.empty()) return context;
+    start = MAX(start, 0);
+    end = MIN(end, (NSInteger)lines.size() - 1);
+    for (NSInteger i = start; i <= end; i++) {
+        [context addObject:NSStringFromStdString(lines[(size_t)i])];
+    }
+    return context;
 }
 }
 
@@ -299,10 +401,11 @@ std::string StdStringFromNSString(NSString* value) {
              outPaths:(NSString**)outPaths {
     
     NSString* path = params[@"path"];
-    if (path) {
-        *outPaths = path;
+    if (path && ![method isEqualToString:@"workspace.openFolder"]) {
         NSString* ws = [_windowController workspacePath];
-        if (ws && ![path hasPrefix:ws]) {
+        NSString* checkedPath = AbsolutePathForRPCPath(path, ws);
+        *outPaths = checkedPath;
+        if (ws && ![checkedPath hasPrefix:ws]) {
             *outErrCode = @"permission_denied";
             *outErrMsg = @"Target path is outside active workspace folder.";
             return;
@@ -433,13 +536,18 @@ std::string StdStringFromNSString(NSString* value) {
                     if (!matchesInclude) continue;
                 }
                 
-                auto readRes = [_windowController textForFileAtPath:NSStringFromStdString(p.string())];
+                NSString* readRes = [_windowController textForFileAtPath:NSStringFromStdString(p.string())];
                 if (readRes) {
                     std::string content = StdStringFromNSString(readRes);
                     std::istringstream stream(content);
+                    std::vector<std::string> fileLines;
                     std::string lineText;
-                    int lineIdx = 1;
                     while (std::getline(stream, lineText)) {
+                        fileLines.push_back(lineText);
+                    }
+
+                    for (size_t lineIdx = 0; lineIdx < fileLines.size(); lineIdx++) {
+                        lineText = fileLines[lineIdx];
                         size_t matchPos = std::string::npos;
                         if (caseSensitive) {
                             matchPos = lineText.find(stdQuery);
@@ -452,15 +560,17 @@ std::string StdStringFromNSString(NSString* value) {
                         }
                         
                         if (matchPos != std::string::npos) {
+                            NSInteger lineNumber = (NSInteger)lineIdx + 1;
                             [matches addObject:@{
                                 @"path": NSStringFromStdString(relPath),
-                                @"line": @(lineIdx),
+                                @"line": @(lineNumber),
                                 @"column": @(matchPos + 1),
-                                @"preview": NSStringFromStdString(lineText)
+                                @"preview": NSStringFromStdString(lineText),
+                                @"contextBefore": ContextLines(fileLines, (NSInteger)lineIdx - 2, (NSInteger)lineIdx - 1),
+                                @"contextAfter": ContextLines(fileLines, (NSInteger)lineIdx + 1, (NSInteger)lineIdx + 2)
                             }];
                             if (matches.count >= (NSUInteger)maxResults) break;
                         }
-                        lineIdx++;
                     }
                 }
             }
@@ -653,7 +763,350 @@ std::string StdStringFromNSString(NSString* value) {
         return;
     }
     
+    // Analysis commands
+    if ([method isEqualToString:@"analysis.workspaceSummary"]) {
+        NSString* ws = [_windowController workspacePath];
+        if (!ws) {
+            *outErrCode = @"invalid_request";
+            *outErrMsg = @"No open workspace.";
+            return;
+        }
+
+        NSDictionary* git = [_windowController gitStatusInfo] ?: @{};
+        NSMutableArray* modified = [NSMutableArray arrayWithArray:DirtyFilePathsFromTabs(_windowController.openTabs ?: @[])];
+        for (NSString* key in @[@"modified", @"staged", @"untracked"]) {
+            for (NSString* rel in git[key] ?: @[]) {
+                NSString* abs = AbsolutePathForRPCPath(rel, ws);
+                if (![modified containsObject:abs]) {
+                    [modified addObject:abs];
+                }
+            }
+        }
+
+        NSArray* problems = [_windowController problemsList] ?: @[];
+        *outResult = [DietCodeWorkspaceAnalysisService summaryOfWorkspace:ws
+                                                                 openFiles:[_windowController openFilePaths]
+                                                             modifiedFiles:modified
+                                                               diagnostics:DiagnosticsSummaryFromProblems(problems)
+                                                                 gitBranch:git[@"branch"]];
+        return;
+    }
+
+    if ([method isEqualToString:@"analysis.searchRanked"]) {
+        NSString* ws = [_windowController workspacePath];
+        NSString* query = params[@"query"];
+        if (!ws || query.length == 0) {
+            *outErrCode = @"invalid_params";
+            *outErrMsg = @"Query string and workspace required.";
+            return;
+        }
+        if (![_windowController.sessionLastSearches containsObject:query]) {
+            [_windowController.sessionLastSearches insertObject:query atIndex:0];
+            if (_windowController.sessionLastSearches.count > 50) {
+                [_windowController.sessionLastSearches removeLastObject];
+            }
+        }
+
+        NSArray* ranked = [DietCodeWorkspaceAnalysisService searchRankedForQuery:query
+                                                                       workspace:ws
+                                                                       openFiles:[_windowController openFilePaths]
+                                                                     recentFiles:[[NSUserDefaults standardUserDefaults] stringArrayForKey:@"RecentFiles"] ?: @[]
+                                                                         include:params[@"include"] ?: @[]
+                                                                         exclude:params[@"exclude"] ?: @[]
+                                                                   caseSensitive:[params[@"caseSensitive"] boolValue]];
+        NSInteger maxResults = params[@"maxResults"] ? [params[@"maxResults"] integerValue] : ranked.count;
+        if (maxResults >= 0 && maxResults < (NSInteger)ranked.count) {
+            ranked = [ranked subarrayWithRange:NSMakeRange(0, (NSUInteger)maxResults)];
+        }
+        *outResult = @{ @"results": ranked };
+        return;
+    }
+
+    if ([method isEqualToString:@"analysis.fileSummary"]) {
+        NSString* ws = [_windowController workspacePath];
+        NSString* targetPath = AbsolutePathForRPCPath(params[@"path"] ?: [_windowController activeFilePath], ws);
+        if (!targetPath) {
+            *outErrCode = @"invalid_params";
+            *outErrMsg = @"path parameter or active file required.";
+            return;
+        }
+        NSString* text = [_windowController textForFileAtPath:targetPath] ?: @"";
+        NSArray* symbols = [DietCodeSymbolIndexService symbolsForFileContent:text extension:[[targetPath pathExtension] lowercaseString]];
+        *outResult = [DietCodeWorkspaceAnalysisService fileSummaryForPath:targetPath symbolsCount:symbols.count];
+        return;
+    }
+
+    if ([method isEqualToString:@"analysis.relatedFiles"]) {
+        NSString* ws = [_windowController workspacePath];
+        NSString* targetPath = AbsolutePathForRPCPath(params[@"path"] ?: [_windowController activeFilePath], ws);
+        if (!ws || !targetPath) {
+            *outErrCode = @"invalid_params";
+            *outErrMsg = @"Workspace and path required.";
+            return;
+        }
+        *outResult = @{ @"files": [DietCodeWorkspaceAnalysisService relatedFilesForPath:targetPath workspace:ws] };
+        return;
+    }
+
+    // Symbol commands
+    if ([method isEqualToString:@"symbols.document"] || [method isEqualToString:@"symbols.outline"]) {
+        NSString* ws = [_windowController workspacePath];
+        NSString* targetPath = AbsolutePathForRPCPath(params[@"path"] ?: [_windowController activeFilePath], ws);
+        if (!targetPath) {
+            *outErrCode = @"invalid_params";
+            *outErrMsg = @"path parameter or active file required.";
+            return;
+        }
+        NSString* text = [_windowController textForFileAtPath:targetPath];
+        if (!text) {
+            *outErrCode = @"invalid_request";
+            *outErrMsg = @"File is not readable.";
+            return;
+        }
+        *outResult = @{
+            @"path": targetPath,
+            @"symbols": [DietCodeSymbolIndexService symbolsForFileContent:text extension:[[targetPath pathExtension] lowercaseString]]
+        };
+        return;
+    }
+
+    if ([method isEqualToString:@"symbols.activeDocument"]) {
+        NSString* targetPath = [_windowController activeFilePath];
+        NSString* text = targetPath ? [_windowController textForFileAtPath:targetPath] : nil;
+        if (!targetPath || !text) {
+            *outErrCode = @"invalid_request";
+            *outErrMsg = @"No active readable file.";
+            return;
+        }
+        *outResult = @{
+            @"path": targetPath,
+            @"symbols": [DietCodeSymbolIndexService symbolsForFileContent:text extension:[[targetPath pathExtension] lowercaseString]]
+        };
+        return;
+    }
+
+    if ([method isEqualToString:@"symbols.references"]) {
+        NSString* ws = [_windowController workspacePath];
+        NSString* symbol = params[@"symbol"];
+        if (!ws || symbol.length == 0) {
+            *outErrCode = @"invalid_params";
+            *outErrMsg = @"symbol and workspace required.";
+            return;
+        }
+        NSArray* problems = [_windowController problemsList] ?: @[];
+        NSMutableArray* diagFiles = [NSMutableArray array];
+        for (NSDictionary* problem in problems) {
+            NSString* abs = AbsolutePathForRPCPath(problem[@"path"], ws);
+            if (abs.length > 0 && ![diagFiles containsObject:abs]) {
+                [diagFiles addObject:abs];
+            }
+        }
+        *outResult = @{
+            @"symbol": symbol,
+            @"references": [DietCodeSymbolIndexService referencesForSymbol:symbol
+                                                                inWorkspace:ws
+                                                                  openFiles:[_windowController openFilePaths]
+                                                           diagnosticsFiles:diagFiles]
+        };
+        return;
+    }
+
+    if ([method isEqualToString:@"symbols.atCursor"]) {
+        NSDictionary* sel = [_windowController activeSelectionInfo];
+        NSString* targetPath = [_windowController activeFilePath];
+        NSString* text = targetPath ? [_windowController textForFileAtPath:targetPath] : nil;
+        if (!targetPath || !text) {
+            *outErrCode = @"invalid_request";
+            *outErrMsg = @"No active readable file.";
+            return;
+        }
+        NSInteger cursor = [sel[@"start"] integerValue];
+        NSArray* symbols = [DietCodeSymbolIndexService symbolsForFileContent:text extension:[[targetPath pathExtension] lowercaseString]];
+        __block NSDictionary* match = @{};
+        NSInteger currentLine = 1;
+        NSUInteger boundedCursor = MIN((NSUInteger)MAX(cursor, 0), text.length);
+        for (NSUInteger i = 0; i < boundedCursor; i++) {
+            if ([text characterAtIndex:i] == '\n') currentLine++;
+        }
+        for (NSDictionary* symbolInfo in symbols) {
+            NSInteger startLine = [symbolInfo[@"line"] integerValue];
+            NSInteger endLine = [symbolInfo[@"endLine"] integerValue];
+            if (currentLine >= startLine && currentLine <= endLine) {
+                match = symbolInfo;
+                break;
+            }
+        }
+        *outResult = @{ @"path": targetPath, @"symbol": match };
+        return;
+    }
+
+    // Diff commands
+    if ([method isEqualToString:@"diff.workspaceInfo"] || [method isEqualToString:@"diff.stats"]) {
+        NSString* ws = [_windowController workspacePath];
+        if (!ws) {
+            *outErrCode = @"invalid_request";
+            *outErrMsg = @"No open workspace.";
+            return;
+        }
+        *outResult = [DietCodeDiffAnalysisService workspaceDiffInfo:ws];
+        return;
+    }
+
+    if ([method isEqualToString:@"diff.file"]) {
+        NSString* ws = [_windowController workspacePath];
+        NSString* targetPath = AbsolutePathForRPCPath(params[@"path"] ?: @"", ws);
+        NSString* diff = [_windowController gitDiffForFile:targetPath];
+        *outResult = @{ @"path": targetPath ?: @"", @"diff": diff ?: @"" };
+        return;
+    }
+
+    if ([method isEqualToString:@"diff.previewPatch"]) {
+        NSString* ws = [_windowController workspacePath];
+        NSString* targetPath = AbsolutePathForRPCPath(params[@"path"] ?: [_windowController activeFilePath], ws);
+        NSString* patchStr = params[@"patch"];
+        if (!targetPath || patchStr.length == 0) {
+            *outErrCode = @"invalid_params";
+            *outErrMsg = @"path and patch parameters required.";
+            return;
+        }
+        NSString* currentText = params[@"currentText"] ?: [_windowController textForFileAtPath:targetPath];
+        if (!currentText) {
+            *outErrCode = @"invalid_request";
+            *outErrMsg = @"File is not readable.";
+            return;
+        }
+        NSArray* symbols = [DietCodeSymbolIndexService symbolsForFileContent:currentText extension:[[targetPath pathExtension] lowercaseString]];
+        *outResult = [DietCodeDiffAnalysisService previewPatchAtPath:targetPath patch:patchStr currentText:currentText symbols:symbols];
+        return;
+    }
+
+    // Buffer commands
+    if ([method isEqualToString:@"buffers.snapshot"]) {
+        *outResult = @{ @"buffers": [DietCodeBufferStateService snapshotForTabs:_windowController.openTabs ?: @[]] };
+        return;
+    }
+
+    if ([method isEqualToString:@"buffers.dirty"]) {
+        *outResult = @{ @"files": DirtyFilePathsFromTabs(_windowController.openTabs ?: @[]) };
+        return;
+    }
+
+    if ([method isEqualToString:@"buffers.active"]) {
+        NSString* pathValue = [_windowController activeFilePath] ?: @"";
+        NSDictionary* selection = [_windowController activeSelectionInfo] ?: @{};
+        *outResult = @{ @"path": pathValue, @"selection": selection };
+        return;
+    }
+
+    if ([method isEqualToString:@"buffers.unsavedDiff"]) {
+        NSString* ws = [_windowController workspacePath];
+        NSString* targetPath = AbsolutePathForRPCPath(params[@"path"] ?: [_windowController activeFilePath], ws);
+        NSString* diff = @"";
+        for (id tab in _windowController.openTabs ?: @[]) {
+            if ([[tab valueForKey:@"path"] isEqualToString:targetPath]) {
+                diff = [DietCodeBufferStateService unsavedDiffForTab:tab];
+                break;
+            }
+        }
+        *outResult = @{ @"path": targetPath ?: @"", @"diff": diff ?: @"" };
+        return;
+    }
+
+    // Diagnostics commands
+    if ([method isEqualToString:@"diagnostics.list"]) {
+        NSArray* problems = [_windowController problemsList] ?: @[];
+        *outResult = @{ @"diagnostics": problems };
+        return;
+    }
+
+    if ([method isEqualToString:@"diagnostics.summary"]) {
+        NSArray* problems = [_windowController problemsList] ?: @[];
+        *outResult = DiagnosticsSummaryFromProblems(problems);
+        return;
+    }
+
+    if ([method isEqualToString:@"diagnostics.cluster"]) {
+        NSArray* problems = [_windowController problemsList] ?: @[];
+        *outResult = @{ @"clusters": ClusterDiagnostics(problems) };
+        return;
+    }
+
+    if ([method isEqualToString:@"diagnostics.forFile"]) {
+        NSString* ws = [_windowController workspacePath];
+        NSString* targetPath = AbsolutePathForRPCPath(params[@"path"] ?: [_windowController activeFilePath], ws);
+        if (!targetPath) {
+            *outErrCode = @"invalid_params";
+            *outErrMsg = @"path parameter or active file required.";
+            return;
+        }
+        NSMutableArray* matches = [NSMutableArray array];
+        for (NSDictionary* problem in [_windowController problemsList] ?: @[]) {
+            NSString* problemPath = AbsolutePathForRPCPath(problem[@"path"], ws);
+            if ([problemPath isEqualToString:targetPath]) {
+                [matches addObject:problem];
+            }
+        }
+        *outResult = @{ @"path": targetPath, @"diagnostics": matches };
+        return;
+    }
+
+    // Session workflow commands
+    if ([method isEqualToString:@"session.info"] || [method isEqualToString:@"session.workflowState"]) {
+        NSString* ws = [_windowController workspacePath] ?: @"";
+        NSDictionary* git = [_windowController gitStatusInfo] ?: @{};
+        *outResult = @{
+            @"workspace": ws,
+            @"activeFile": [_windowController activeFilePath] ?: @"",
+            @"openFiles": [_windowController openFilePaths] ?: @[],
+            @"dirtyFiles": DirtyFilePathsFromTabs(_windowController.openTabs ?: @[]),
+            @"gitBranch": git[@"branch"] ?: @"",
+            @"recentCommands": _windowController.sessionRecentCommands ?: @[],
+            @"lastSearches": _windowController.sessionLastSearches ?: @[],
+            @"terminalPid": @([_windowController terminalPid])
+        };
+        return;
+    }
+
+    if ([method isEqualToString:@"session.recentCommands"]) {
+        *outResult = @{ @"commands": _windowController.sessionRecentCommands ?: @[] };
+        return;
+    }
+
+    if ([method isEqualToString:@"session.lastSearches"]) {
+        *outResult = @{ @"searches": _windowController.sessionLastSearches ?: @[] };
+        return;
+    }
+
+    if ([method isEqualToString:@"session.clearHistory"]) {
+        [_windowController.sessionRecentCommands removeAllObjects];
+        [_windowController.sessionLastSearches removeAllObjects];
+        *outResult = @{ @"cleared": @YES };
+        return;
+    }
+
     // Terminal commands
+    if ([method isEqualToString:@"terminal.status"]) {
+        pid_t pid = [_windowController terminalPid];
+        *outResult = @{
+            @"pid": @(pid),
+            @"running": @(pid > 0),
+            @"outputLength": @(([_windowController terminalOutput] ?: @"").length)
+        };
+        return;
+    }
+
+    if ([method isEqualToString:@"terminal.jobs"]) {
+        pid_t pid = [_windowController terminalPid];
+        NSArray* jobs = pid > 0 ? @[@{ @"id": @"terminal", @"pid": @(pid), @"status": @"running" }] : @[];
+        *outResult = @{ @"jobs": jobs };
+        return;
+    }
+
+    if ([method isEqualToString:@"terminal.history"]) {
+        *outResult = @{ @"commands": _windowController.sessionRecentCommands ?: @[] };
+        return;
+    }
+
     if ([method isEqualToString:@"terminal.run"]) {
         NSString* command = params[@"command"];
         if (!command) {
@@ -665,7 +1118,7 @@ std::string StdStringFromNSString(NSString* value) {
         BOOL show = params[@"show"] ? [params[@"show"] boolValue] : YES;
         
         [_windowController runTerminalCommand:command cwd:cwd show:show];
-        *outResult = @{ @"run": @YES };
+        *outResult = @{ @"run": @YES, @"pid": @([_windowController terminalPid]) };
         return;
     }
     

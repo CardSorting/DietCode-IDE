@@ -64,7 +64,6 @@ extern char** environ;
 @property(nonatomic, strong) NSMutableDictionary<NSString*, NSArray<NSString*>*>* directoryCache;
 
 // Tabbed Editor State
-@property(nonatomic, strong) NSMutableArray<DietCodeTabState*>* openTabs;
 @property(nonatomic, strong) DietCodeTabState* activeTab;
 @property(nonatomic, strong) NSTabView* editorTabView;
 @property(nonatomic, strong) NSScrollView* tabHeaderScrollView;
@@ -608,6 +607,8 @@ static NSString* FindBinaryPath(NSString* name, NSString* fallback) {
         [window setDelegate:self];
         _openTabs = [NSMutableArray array];
         _directoryCache = [NSMutableDictionary dictionary];
+        _sessionRecentCommands = [NSMutableArray array];
+        _sessionLastSearches = [NSMutableArray array];
         terminalMasterFd_ = -1;
         terminalPid_ = -1;
         
@@ -3167,6 +3168,13 @@ static NSString* FindBinaryPath(NSString* name, NSString* fallback) {
     NSString* query = searchInput.stringValue;
     if (query.length == 0) return;
     
+    if (![self.sessionLastSearches containsObject:query]) {
+        [self.sessionLastSearches insertObject:query atIndex:0];
+        if (self.sessionLastSearches.count > 50) {
+            [self.sessionLastSearches removeLastObject];
+        }
+    }
+
     BOOL caseSensitive = (caseCheck.state == NSControlStateValueOn);
     
     // Clear old
@@ -5668,7 +5676,17 @@ static NSString* FindBinaryPath(NSString* name, NSString* fallback) {
 }
 
 // Terminal
+- (pid_t)terminalPid {
+    return terminalPid_;
+}
+
 - (void)runTerminalCommand:(NSString*)command cwd:(NSString*)cwd show:(BOOL)show {
+    if (![self.sessionRecentCommands containsObject:command]) {
+        [self.sessionRecentCommands insertObject:command atIndex:0];
+        if (self.sessionRecentCommands.count > 50) {
+            [self.sessionRecentCommands removeLastObject];
+        }
+    }
     [self ensureTerminalProcess];
     if (show) {
         [self.bottomPanel setHidden:NO];

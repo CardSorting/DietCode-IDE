@@ -30,6 +30,9 @@
 
 // --- Agent Control Surface v1.1 Programmatic API ---
 @property(nonatomic, assign) BOOL externalControlEnabled;
+@property(nonatomic, strong) NSMutableArray* openTabs;
+@property(nonatomic, strong) NSMutableArray<NSString*>* sessionRecentCommands;
+@property(nonatomic, strong) NSMutableArray<NSString*>* sessionLastSearches;
 
 // Workspace
 - (NSString*)workspacePath;
@@ -44,6 +47,7 @@
 - (void)jumpToLine:(NSInteger)line column:(NSInteger)column;
 
 // Terminal
+- (pid_t)terminalPid;
 - (void)runTerminalCommand:(NSString*)command cwd:(NSString*)cwd show:(BOOL)show;
 - (void)stopTerminalCommand;
 - (NSString*)terminalOutput;
