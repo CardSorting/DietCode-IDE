@@ -1,4 +1,5 @@
 #include "MacWindow.hpp"
+#import "MacControlServer.hpp"
 
 #include "../../filesystem/FileService.hpp"
 #include "MacFileDialog.hpp"
@@ -143,6 +144,14 @@ extern char** environ;
 @property(nonatomic, strong) NSMutableDictionary<NSString*, NSMutableArray<NSDictionary*>*>* diagnosticsDict;
 @property(nonatomic, strong) NSMutableArray<NSDictionary*>* unifiedDiagnostics;
 @property(nonatomic, assign) BOOL forceLargeFileModeForNextOpen;
+
+// Control Surface properties
+@property(nonatomic, strong) NSTextField* controlActiveLabel;
+@property(nonatomic, strong) NSTextView* controlLogTextView;
+@property(nonatomic, strong) NSTextField* controlStatusLabel;
+@property(nonatomic, strong) NSButton* externalControlBtn;
+@property(nonatomic, strong) id controlServer; // Typed loosely as id to avoid cyclic header imports
+
 
 - (NSString*)detectLanguage:(NSString*)path;
 - (dietcode::lsp::LSPClient*)lspClientForLanguage:(NSString*)language;
@@ -634,7 +643,14 @@ static NSString* FindBinaryPath(NSString* name, NSString* fallback) {
         _ruffPath = [defaults stringForKey:@"RuffPath"] ?: FindBinaryPath(@"ruff", @"/opt/homebrew/bin/ruff");
         _eslintPath = [defaults stringForKey:@"EslintPath"] ?: FindBinaryPath(@"eslint", @"/opt/homebrew/bin/eslint");
         
+        _externalControlEnabled = [defaults boolForKey:@"ExternalControlEnabled"];
+        _controlServer = [[DietCodeControlServer alloc] initWithWindowController:self];
+        if (_externalControlEnabled) {
+            [_controlServer start];
+        }
+        
         [self buildInterface];
+        [self updateControlStatusIndicator];
         [[self window] setAutorecalculatesKeyViewLoop:YES];
         [self showWelcome:nil];
         [self selectActivity:@"files"];
@@ -794,7 +810,8 @@ static NSString* FindBinaryPath(NSString* name, NSString* fallback) {
     NSArray<NSDictionary*>* bottomTabs = @[
         @{@"id": @"terminal", @"label": @"Terminal"},
         @{@"id": @"output", @"label": @"Output"},
-        @{@"id": @"errors", @"label": @"Problems"}
+        @{@"id": @"errors", @"label": @"Problems"},
+        @{@"id": @"control", @"label": @"Control"}
     ];
     for (NSDictionary* bt in bottomTabs) {
         NSButton* btn = [NSButton buttonWithTitle:bt[@"label"] target:self action:@selector(bottomTabButtonClicked:)];
@@ -832,9 +849,19 @@ static NSString* FindBinaryPath(NSString* name, NSString* fallback) {
     [statusBar setWantsLayer:YES];
     [statusBar.heightAnchor constraintEqualToConstant:30].active = YES;
     [statusBar addSubview:self.statusLabel];
+    
+    self.controlStatusLabel = [NSTextField labelWithString:@"● Control: Disabled"];
+    [self.controlStatusLabel setFont:[NSFont systemFontOfSize:12]];
+    [self.controlStatusLabel setTranslatesAutoresizingMaskIntoConstraints:NO];
+    [self.controlStatusLabel setAccessibilityLabel:@"External control status"];
+    [statusBar addSubview:self.controlStatusLabel];
+    
     [NSLayoutConstraint activateConstraints:@[
         [self.statusLabel.leadingAnchor constraintEqualToAnchor:statusBar.leadingAnchor constant:12],
-        [self.statusLabel.centerYAnchor constraintEqualToAnchor:statusBar.centerYAnchor]
+        [self.statusLabel.centerYAnchor constraintEqualToAnchor:statusBar.centerYAnchor],
+        
+        [self.controlStatusLabel.trailingAnchor constraintEqualToAnchor:statusBar.trailingAnchor constant:-12],
+        [self.controlStatusLabel.centerYAnchor constraintEqualToAnchor:statusBar.centerYAnchor]
     ]];
     
     // Replace vertical stack with dynamic splits + status bar
@@ -917,6 +944,46 @@ static NSString* FindBinaryPath(NSString* name, NSString* fallback) {
     [errItem setView:errScroll];
     [self.bottomTabView addTabViewItem:errItem];
 
+    // Control Tab
+    NSScrollView* controlScroll = [[NSScrollView alloc] init];
+    [controlScroll setHasVerticalScroller:YES];
+    [controlScroll setBorderType:NSNoBorder];
+    
+    NSStackView* controlStack = [[NSStackView alloc] init];
+    [controlStack setOrientation:NSUserInterfaceLayoutOrientationVertical];
+    [controlStack setSpacing:8];
+    [controlStack setEdgeInsets:NSEdgeInsetsMake(8, 12, 8, 12)];
+    [controlStack setTranslatesAutoresizingMaskIntoConstraints:NO];
+    [controlScroll setDocumentView:controlStack];
+    
+    self.controlActiveLabel = [NSTextField labelWithString:@"Active Command: Idle"];
+    [self.controlActiveLabel setFont:[NSFont boldSystemFontOfSize:12]];
+    [controlStack addArrangedSubview:self.controlActiveLabel];
+    
+    NSScrollView* logScroll = [[NSScrollView alloc] init];
+    [logScroll setHasVerticalScroller:YES];
+    [logScroll setHasHorizontalScroller:YES];
+    [logScroll setBorderType:NSBezelBorder];
+    
+    self.controlLogTextView = [[NSTextView alloc] initWithFrame:logScroll.bounds];
+    [self.controlLogTextView setEditable:NO];
+    [self.controlLogTextView setRichText:NO];
+    [self.controlLogTextView setFont:[NSFont monospacedSystemFontOfSize:11 weight:NSFontWeightRegular]];
+    [self.controlLogTextView setAccessibilityLabel:@"Recent external commands log"];
+    [logScroll setDocumentView:self.controlLogTextView];
+    [logScroll.heightAnchor constraintGreaterThanOrEqualToConstant:150].active = YES;
+    [controlStack addArrangedSubview:logScroll];
+    
+    [NSLayoutConstraint activateConstraints:@[
+        [controlStack.leadingAnchor constraintEqualToAnchor:controlScroll.leadingAnchor],
+        [controlStack.trailingAnchor constraintEqualToAnchor:controlScroll.trailingAnchor],
+        [controlStack.topAnchor constraintEqualToAnchor:controlScroll.topAnchor]
+    ]];
+    
+    NSTabViewItem* controlItem = [[NSTabViewItem alloc] initWithIdentifier:@"control"];
+    [controlItem setLabel:@"Control"];
+    [controlItem setView:controlScroll];
+    [self.bottomTabView addTabViewItem:controlItem];
 }
 
 - (void)bottomTabButtonClicked:(NSButton*)sender {
@@ -1391,6 +1458,13 @@ static NSString* FindBinaryPath(NSString* name, NSString* fallback) {
     [self.eslintPathField setTarget:self];
     [self.eslintPathField setAction:@selector(settingsChanged:)];
     [setStack addArrangedSubview:self.eslintPathField];
+
+    [setStack addArrangedSubview:MakeLabel(@"EXTERNAL CONTROL", 13, NSFontWeightBold)];
+    self.externalControlBtn = [NSButton buttonWithTitle:@"Enable External Control" target:self action:@selector(settingsChanged:)];
+    [self.externalControlBtn setButtonType:NSButtonTypeSwitch];
+    [self.externalControlBtn setState:(self.externalControlEnabled ? NSControlStateValueOn : NSControlStateValueOff)];
+    [self.externalControlBtn setAccessibilityLabel:@"Enable external control agent socket"];
+    [setStack addArrangedSubview:self.externalControlBtn];
 }
 
 - (void)applyThemeColors {
@@ -1466,6 +1540,7 @@ static NSString* FindBinaryPath(NSString* name, NSString* fallback) {
     [statusBar setWantsLayer:YES];
     [statusBar.layer setBackgroundColor:[statusBg CGColor]];
     [self.statusLabel setTextColor:statusText];
+    [self updateControlStatusIndicator];
     
     // Rulers and editor backgrounds
     for (DietCodeTabState* tab in self.openTabs) {
@@ -2747,6 +2822,17 @@ static NSString* FindBinaryPath(NSString* name, NSString* fallback) {
     self.ruffPath = self.ruffPathField.stringValue;
     self.eslintPath = self.eslintPathField.stringValue;
     
+    BOOL newControlVal = ([self.externalControlBtn state] == NSControlStateValueOn);
+    if (newControlVal != self.externalControlEnabled) {
+        self.externalControlEnabled = newControlVal;
+        if (self.externalControlEnabled) {
+            [(DietCodeControlServer*)self.controlServer start];
+        } else {
+            [(DietCodeControlServer*)self.controlServer stop];
+        }
+        [self updateControlStatusIndicator];
+    }
+    
     // Save to NSUserDefaults
     NSUserDefaults* defaults = [NSUserDefaults standardUserDefaults];
     [defaults setInteger:self.currentFontSize forKey:@"FontSize"];
@@ -2756,6 +2842,7 @@ static NSString* FindBinaryPath(NSString* name, NSString* fallback) {
     [defaults setBool:self.currentFormatOnSave forKey:@"FormatOnSave"];
     [defaults setBool:self.currentLintOnSave forKey:@"LintOnSave"];
     [defaults setBool:self.currentDiagnosticsEnabled forKey:@"DiagnosticsEnabled"];
+    [defaults setBool:self.externalControlEnabled forKey:@"ExternalControlEnabled"];
     
     [defaults setObject:self.clangdPath forKey:@"ClangdPath"];
     [defaults setObject:self.pyrightPath forKey:@"PyrightPath"];
@@ -3954,6 +4041,9 @@ static NSString* FindBinaryPath(NSString* name, NSString* fallback) {
 }
 
 - (void)cleanupProcesses {
+    if (self.controlServer) {
+        [(DietCodeControlServer*)self.controlServer stop];
+    }
     if (self.currentRunTask && [self.currentRunTask isRunning]) {
         [self.currentRunTask terminate];
     }
@@ -4430,7 +4520,8 @@ static NSString* FindBinaryPath(NSString* name, NSString* fallback) {
                 @"line": @(line),
                 @"column": @(col),
                 @"severity": severity,
-                @"message": msg
+                @"message": msg,
+                @"source": diag[@"source"] ?: @"unknown"
             }];
         }
     }
@@ -5273,6 +5364,11 @@ static NSString* FindBinaryPath(NSString* name, NSString* fallback) {
 }
 
 - (void)openFileAtPath:(NSString*)path line:(NSInteger)line column:(NSInteger)column {
+    BOOL isDir = NO;
+    if ([[NSFileManager defaultManager] fileExistsAtPath:path isDirectory:&isDir] && isDir) {
+        [self openWorkspaceFolder:path];
+        return;
+    }
     BOOL found = NO;
     for (DietCodeTabState* tab in self.openTabs) {
         if ([tab.path isEqualToString:path]) {
@@ -5413,6 +5509,480 @@ static NSString* FindBinaryPath(NSString* name, NSString* fallback) {
     [menu insertItem:defItem atIndex:0];
     [menu insertItem:[NSMenuItem separatorItem] atIndex:1];
     return menu;
+}
+
+// --- Agent Control Surface v1.1 Programmatic API Implementation ---
+
+- (NSString*)workspacePath {
+    return self.openedFolderPath;
+}
+
+- (void)openWorkspaceFolder:(NSString*)path {
+    self.openedFolderPath = path;
+    [self addToRecentFolders:self.openedFolderPath];
+    [self refreshFilesTree:nil];
+    [self selectActivity:@"files"];
+}
+
+- (NSArray<NSString*>*)openFilePaths {
+    NSMutableArray* paths = [NSMutableArray array];
+    for (DietCodeTabState* tab in self.openTabs) {
+        if (tab.path) {
+            [paths addObject:tab.path];
+        }
+    }
+    return paths;
+}
+
+- (NSString*)activeFilePath {
+    return self.activeTab.path;
+}
+
+- (NSString*)textForFileAtPath:(NSString*)path {
+    for (DietCodeTabState* tab in self.openTabs) {
+        if ([tab.path isEqualToString:path]) {
+            return [tab.textView string];
+        }
+    }
+    if ([path isAbsolutePath] && [[NSFileManager defaultManager] fileExistsAtPath:path]) {
+        const auto result = fileService_.readTextFile(std::filesystem::path(StdStringFromNSString(path)));
+        if (result.ok) {
+            return NSStringFromStdString(result.contents);
+        }
+    }
+    return nil;
+}
+
+- (BOOL)replaceTextInRange:(NSRange)range withText:(NSString*)text forFileAtPath:(NSString*)path {
+    DietCodeTabState* targetTab = nil;
+    for (DietCodeTabState* tab in self.openTabs) {
+        if ([tab.path isEqualToString:path]) {
+            targetTab = tab;
+            break;
+        }
+    }
+    if (!targetTab || targetTab.isReadOnly) return NO;
+    NSTextView* tv = targetTab.textView;
+    if (range.location + range.length <= tv.string.length) {
+        if ([tv shouldChangeTextInRange:range replacementString:text]) {
+            [tv.textStorage replaceCharactersInRange:range withString:text];
+            [tv didChangeText];
+            return YES;
+        }
+    }
+    return NO;
+}
+
+- (BOOL)applyPatchAtPath:(NSString*)path patchString:(NSString*)patchString errorOut:(NSString**)errorOut {
+    DietCodeTabState* targetTab = nil;
+    for (DietCodeTabState* tab in self.openTabs) {
+        if ([tab.path isEqualToString:path]) {
+            targetTab = tab;
+            break;
+        }
+    }
+    if (!targetTab || targetTab.isReadOnly) {
+        if (errorOut) *errorOut = @"File is not open or is read-only.";
+        return NO;
+    }
+    
+    NSString* currentText = [targetTab.textView string];
+    NSString* tempDir = NSTemporaryDirectory() ?: @"/tmp";
+    NSString* tempSrcPath = [tempDir stringByAppendingPathComponent:[NSString stringWithFormat:@"dietcode_patch_src_%u.txt", arc4random()]];
+    NSString* tempDiffPath = [tempDir stringByAppendingPathComponent:[NSString stringWithFormat:@"dietcode_patch_diff_%u.diff", arc4random()]];
+    
+    NSError* err = nil;
+    [currentText writeToFile:tempSrcPath atomically:YES encoding:NSUTF8StringEncoding error:&err];
+    if (err) {
+        if (errorOut) *errorOut = [NSString stringWithFormat:@"Failed to write temp source: %@", err.localizedDescription];
+        return NO;
+    }
+    [patchString writeToFile:tempDiffPath atomically:YES encoding:NSUTF8StringEncoding error:&err];
+    if (err) {
+        [[NSFileManager defaultManager] removeItemAtPath:tempSrcPath error:nil];
+        if (errorOut) *errorOut = [NSString stringWithFormat:@"Failed to write temp patch: %@", err.localizedDescription];
+        return NO;
+    }
+    
+    NSTask* task = [[NSTask alloc] init];
+    [task setLaunchPath:@"/usr/bin/patch"];
+    [task setArguments:@[@"--silent", tempSrcPath, tempDiffPath]];
+    
+    NSPipe* errPipe = [NSPipe pipe];
+    [task setStandardError:errPipe];
+    [task setStandardOutput:[NSPipe pipe]];
+    
+    [task launch];
+    [task waitUntilExit];
+    
+    int status = [task terminationStatus];
+    if (status != 0) {
+        NSData* errData = [[errPipe fileHandleForReading] readDataToEndOfFile];
+        NSString* errMsg = [[NSString alloc] initWithData:errData encoding:NSUTF8StringEncoding];
+        [[NSFileManager defaultManager] removeItemAtPath:tempSrcPath error:nil];
+        [[NSFileManager defaultManager] removeItemAtPath:tempDiffPath error:nil];
+        if (errorOut) *errorOut = [NSString stringWithFormat:@"Patch failed with exit status %d: %@", status, errMsg];
+        return NO;
+    }
+    
+    NSString* patchedText = [NSString stringWithContentsOfFile:tempSrcPath encoding:NSUTF8StringEncoding error:&err];
+    [[NSFileManager defaultManager] removeItemAtPath:tempSrcPath error:nil];
+    [[NSFileManager defaultManager] removeItemAtPath:tempDiffPath error:nil];
+    
+    if (err || !patchedText) {
+        if (errorOut) *errorOut = [NSString stringWithFormat:@"Failed to read patched output: %@", err ? err.localizedDescription : @"Unknown error"];
+        return NO;
+    }
+    
+    NSTextView* tv = targetTab.textView;
+    NSRange sel = tv.selectedRange;
+    NSRect visibleRect = tv.visibleRect;
+    
+    [tv setString:patchedText];
+    targetTab.dirty = YES;
+    
+    if (sel.location <= tv.string.length) {
+        tv.selectedRange = sel;
+    }
+    [tv scrollRectToVisible:visibleRect];
+    [self updateWindowTitleAndStatus];
+    return YES;
+}
+
+- (void)saveFileAtPath:(NSString*)path {
+    for (DietCodeTabState* tab in self.openTabs) {
+        if ([tab.path isEqualToString:path]) {
+            [self saveTab:tab];
+            break;
+        }
+    }
+}
+
+- (void)closeFileAtPath:(NSString*)path {
+    for (DietCodeTabState* tab in self.openTabs) {
+        if ([tab.path isEqualToString:path]) {
+            [self closeTab:tab];
+            break;
+        }
+    }
+}
+
+// Terminal
+- (void)runTerminalCommand:(NSString*)command cwd:(NSString*)cwd show:(BOOL)show {
+    [self ensureTerminalProcess];
+    if (show) {
+        [self.bottomPanel setHidden:NO];
+        [self.bottomTabView selectTabViewItemWithIdentifier:@"terminal"];
+    }
+    if (terminalMasterFd_ >= 0) {
+        NSString* cmdStr = [NSString stringWithFormat:@"cd %@ && %@\n", cwd ?: self.openedFolderPath ?: @"~", command];
+        const char* utf8 = [cmdStr UTF8String];
+        write(terminalMasterFd_, utf8, strlen(utf8));
+    }
+}
+
+- (void)stopTerminalCommand {
+    if (terminalPid_ > 0) {
+        kill(terminalPid_, SIGINT);
+    }
+}
+
+- (NSString*)terminalOutput {
+    return [self.terminalTextView string];
+}
+
+- (void)clearTerminalOutput {
+    [self.terminalTextView setString:@""];
+}
+
+// Git
+- (NSDictionary*)gitStatusInfo {
+    if (self.openedFolderPath == nil) return @{};
+    std::string ws = StdStringFromNSString(self.openedFolderPath);
+    auto res = dietcode::filesystem::GitService::getStatus(ws);
+    
+    NSMutableArray* staged = [NSMutableArray array];
+    NSMutableArray* modified = [NSMutableArray array];
+    NSMutableArray* untracked = [NSMutableArray array];
+    
+    for (const auto& c : res.changes) {
+        NSString* path = NSStringFromStdString(c.path);
+        if (c.staged) {
+            [staged addObject:path];
+        } else {
+            if (c.status == "??" || c.status == "Untracked") {
+                [untracked addObject:path];
+            } else {
+                [modified addObject:path];
+            }
+        }
+    }
+    
+    return @{
+        @"branch": NSStringFromStdString(res.branch),
+        @"staged": staged,
+        @"modified": modified,
+        @"untracked": untracked
+    };
+}
+
+- (NSString*)gitDiffForFile:(NSString*)path {
+    if (self.openedFolderPath == nil) return @"";
+    NSString* relPath = path;
+    if ([path isAbsolutePath] && [path hasPrefix:self.openedFolderPath]) {
+        relPath = [path substringFromIndex:self.openedFolderPath.length];
+        if ([relPath hasPrefix:@"/"]) {
+            relPath = [relPath substringFromIndex:1];
+        }
+    }
+    std::string ws = StdStringFromNSString(self.openedFolderPath);
+    std::string rel = StdStringFromNSString(relPath);
+    std::string unstagedDiff = dietcode::filesystem::GitService::getDiff(ws, rel, false);
+    std::string stagedDiff = dietcode::filesystem::GitService::getDiff(ws, rel, true);
+    return [NSString stringWithFormat:@"%s\n%s", stagedDiff.c_str(), unstagedDiff.c_str()];
+}
+
+- (BOOL)gitStageFile:(NSString*)path {
+    if (self.openedFolderPath == nil) return NO;
+    NSString* relPath = path;
+    if ([path isAbsolutePath] && [path hasPrefix:self.openedFolderPath]) {
+        relPath = [path substringFromIndex:self.openedFolderPath.length];
+        if ([relPath hasPrefix:@"/"]) {
+            relPath = [relPath substringFromIndex:1];
+        }
+    }
+    std::string ws = StdStringFromNSString(self.openedFolderPath);
+    std::string rel = StdStringFromNSString(relPath);
+    BOOL ok = dietcode::filesystem::GitService::stageFile(ws, rel);
+    if (ok) [self refreshGitStatus];
+    return ok;
+}
+
+- (BOOL)gitUnstageFile:(NSString*)path {
+    if (self.openedFolderPath == nil) return NO;
+    NSString* relPath = path;
+    if ([path isAbsolutePath] && [path hasPrefix:self.openedFolderPath]) {
+        relPath = [path substringFromIndex:self.openedFolderPath.length];
+        if ([relPath hasPrefix:@"/"]) {
+            relPath = [relPath substringFromIndex:1];
+        }
+    }
+    std::string ws = StdStringFromNSString(self.openedFolderPath);
+    std::string rel = StdStringFromNSString(relPath);
+    BOOL ok = dietcode::filesystem::GitService::unstageFile(ws, rel);
+    if (ok) [self refreshGitStatus];
+    return ok;
+}
+
+- (BOOL)gitDiscardFile:(NSString*)path {
+    if (self.openedFolderPath == nil) return NO;
+    NSString* absPath = path;
+    NSString* relPath = path;
+    if ([path isAbsolutePath]) {
+        if ([path hasPrefix:self.openedFolderPath]) {
+            relPath = [path substringFromIndex:self.openedFolderPath.length];
+            if ([relPath hasPrefix:@"/"]) {
+                relPath = [relPath substringFromIndex:1];
+            }
+        }
+    } else {
+        absPath = [self.openedFolderPath stringByAppendingPathComponent:path];
+    }
+    std::string ws = StdStringFromNSString(self.openedFolderPath);
+    std::string rel = StdStringFromNSString(relPath);
+    BOOL ok = dietcode::filesystem::GitService::discardChanges(ws, rel);
+    if (ok) {
+        [self refreshGitStatus];
+        for (DietCodeTabState* tab in self.openTabs) {
+            if ([tab.path isEqualToString:absPath]) {
+                const auto result = fileService_.readTextFile(std::filesystem::path(StdStringFromNSString(tab.path)));
+                if (result.ok) {
+                    self.loadingDocument = YES;
+                    [tab.textView setString:NSStringFromStdString(result.contents)];
+                    self.loadingDocument = NO;
+                    tab.dirty = NO;
+                    NSDictionary* attrs = [[NSFileManager defaultManager] attributesOfItemAtPath:tab.path error:nil];
+                    tab.lastModifiedDate = attrs.fileModificationDate;
+                    [self updateTabHeaderLayout];
+                    [self updateWindowTitleAndStatus];
+                }
+            }
+        }
+    }
+    return ok;
+}
+
+- (BOOL)gitCommitWithMessage:(NSString*)message errorOut:(NSString**)errorOut {
+    if (self.openedFolderPath == nil) {
+        if (errorOut) *errorOut = @"No open folder workspace.";
+        return NO;
+    }
+    std::string ws = StdStringFromNSString(self.openedFolderPath);
+    std::string msg = StdStringFromNSString(message);
+    std::string err;
+    BOOL ok = dietcode::filesystem::GitService::commit(ws, msg, err);
+    if (ok) {
+        [self refreshGitStatus];
+    } else {
+        if (errorOut) *errorOut = NSStringFromStdString(err);
+    }
+    return ok;
+}
+
+// Problems
+- (NSArray<NSDictionary*>*)problemsList {
+    NSMutableArray* list = [NSMutableArray array];
+    int idx = 0;
+    for (NSDictionary* d in self.unifiedDiagnostics) {
+        NSString* relPath = d[@"path"];
+        if (self.openedFolderPath && [relPath hasPrefix:self.openedFolderPath]) {
+            relPath = [relPath substringFromIndex:self.openedFolderPath.length];
+            if ([relPath hasPrefix:@"/"]) relPath = [relPath substringFromIndex:1];
+        }
+        [list addObject:@{
+            @"id": [NSString stringWithFormat:@"diag-%03d", idx++],
+            @"source": d[@"source"] ?: @"unknown",
+            @"severity": d[@"severity"] ?: @"info",
+            @"path": relPath,
+            @"line": d[@"line"] ?: @(1),
+            @"column": d[@"column"] ?: @(1),
+            @"message": d[@"message"] ?: @""
+        }];
+    }
+    return list;
+}
+
+- (void)problemsOpen:(NSString*)problemId {
+    if ([problemId hasPrefix:@"diag-"]) {
+        NSInteger idx = [[problemId substringFromIndex:5] integerValue];
+        if (idx >= 0 && idx < (NSInteger)self.unifiedDiagnostics.count) {
+            NSDictionary* diag = self.unifiedDiagnostics[idx];
+            [self openFileAtPath:diag[@"path"] line:[diag[@"line"] integerValue] column:[diag[@"column"] integerValue]];
+        }
+    }
+}
+
+- (void)problemsClearSource:(NSString*)source {
+    for (NSString* filePath in [self.diagnosticsDict allKeys]) {
+        NSMutableArray* list = self.diagnosticsDict[filePath];
+        NSMutableArray* fileToRemove = [NSMutableArray array];
+        for (NSDictionary* d in list) {
+            if ([d[@"source"] isEqualToString:source]) {
+                [fileToRemove addObject:d];
+            }
+        }
+        [list removeObjectsInArray:fileToRemove];
+    }
+    [self rebuildProblemsPanel];
+}
+
+// Language Features
+- (NSArray*)languageDiagnosticsForPath:(NSString*)path {
+    NSMutableArray* list = [NSMutableArray array];
+    NSArray* fileDiags = self.diagnosticsDict[path];
+    for (NSDictionary* d in fileDiags) {
+        if ([d[@"source"] isEqualToString:@"lsp"]) {
+            [list addObject:d];
+        }
+    }
+    return list;
+}
+
+- (void)formatFileAtPath:(NSString*)path {
+    for (DietCodeTabState* tab in self.openTabs) {
+        if ([tab.path isEqualToString:path]) {
+            [self formatTab:tab];
+            break;
+        }
+    }
+}
+
+- (void)lintFileAtPath:(NSString*)path {
+    for (DietCodeTabState* tab in self.openTabs) {
+        if ([tab.path isEqualToString:path]) {
+            [self runLinterForTab:tab];
+            break;
+        }
+    }
+}
+
+- (void)restartLSPForLanguage:(NSString*)lang {
+    [self stopLSPForLanguage:lang];
+    [self startLSPForLanguage:lang];
+}
+
+// UI Logging
+- (void)appendControlLogLine:(NSString*)line {
+    dispatch_async(dispatch_get_main_queue(), ^{
+        NSTextStorage* storage = self.controlLogTextView.textStorage;
+        [storage beginEditing];
+        [storage appendAttributedString:[[NSAttributedString alloc] initWithString:[line stringByAppendingString:@"\n"] attributes:@{
+            NSForegroundColorAttributeName: [NSColor textColor],
+            NSFontAttributeName: [NSFont monospacedSystemFontOfSize:11 weight:NSFontWeightRegular]
+        }]];
+        [storage endEditing];
+        [self.controlLogTextView scrollRangeToVisible:NSMakeRange(storage.length, 0)];
+    });
+}
+
+- (void)setControlActiveCommand:(NSString*)method caller:(NSString*)caller {
+    dispatch_async(dispatch_get_main_queue(), ^{
+        if (method) {
+            [self.controlActiveLabel setStringValue:[NSString stringWithFormat:@"Active Command: %@ (Caller: %@)", method, caller]];
+        } else {
+            [self.controlActiveLabel setStringValue:@"Active Command: Idle"];
+        }
+    });
+}
+
+- (void)showBottomPanelTab:(NSString*)identifier {
+    self.bottomPanel.hidden = NO;
+    [self.bottomTabView selectTabViewItemWithIdentifier:identifier];
+}
+
+- (void)updateControlStatusIndicator {
+    if (self.externalControlEnabled) {
+        [self.controlStatusLabel setStringValue:@"● Control: Active"];
+        [self.controlStatusLabel setTextColor:[NSColor systemGreenColor]];
+    } else {
+        [self.controlStatusLabel setStringValue:@"● Control: Disabled"];
+        [self.controlStatusLabel setTextColor:[NSColor disabledControlTextColor]];
+    }
+}
+
+- (NSDictionary*)activeSelectionInfo {
+    DietCodeTabState* tab = self.activeTab;
+    if (!tab) return @{};
+    NSRange r = tab.textView.selectedRange;
+    NSString* text = @"";
+    if (r.location + r.length <= tab.textView.string.length) {
+        text = [tab.textView.string substringWithRange:r] ?: @"";
+    }
+    return @{
+        @"text": text,
+        @"start": @(r.location),
+        @"end": @(r.location + r.length)
+    };
+}
+
+- (BOOL)setActiveSelectionStart:(NSInteger)start end:(NSInteger)end {
+    DietCodeTabState* tab = self.activeTab;
+    if (!tab) return NO;
+    if (start < 0 || end < start || end > (NSInteger)tab.textView.string.length) return NO;
+    tab.textView.selectedRange = NSMakeRange(start, end - start);
+    return YES;
+}
+
+- (BOOL)insertTextAtActiveCursor:(NSString*)text {
+    DietCodeTabState* tab = self.activeTab;
+    if (!tab || tab.isReadOnly) return NO;
+    return [self replaceTextInRange:tab.textView.selectedRange withText:text forFileAtPath:tab.path];
+}
+
+- (BOOL)replaceActiveSelectionWithText:(NSString*)text {
+    DietCodeTabState* tab = self.activeTab;
+    if (!tab || tab.isReadOnly) return NO;
+    return [self replaceTextInRange:tab.textView.selectedRange withText:text forFileAtPath:tab.path];
 }
 
 @end
