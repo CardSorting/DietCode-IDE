@@ -79,15 +79,44 @@ Covered behaviors:
 - Case-insensitive find returns expected matches.
 - Case-sensitive find returns expected matches.
 
-## Manual testing still required
+## Manual Verification Checklist
 
-The app bundle builds, but these UI behaviors still need manual runtime validation:
+The application requires runtime verification of native macOS AppKit user flows:
 
-- Welcome window display.
-- New File button/menu action.
-- Open File native dialog.
-- Text editing in `NSTextView`.
-- Save and Save As writing to disk.
-- Unsaved close confirmation.
-- File error alerts.
-- Status bar cursor updates.
+### 1. Core Editor Operations
+- **Welcome Screen**: Launches on clean start, offers "New File", "Open File", and "Open Folder" options.
+- **Recent Projects**: Displays up to 5 previously opened folders on the Welcome Screen; clicking one loads that workspace.
+- **Editing & Save Loop**: Typing in the editor updates dirty state (unsaved dot in window title, status bar). Cmd+S saves to disk; Cmd+Shift+S triggers "Save As".
+- **External Changes**: Modifying or deleting an open file externally shows a conflict dialog upon window/tab focus.
+
+### 2. Keyboard Navigation & Focus
+- **Sidebar Navigation**: Navigating folders in the sidebar file tree using Arrow keys; pressing **Return** opens the selected file or expands/collapses folders.
+- **Tab Switching**: Pressing **Ctrl+Tab** switches to the next document tab; **Ctrl+Shift+Tab** switches to the previous tab.
+- **Panel Dismissal**: Pressing **Escape** dismisses the sidebar or bottom panel when the keyboard focus is inside them.
+- **Visual Focus Borders**: High-contrast outline borders dynamically redraw around the active panel (Editor, Sidebar, or Terminal/Output console) when navigating via Tab/mouse.
+
+### 3. VoiceOver & Screen Readers
+- Accessibility roles and labels are populated for custom controls:
+  - Close buttons on tabs have descriptions.
+  - Tab button items declare `@"AXTab"` accessibility roles.
+  - Interactive input fields and buttons have helpful labels.
+
+### 4. High Contrast & Styling
+- Opening Preferences and choosing **High Contrast Light** or **High Contrast Dark** switches all panels (editor text, line ruler, sidebar, terminal, console outputs, status bar) to stark contrasting color configurations.
+- Selection attributes set a bright yellow (for Dark theme) or blue (for Light theme) highlight for legibility.
+
+### 5. Crash Recovery Snapshots
+- Edit a file without saving (wait 1 second for debounced backup).
+- Kill the app process.
+- Restart the app. A Recovery Dialog should display original file metadata and offer to **Restore** or **Discard**.
+- Select **Restore** to reload changes back into the active session.
+
+### 6. Large File Handling
+- Open a file >= 50MB. A warning dialog should present options to **Open**, **Open Read-Only**, or **Cancel**.
+- Select **Open** and verify that the editor remains responsive (wrapping disabled, rulers hidden, background text layout calculations enabled).
+
+### 7. Process Cleanup
+- Launch an interactive terminal via **Terminal -> Toggle Terminal**.
+- Run a compiler or long-running command.
+- Quit DietCode. Verify in Activity Monitor that no orphan `zsh` or compiler processes associated with DietCode remain active.
+

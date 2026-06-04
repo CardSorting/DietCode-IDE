@@ -112,30 +112,30 @@ Verified boundary:
 
 - Contains stateless helper functions only.
 
-## macOS Phase 1A behavior
+## macOS Prototype Native Integration
 
-The macOS prototype uses native AppKit controls:
+The macOS shell integrates native AppKit components:
 
-- `NSApplication`
-- `NSWindow`
-- `NSMenu`
-- `NSOpenPanel`
-- `NSSavePanel`
-- `NSTextView`
-- `NSScrollView`
-- `NSButton`
-- `NSTextField`
+- `NSApplication` & `NSAppDelegate` (lifecycle management, clean teardown of child processes)
+- `NSWindow` & `NSWindowController` (focus border tracking, tab management)
+- `NSMenu` (custom keyboard shortcuts, theme switching toggles)
+- `NSOpenPanel` & `NSSavePanel` (sandbox-compliant file/folder dialogs)
+- `NSTextView` (enhanced with high-contrast text attributes, background layout threads for large files)
+- `NSOutlineView` (subclassed as `DietCodeOutlineView` to support keyboard Return to open/toggle items)
+- `NSSplitView` (constrained to 150px - 400px widths and stable heights via delegate layout logic)
+- `NSTabView` (tabbed workspace editor documents and bottom panel logs)
+- `NSScrollView`, `NSButton`, `NSTextField` (for settings, panels, welcome screen actions)
 
-This intentionally prioritizes a usable, native, accessible editor loop before a custom text renderer.
+This architecture maintains a dependency-free AppKit/C++ vertical slice, prioritizing responsiveness and macOS platform standards before committing to custom text renderers.
 
 ## No-hidden-compute audit
 
-Verified by source inspection of the created prototype:
+Verified by source inspection of the completed prototype:
 
-- No network APIs are used.
-- No terminal process is started.
-- No folder scan occurs at startup.
-- No file watcher is started.
-- No extension host exists.
-- No AI/agent/marketplace code exists.
-- Folder opening is represented only as disabled/phase-later UI copy in the first prototype.
+- **No unsolicited network APIs**: DietCode does not perform automatic updates, telemetry transmission, or remote system lookups.
+- **On-demand interactive terminals**: A local interactive PTY terminal process is started *only* when the terminal panel is toggled and used by the user, and compilation tasks spawn `NSTask` on-demand.
+- **Clean subprocess lifecycle**: All spawned subprocesses (PTY shell, runner tasks) are forcibly terminated upon application exit to prevent resource leaks.
+- **Lazy folder workspace loading**: Rather than scanning entire projects recursively on startup, workspace files are read and cached lazily as outline tree nodes are expanded by the user.
+- **No background file watchers or indexers**: The application avoids background indexing threads, maintaining zero CPU overhead when idle.
+- **No extensions or AI systems**: The workspace has no extension host, marketplace code, or hidden AI compute workloads.
+

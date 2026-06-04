@@ -21,7 +21,9 @@ MACOS_MM := \
 	src/platform/macos/MacMenu.mm \
 	src/platform/macos/MacFileDialog.mm \
 	src/platform/macos/MacClipboard.mm \
-	src/platform/macos/MacTextRendering.mm
+	src/platform/macos/MacTextRendering.mm \
+	src/filesystem/GitService.mm \
+	src/core/LSPClient.mm
 
 .PHONY: all app run test clean
 

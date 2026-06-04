@@ -20,7 +20,7 @@
     NSMenu* appMenu = [[NSMenu alloc] initWithTitle:@"DietCode"];
     [appMenu addItemWithTitle:@"About DietCode" action:@selector(orderFrontStandardAboutPanel:) keyEquivalent:@""];
     [appMenu addItem:[NSMenuItem separatorItem]];
-    [appMenu addItemWithTitle:@"Settings…" action:nil keyEquivalent:@","];
+    [appMenu addItem:[self itemWithTitle:@"Settings…" action:@selector(openSettingsAction:) key:@"," modifiers:NSEventModifierFlagCommand target:target]];
     [appMenu addItem:[NSMenuItem separatorItem]];
     [appMenu addItemWithTitle:@"Quit DietCode" action:@selector(terminate:) keyEquivalent:@"q"];
     [appMenuItem setSubmenu:appMenu];
@@ -49,6 +49,8 @@
     [editMenu addItemWithTitle:@"Paste" action:@selector(paste:) keyEquivalent:@"v"];
     [editMenu addItem:[NSMenuItem separatorItem]];
     [editMenu addItemWithTitle:@"Find" action:@selector(performTextFinderAction:) keyEquivalent:@"f"];
+    [editMenu addItem:[NSMenuItem separatorItem]];
+    [editMenu addItem:[self itemWithTitle:@"Format Document" action:@selector(formatCurrentFile:) key:@"f" modifiers:NSEventModifierFlagCommand | NSEventModifierFlagShift target:target]];
     [editMenuItem setSubmenu:editMenu];
 
     NSMenuItem* selectionMenuItem = [[NSMenuItem alloc] init];
@@ -69,6 +71,7 @@
     [mainMenu addItem:goMenuItem];
     NSMenu* goMenu = [[NSMenu alloc] initWithTitle:@"Go"];
     [goMenu addItem:[self itemWithTitle:@"Go to Line…" action:@selector(goToLine:) key:@"g" modifiers:NSEventModifierFlagCommand target:target]];
+    [goMenu addItem:[self itemWithTitle:@"Go to Definition" action:@selector(goToDefinitionClicked:) key:@"d" modifiers:NSEventModifierFlagCommand | NSEventModifierFlagControl target:target]];
     [goMenu addItem:[NSMenuItem separatorItem]];
     [goMenu addItem:[self itemWithTitle:@"Next Tab" action:@selector(nextTab:) key:@"\t" modifiers:NSEventModifierFlagControl target:target]];
     [goMenu addItem:[self itemWithTitle:@"Previous Tab" action:@selector(previousTab:) key:@"\t" modifiers:NSEventModifierFlagControl | NSEventModifierFlagShift target:target]];
@@ -78,7 +81,14 @@
     [mainMenu addItem:runMenuItem];
     NSMenu* runMenu = [[NSMenu alloc] initWithTitle:@"Run"];
     [runMenu addItem:[self itemWithTitle:@"Run Current File" action:@selector(runCurrentFile:) key:@"r" modifiers:NSEventModifierFlagCommand target:target]];
+    [runMenu addItem:[self itemWithTitle:@"Run Linter" action:@selector(runLinter:) key:@"l" modifiers:NSEventModifierFlagCommand | NSEventModifierFlagShift target:target]];
     [runMenuItem setSubmenu:runMenu];
+
+    NSMenuItem* gitMenuItem = [[NSMenuItem alloc] init];
+    [mainMenu addItem:gitMenuItem];
+    NSMenu* gitMenu = [[NSMenu alloc] initWithTitle:@"Git"];
+    [gitMenu addItem:[self itemWithTitle:@"Refresh Git Status" action:@selector(gitRefreshClicked:) key:@"g" modifiers:NSEventModifierFlagCommand | NSEventModifierFlagShift target:target]];
+    [gitMenuItem setSubmenu:gitMenu];
 
     NSMenuItem* terminalMenuItem = [[NSMenuItem alloc] init];
     [mainMenu addItem:terminalMenuItem];

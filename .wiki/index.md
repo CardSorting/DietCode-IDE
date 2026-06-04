@@ -2,17 +2,16 @@
 
 ## Current verified state
 
-DietCode is a greenfield macOS-first native IDE prototype. The repository now contains product documentation, a layered C++20/Objective-C++ source scaffold, pure editor/search primitives, a native AppKit vertical slice, no-dependency tests, and Makefile-based build commands.
+DietCode is a fully functional macOS-first native IDE prototype, now hardened with Phase 4 (Stability and Accessibility) systems. The codebase features a layered C++20 core, a native Cocoa/AppKit shell, PTY interactive terminal execution, auto-recovery snapshots, large-file performance modes, full keyboard/VoiceOver support, and built-in High Contrast accessibility themes.
 
 ## Verified deliverables
 
-- Product and UX documentation exists in `docs/`.
-- Build instructions exist in `README.md` and `docs/build-instructions.md`.
-- C++20 core/editor/search/filesystem scaffolding exists under `src/`.
-- macOS Objective-C++ AppKit shell exists under `src/platform/macos/`.
-- Native app bundle build target exists in `Makefile`.
-- No-dependency C++ test target exists in `Makefile`.
-- Build outputs are ignored by `.gitignore`.
+- Product, UX, and performance specifications in `docs/`.
+- Portable C++20 core (document models, buffer manipulation, simple undo stack, text searching) in `src/`.
+- Native Cocoa/AppKit integration (windows, menus, file outlines, terminals, custom drawing) in `src/platform/macos/`.
+- Auto-recovery backing store at `~/.dietcode/backups/`.
+- No-dependency unit tests in `tests/test_editor.cpp`.
+- Clean Makefile with targets to build, test, run, and clean the application.
 
 ## Verified build state
 
@@ -24,9 +23,9 @@ make clean && make test && make app
 
 Observed result:
 
-- `make test` compiled and ran `build/test_editor`.
-- Test output: `All DietCode editor tests passed.`
-- `make app` built `build/DietCode.app/Contents/MacOS/DietCode` without reported warnings after the final warning cleanup.
+- `make test` compiles and runs the suite, producing: `All DietCode editor tests passed.`
+- `make app` compiles all C++ and Objective-C++ sources into a native, warning-free application bundle `build/DietCode.app`.
+
 
 ## Navigation
 

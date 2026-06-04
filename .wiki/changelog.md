@@ -1,5 +1,37 @@
 # Changelog
 
+## 2026-06-04 — Phase 4 Hardening: Stability and Accessibility
+
+### Added keyboard accessibility & VoiceOver
+- Added Return key navigation inside `NSOutlineView` using a subclass `DietCodeOutlineView` to open files and toggle folders.
+- Added Next Tab (`Ctrl+Tab`) and Previous Tab (`Ctrl+Shift+Tab`) menu items and handlers for editor tab navigation.
+- Added Escape (`cancelOperation:`) panel dismissal support for sidebar and bottom panels.
+- Added visible focus borders highlighting active panels (editor scroll views, outline views, and terminal scroll views).
+- Added accessibility labels and roles for tab headers, tab close buttons, and command palette inputs/lists.
+
+### Added High Contrast themes
+- Added **High Contrast Light** and **High Contrast Dark** theme options in preference settings alongside standard Light/Dark/System options.
+- Configured stark black/white colors, highly visible selection attributes, text-colored cursors, and custom tab outlines.
+- Synchronized theme updating for all text displays (editor, terminal, output console, compiler errors, search results, line ruler, and status bar).
+
+### Added crash recovery & snapshots
+- Added automatic temporary recovery snapshot saving to `~/.dietcode/backups/` on a 1-second debounce for dirty files.
+- Added Recovery dialog on unclean launch displaying original paths, titles, and modification timestamps with options to **Restore** or **Discard**.
+- Added warnings for Save As collisions and external file deletions or modifications upon tab/window focus.
+
+### Added Large File Mode
+- Added size checks. Files >= 50MB prompt a warning with options to Open, Open Read-Only, or Cancel.
+- Optimized large file view by disabling word wrap, hiding rulers, and enabling background layout threads.
+
+### Added onboarding recents & empty states
+- Added "Recent Projects" list to the Welcome screen showing the 5 most recently opened folder workspaces, persisted via `NSUserDefaults`.
+- Added friendly placeholders overlayed on empty file tree sidebars, runner outputs, compiler error logs, and search result text views.
+
+### Added stability and cleanup polish
+- Implemented `NSSplitViewDelegate` methods to properly constrain the sidebar width (150px - 400px), keep sidebar/terminal heights fixed on window resizing, and resolve layout jumps.
+- Restored open tabs and active tab state from previous session on launch.
+- Terminated running compiler compilation tasks and interactive PTY terminals on application quit.
+
 ## 2026-06-04 — Greenfield DietCode prototype foundation
 
 ### Added product documentation
