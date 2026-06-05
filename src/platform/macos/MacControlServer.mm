@@ -26,6 +26,10 @@ static const NSUInteger kMaxResponseBytes = 4 * 1024 * 1024;
 static const NSInteger kMaxGrepResults = 500;
 static const NSUInteger kMaxFileTextBytes = 1024 * 1024;
 static const NSUInteger kMaxPatchBytesBeforeConfirmation = 10 * 1024;
+static const NSUInteger kMaxPatchBytes = 1024 * 1024;
+static const NSInteger kMaxBatchPatchCount = 10;
+static const NSUInteger kMaxChunkPreviewLength = 180;
+static const NSInteger kMaxPlanSteps = 30;
 
 NSString* NSStringFromStdString(const std::string& value) {
     return [NSString stringWithUTF8String:value.c_str()] ?: @"";
@@ -150,6 +154,113 @@ NSInteger ChangedLineCountFromHunks(NSArray<NSDictionary*>* hunks) {
     return count;
 }
 
+NSArray<NSString*>* LinesFromText(NSString* text) {
+    NSMutableArray<NSString*>* lines = [NSMutableArray array];
+    [text enumerateLinesUsingBlock:^(NSString* line, BOOL*) {
+        [lines addObject:line ?: @""];
+    }];
+    if (text.length > 0 && [text hasSuffix:@"\n"]) {
+        [lines addObject:@""];
+    }
+    return lines;
+}
+
+NSString* TextForLineRange(NSArray<NSString*>* lines, NSInteger startLine, NSInteger endLine) {
+    if (startLine < 1 || endLine < startLine || endLine > (NSInteger)lines.count) {
+        return nil;
+    }
+    NSMutableArray<NSString*>* selected = [NSMutableArray array];
+    for (NSInteger i = startLine; i <= endLine; i++) {
+        [selected addObject:lines[(NSUInteger)i - 1]];
+    }
+    return [selected componentsJoinedByString:@"\n"];
+}
+
+BOOL AnyPatternMatches(NSArray<NSString*>* patterns, const std::string& relPath, const std::string& filename) {
+    for (NSString* pattern in patterns ?: @[]) {
+        std::string pat = StdStringFromNSString(pattern);
+        if (fnmatch(pat.c_str(), relPath.c_str(), FNM_CASEFOLD) == 0 ||
+            fnmatch(pat.c_str(), filename.c_str(), FNM_CASEFOLD) == 0) {
+            return YES;
+        }
+        std::filesystem::path p(relPath);
+        for (const auto& part : p) {
+            if (fnmatch(pat.c_str(), part.string().c_str(), FNM_CASEFOLD) == 0) {
+                return YES;
+            }
+        }
+    }
+    return NO;
+}
+
+BOOL ShouldSkipSearchPath(const std::filesystem::path& path, const std::string& relPath, NSArray<NSString*>* includes, NSArray<NSString*>* excludes) {
+    std::string filename = path.filename().string();
+    NSArray* defaultExcludes = @[@".git", @"build", @"dist", @"node_modules", @"DerivedData", @".next", @"__pycache__"];
+    if (AnyPatternMatches(defaultExcludes, relPath, filename) || AnyPatternMatches(excludes, relPath, filename)) {
+        return YES;
+    }
+    if (includes.count > 0 && !AnyPatternMatches(includes, relPath, filename)) {
+        return YES;
+    }
+    return NO;
+}
+
+NSString* RunGitOutput(NSString* cwd, NSArray<NSString*>* args) {
+    if (cwd.length == 0) return @"";
+    NSTask* task = [[NSTask alloc] init];
+    [task setLaunchPath:@"/usr/bin/git"];
+    [task setArguments:args];
+    [task setCurrentDirectoryPath:cwd];
+    NSPipe* outPipe = [NSPipe pipe];
+    [task setStandardOutput:outPipe];
+    [task setStandardError:[NSPipe pipe]];
+    @try {
+        [task launch];
+        [task waitUntilExit];
+        NSData* data = [[outPipe fileHandleForReading] readDataToEndOfFile];
+        return [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding] ?: @"";
+    } @catch (NSException*) {
+        return @"";
+    }
+}
+
+NSString* ISODateString(NSDate* date) {
+    if (!date) return @"";
+    NSDateFormatter* formatter = [[NSDateFormatter alloc] init];
+    formatter.locale = [NSLocale localeWithLocaleIdentifier:@"en_US_POSIX"];
+    formatter.timeZone = [NSTimeZone timeZoneForSecondsFromGMT:0];
+    formatter.dateFormat = @"yyyy-MM-dd'T'HH:mm:ss'Z'";
+    return [formatter stringFromDate:date];
+}
+
+NSDictionary* PatchPreviewSummary(NSString* patch) {
+    NSArray<NSDictionary*>* hunks = HunkSummariesFromPatch(patch ?: @"");
+    NSMutableArray* previews = [NSMutableArray array];
+    for (NSDictionary* hunk in hunks) {
+        NSInteger start = [hunk[@"newStart"] integerValue];
+        NSInteger end = start + MAX([hunk[@"newLines"] integerValue] - 1, 0);
+        [previews addObject:@{
+            @"startLine": @(start),
+            @"endLine": @(end),
+            @"preview": hunk[@"header"] ?: @"",
+            @"addedLines": hunk[@"addedLines"] ?: @0,
+            @"removedLines": hunk[@"removedLines"] ?: @0
+        }];
+    }
+    NSInteger added = 0;
+    NSInteger removed = 0;
+    for (NSDictionary* hunk in hunks) {
+        added += [hunk[@"addedLines"] integerValue];
+        removed += [hunk[@"removedLines"] integerValue];
+    }
+    return @{
+        @"addedLines": @(added),
+        @"removedLines": @(removed),
+        @"changedLines": @(added + removed),
+        @"hunks": previews
+    };
+}
+
 NSArray<NSString*>* DirtyFilePathsFromTabs(NSArray* tabs) {
     NSMutableArray* paths = [NSMutableArray array];
     for (id tab in tabs) {
@@ -245,6 +356,16 @@ NSArray<NSString*>* ContextLines(const std::vector<std::string>& lines, NSIntege
     int _serverFd;
     NSThread* _acceptThread;
     NSString* _lastVerifyCommand;
+    NSDate* _lastVerifyStartedAt;
+    NSDate* _lastVerifyFinishedAt;
+    NSNumber* _lastVerifyExitCode;
+    NSMutableArray<NSDictionary*>* _lastRPCPatchRecords;
+    NSMutableDictionary<NSString*, NSDictionary*>* _contextSnapshots;
+    NSInteger _contextSnapshotCounter;
+    NSMutableDictionary<NSString*, NSMutableDictionary*>* _tasks;
+    NSInteger _taskCounter;
+    NSMutableDictionary<NSString*, NSDictionary*>* _editPlans;
+    NSInteger _editPlanCounter;
 }
 
 - (instancetype)initWithWindowController:(DietCodeWindowController*)controller {
@@ -253,6 +374,13 @@ NSArray<NSString*>* ContextLines(const std::vector<std::string>& lines, NSIntege
         _windowController = controller;
         _isRunning = NO;
         _serverFd = -1;
+        _lastRPCPatchRecords = [NSMutableArray array];
+        _contextSnapshots = [NSMutableDictionary dictionary];
+        _contextSnapshotCounter = 0;
+        _tasks = [NSMutableDictionary dictionary];
+        _taskCounter = 0;
+        _editPlans = [NSMutableDictionary dictionary];
+        _editPlanCounter = 0;
     }
     return self;
 }
@@ -473,6 +601,15 @@ NSArray<NSString*>* ContextLines(const std::vector<std::string>& lines, NSIntege
             @{ @"name": @"workspace.grep", @"permission": @"Read", @"params": @{ @"query": @"string", @"maxResults": @"number <= 500 optional" }, @"returns": @{ @"matches": @"array with contextBefore/contextAfter" } },
             @{ @"name": @"workspace.openFile", @"permission": @"Read", @"params": @{ @"path": @"string" }, @"returns": @{ @"opened": @"boolean" } },
             @{ @"name": @"workspace.getRecentFiles", @"permission": @"Read", @"params": @{}, @"returns": @{ @"files": @"array" } },
+            @{ @"name": @"search.files", @"permission": @"Read", @"params": @{ @"query": @"string", @"include": @"array optional", @"exclude": @"array optional", @"maxResults": @"number <= 500 optional" }, @"returns": @{ @"results": @"array" } },
+            @{ @"name": @"search.text", @"permission": @"Read", @"params": @{ @"query": @"string", @"before": @"number optional", @"after": @"number optional", @"maxResults": @"number <= 500 optional" }, @"returns": @{ @"results": @"array" } },
+            @{ @"name": @"search.todo", @"permission": @"Read", @"params": @{ @"include": @"array optional", @"maxResults": @"number <= 500 optional" }, @"returns": @{ @"results": @"array" } },
+            @{ @"name": @"search.diagnostics", @"permission": @"Read", @"params": @{ @"severity": @"string optional", @"source": @"string optional" }, @"returns": @{ @"results": @"array" } },
+            @{ @"name": @"file.read", @"permission": @"Read", @"params": @{ @"path": @"string" }, @"returns": @{ @"text": @"string" } },
+            @{ @"name": @"file.readRange", @"permission": @"Read", @"params": @{ @"path": @"string", @"startLine": @"number", @"endLine": @"number" }, @"returns": @{ @"text": @"string" } },
+            @{ @"name": @"file.readAround", @"permission": @"Read", @"params": @{ @"path": @"string", @"line": @"number", @"before": @"number optional", @"after": @"number optional" }, @"returns": @{ @"text": @"string" } },
+            @{ @"name": @"file.getChunks", @"permission": @"Read", @"params": @{ @"path": @"string", @"chunkSize": @"number optional" }, @"returns": @{ @"chunks": @"array" } },
+            @{ @"name": @"file.stat", @"permission": @"Read", @"params": @{ @"path": @"string" }, @"returns": @{ @"path": @"string", @"sizeBytes": @"number", @"lineCount": @"number" } },
             @{ @"name": @"editor.getActiveFile", @"permission": @"Read", @"params": @{}, @"returns": @{ @"path": @"string" } },
             @{ @"name": @"editor.getOpenFiles", @"permission": @"Read", @"params": @{}, @"returns": @{ @"files": @"array" } },
             @{ @"name": @"editor.getText", @"permission": @"Read", @"params": @{ @"path": @"string optional" }, @"returns": @{ @"text": @"string" } },
@@ -500,6 +637,15 @@ NSArray<NSString*>* ContextLines(const std::vector<std::string>& lines, NSIntege
             @{ @"name": @"diff.stats", @"permission": @"Read", @"params": @{}, @"returns": @{ @"files": @"array", @"totalAdded": @"number", @"totalDeleted": @"number" } },
             @{ @"name": @"diff.file", @"permission": @"Read", @"params": @{ @"path": @"string" }, @"returns": @{ @"diff": @"string" } },
             @{ @"name": @"diff.previewPatch", @"permission": @"Read", @"params": @{ @"path": @"string", @"patch": @"unified diff" }, @"returns": @{ @"ok": @"boolean", @"risk": @"string" } },
+            @{ @"name": @"patch.validate", @"permission": @"Read", @"params": @{ @"path": @"string", @"patch": @"unified diff" }, @"returns": @{ @"applies": @"boolean", @"changedLines": @"number", @"hunks": @"number" } },
+            @{ @"name": @"patch.preview", @"permission": @"Read", @"params": @{ @"path": @"string", @"patch": @"unified diff" }, @"returns": @{ @"addedLines": @"number", @"removedLines": @"number", @"hunks": @"array" } },
+            @{ @"name": @"patch.apply", @"permission": @"Edit/Destructive", @"params": @{ @"path": @"string", @"patch": @"unified diff", @"confirm": @"boolean optional" }, @"returns": @{ @"patched": @"boolean" } },
+            @{ @"name": @"patch.applyBatch", @"permission": @"Edit/Destructive", @"params": @{ @"patches": @"array", @"dryRun": @"boolean optional", @"confirm": @"boolean optional" }, @"returns": @{ @"results": @"array" } },
+            @{ @"name": @"patch.revertLast", @"permission": @"Edit", @"params": @{}, @"returns": @{ @"reverted": @"boolean" } },
+            @{ @"name": @"diff.current", @"permission": @"Read", @"params": @{}, @"returns": @{ @"changes": @"object" } },
+            @{ @"name": @"diff.staged", @"permission": @"Read", @"params": @{}, @"returns": @{ @"diff": @"string" } },
+            @{ @"name": @"diff.unstaged", @"permission": @"Read", @"params": @{}, @"returns": @{ @"diff": @"string" } },
+            @{ @"name": @"diff.summary", @"permission": @"Read", @"params": @{}, @"returns": @{ @"filesChanged": @"number", @"addedLines": @"number", @"removedLines": @"number" } },
             @{ @"name": @"buffers.snapshot", @"permission": @"Read", @"params": @{}, @"returns": @{ @"buffers": @"array" } },
             @{ @"name": @"buffers.dirty", @"permission": @"Read", @"params": @{}, @"returns": @{ @"files": @"array" } },
             @{ @"name": @"buffers.active", @"permission": @"Read", @"params": @{}, @"returns": @{ @"path": @"string", @"selection": @"object" } },
@@ -510,6 +656,20 @@ NSArray<NSString*>* ContextLines(const std::vector<std::string>& lines, NSIntege
             @{ @"name": @"verify.run", @"permission": @"Execute", @"params": @{ @"command": @"make test | make app | git diff --check" }, @"returns": @{ @"started": @"boolean" } },
             @{ @"name": @"verify.last", @"permission": @"Read", @"params": @{}, @"returns": @{ @"command": @"string", @"status": @"object" } },
             @{ @"name": @"verify.status", @"permission": @"Read", @"params": @{}, @"returns": @{ @"status": @"object" } },
+            @{ @"name": @"verify.failures", @"permission": @"Read", @"params": @{}, @"returns": @{ @"failures": @"array", @"problems": @"array" } },
+            @{ @"name": @"context.snapshot", @"permission": @"Read", @"params": @{}, @"returns": @{ @"snapshotId": @"string", @"snapshot": @"object" } },
+            @{ @"name": @"context.delta", @"permission": @"Read", @"params": @{ @"snapshotId": @"string" }, @"returns": @{ @"changed": @"object" } },
+            @{ @"name": @"task.start", @"permission": @"Read", @"params": @{ @"goal": @"string", @"scope": @"object", @"budget": @"object", @"verify": @"array optional" }, @"returns": @{ @"taskId": @"string", @"task": @"object" } },
+            @{ @"name": @"task.status", @"permission": @"Read", @"params": @{ @"taskId": @"string" }, @"returns": @{ @"task": @"object" } },
+            @{ @"name": @"task.step", @"permission": @"Edit/Execute", @"params": @{ @"taskId": @"string", @"step": @"object" }, @"returns": @{ @"stepResult": @"object" } },
+            @{ @"name": @"task.runLoop", @"permission": @"Edit/Execute", @"params": @{ @"taskId": @"string", @"steps": @"array" }, @"returns": @{ @"results": @"array", @"finalDiff": @"object" } },
+            @{ @"name": @"task.cancel", @"permission": @"Read", @"params": @{ @"taskId": @"string" }, @"returns": @{ @"cancelled": @"boolean" } },
+            @{ @"name": @"task.result", @"permission": @"Read", @"params": @{ @"taskId": @"string" }, @"returns": @{ @"result": @"object" } },
+            @{ @"name": @"edit.plan", @"permission": @"Read", @"params": @{ @"steps": @"array" }, @"returns": @{ @"planId": @"string", @"plan": @"object" } },
+            @{ @"name": @"edit.executePlan", @"permission": @"Edit/Execute", @"params": @{ @"planId": @"string optional", @"steps": @"array optional", @"taskId": @"string optional" }, @"returns": @{ @"results": @"array" } },
+            @{ @"name": @"repair.fromCompilerErrors", @"permission": @"Read", @"params": @{ @"files": @"array optional", @"diagnostics": @"array optional" }, @"returns": @{ @"failure": @"string", @"files": @"array" } },
+            @{ @"name": @"repair.fromTestFailures", @"permission": @"Read", @"params": @{ @"files": @"array optional", @"diagnostics": @"array optional" }, @"returns": @{ @"failure": @"string", @"files": @"array" } },
+            @{ @"name": @"repair.fromPatchFailure", @"permission": @"Read", @"params": @{ @"files": @"array optional", @"diagnostics": @"array optional" }, @"returns": @{ @"failure": @"string", @"files": @"array" } },
             @{ @"name": @"diagnostics.list", @"permission": @"Read", @"params": @{}, @"returns": @{ @"diagnostics": @"array with stable id" } },
             @{ @"name": @"diagnostics.summary", @"permission": @"Read", @"params": @{}, @"returns": @{ @"errors": @"number", @"warnings": @"number" } },
             @{ @"name": @"diagnostics.cluster", @"permission": @"Read", @"params": @{}, @"returns": @{ @"clusters": @"array" } },
@@ -670,11 +830,231 @@ NSArray<NSString*>* ContextLines(const std::vector<std::string>& lines, NSIntege
         end++;
     }
     NSInteger exitCode = [[output substringWithRange:NSMakeRange(start, end - start)] integerValue];
+    if (!_lastVerifyExitCode || [_lastVerifyExitCode integerValue] != exitCode) {
+        _lastVerifyExitCode = @(exitCode);
+        if (!_lastVerifyFinishedAt) {
+            _lastVerifyFinishedAt = [NSDate date];
+        }
+    }
+    NSTimeInterval duration = (_lastVerifyStartedAt && _lastVerifyFinishedAt) ? [_lastVerifyFinishedAt timeIntervalSinceDate:_lastVerifyStartedAt] : 0;
     return @{
         @"command": command,
         @"state": @"complete",
         @"exitCode": @(exitCode),
-        @"passed": @(exitCode == 0)
+        @"passed": @(exitCode == 0),
+        @"startedAt": ISODateString(_lastVerifyStartedAt),
+        @"finishedAt": ISODateString(_lastVerifyFinishedAt),
+        @"durationMs": @((NSInteger)(duration * 1000.0))
+    };
+}
+
+- (NSDictionary*)contextSnapshotPayload {
+    NSDictionary* git = [_windowController gitStatusInfo] ?: @{};
+    NSArray* problems = [_windowController problemsList] ?: @[];
+    return @{
+        @"activeFile": [_windowController activeFilePath] ?: @"",
+        @"openFiles": [_windowController openFilePaths] ?: @[],
+        @"dirtyFiles": DirtyFilePathsFromTabs(_windowController.openTabs ?: @[]),
+        @"currentBranch": git[@"branch"] ?: @"",
+        @"recentSearches": _windowController.sessionLastSearches ?: @[],
+        @"recentCommands": _windowController.sessionRecentCommands ?: @[],
+        @"problemCount": @(problems.count),
+        @"changes": [self currentChangesInfo]
+    };
+}
+
+- (NSArray<NSString*>*)verificationFailureLines {
+    NSMutableArray* failures = [NSMutableArray array];
+    NSString* output = [_windowController terminalOutput] ?: @"";
+    NSArray<NSString*>* markers = @[@"error:", @"failed", @"failure", @"FAILED", @"Error:", @"Assertion"];
+    [output enumerateLinesUsingBlock:^(NSString* line, BOOL*) {
+        for (NSString* marker in markers) {
+            if ([line rangeOfString:marker options:NSCaseInsensitiveSearch].location != NSNotFound) {
+                [failures addObject:line];
+                break;
+            }
+        }
+    }];
+    if (failures.count > 100) {
+        return [failures subarrayWithRange:NSMakeRange(failures.count - 100, 100)];
+    }
+    return failures;
+}
+
+- (void)recordLastRPCPatchPaths:(NSArray<NSDictionary*>*)records {
+    [_lastRPCPatchRecords removeAllObjects];
+    [_lastRPCPatchRecords addObjectsFromArray:records ?: @[]];
+}
+
+- (BOOL)restorePatchRecords:(NSArray<NSDictionary*>*)records error:(NSString**)errorOut {
+    for (NSDictionary* record in records.reverseObjectEnumerator) {
+        NSString* path = record[@"path"];
+        NSString* beforeText = record[@"beforeText"];
+        NSString* currentText = [_windowController textForFileAtPath:path];
+        if (!path || !beforeText || !currentText) {
+            if (errorOut) *errorOut = @"Cannot restore patch because a target buffer is unavailable.";
+            return NO;
+        }
+        BOOL ok = [_windowController replaceTextInRange:NSMakeRange(0, currentText.length) withText:beforeText forFileAtPath:path];
+        if (!ok) {
+            if (errorOut) *errorOut = [NSString stringWithFormat:@"Failed to restore %@", path];
+            return NO;
+        }
+    }
+    return YES;
+}
+
+- (BOOL)path:(NSString*)path isAllowedByScope:(NSDictionary*)scope {
+    NSString* ws = [_windowController workspacePath];
+    NSString* absPath = AbsolutePathForRPCPath(path, ws);
+    if (!PathIsInsideWorkspace(absPath, ws)) return NO;
+    std::error_code ec;
+    std::filesystem::path rel = std::filesystem::relative(std::filesystem::path(StdStringFromNSString(absPath)), std::filesystem::path(StdStringFromNSString(ws)), ec);
+    if (ec) return NO;
+    std::string relPath = rel.string();
+    std::string filename = std::filesystem::path(relPath).filename().string();
+    NSArray* includes = scope[@"include"] ?: @[];
+    NSArray* excludes = scope[@"exclude"] ?: @[];
+    if (AnyPatternMatches(excludes, relPath, filename)) return NO;
+    if (includes.count > 0 && !AnyPatternMatches(includes, relPath, filename)) return NO;
+    return YES;
+}
+
+- (BOOL)task:(NSMutableDictionary*)task canConsumeStep:(NSDictionary*)step error:(NSString**)errorOut {
+    if ([task[@"status"] isEqualToString:@"cancelled"] || [task[@"status"] isEqualToString:@"complete"]) {
+        if (errorOut) *errorOut = @"Task is not active.";
+        return NO;
+    }
+    NSDictionary* budget = task[@"budget"] ?: @{};
+    NSDate* startedAt = task[@"startedAtDate"];
+    NSInteger maxDuration = budget[@"maxDurationMs"] ? [budget[@"maxDurationMs"] integerValue] : 300000;
+    if (startedAt && [[NSDate date] timeIntervalSinceDate:startedAt] * 1000.0 > maxDuration) {
+        task[@"status"] = @"budget_exceeded";
+        if (errorOut) *errorOut = @"Task exceeded maxDurationMs.";
+        return NO;
+    }
+    NSString* type = step[@"type"] ?: @"";
+    if ([type isEqualToString:@"patch"] || [type isEqualToString:@"patchBatch"]) {
+        NSInteger maxPatchBatches = budget[@"maxPatchBatches"] ? [budget[@"maxPatchBatches"] integerValue] : 3;
+        if ([task[@"patchBatchesUsed"] integerValue] >= maxPatchBatches) {
+            if (errorOut) *errorOut = @"Task exceeded maxPatchBatches.";
+            return NO;
+        }
+    }
+    if ([type isEqualToString:@"verify"]) {
+        NSInteger maxVerifyRuns = budget[@"maxVerifyRuns"] ? [budget[@"maxVerifyRuns"] integerValue] : 3;
+        if ([task[@"verifyRunsUsed"] integerValue] >= maxVerifyRuns) {
+            if (errorOut) *errorOut = @"Task exceeded maxVerifyRuns.";
+            return NO;
+        }
+    }
+    NSDictionary* scope = task[@"scope"] ?: @{};
+    NSMutableSet* touched = task[@"filesTouchedSet"];
+    NSMutableArray* candidatePaths = [NSMutableArray array];
+    NSMutableArray* candidateAbsPaths = [NSMutableArray array];
+    if (step[@"path"]) [candidatePaths addObject:step[@"path"]];
+    for (NSDictionary* item in step[@"patches"] ?: @[]) {
+        if (item[@"path"]) [candidatePaths addObject:item[@"path"]];
+    }
+    for (NSString* candidate in candidatePaths) {
+        if (![self path:candidate isAllowedByScope:scope]) {
+            if (errorOut) *errorOut = [NSString stringWithFormat:@"Path is outside task scope: %@", candidate];
+            return NO;
+        }
+        [candidateAbsPaths addObject:AbsolutePathForRPCPath(candidate, [_windowController workspacePath]) ?: candidate];
+    }
+    NSInteger maxFilesTouched = budget[@"maxFilesTouched"] ? [budget[@"maxFilesTouched"] integerValue] : 4;
+    NSMutableSet* projectedTouched = [touched mutableCopy];
+    for (NSString* candidateAbs in candidateAbsPaths) {
+        [projectedTouched addObject:candidateAbs];
+    }
+    if (projectedTouched.count > (NSUInteger)maxFilesTouched) {
+        if (errorOut) *errorOut = @"Task exceeded maxFilesTouched.";
+        return NO;
+    }
+    [touched unionSet:projectedTouched];
+    return YES;
+}
+
+- (NSDictionary*)serializableTask:(NSMutableDictionary*)task {
+    NSMutableDictionary* copy = [task mutableCopy];
+    NSMutableArray* touched = [NSMutableArray array];
+    for (NSString* pathValue in task[@"filesTouchedSet"] ?: [NSSet set]) {
+        [touched addObject:pathValue];
+    }
+    copy[@"filesTouched"] = touched;
+    [copy removeObjectForKey:@"filesTouchedSet"];
+    [copy removeObjectForKey:@"startedAtDate"];
+    return copy;
+}
+
+- (NSDictionary*)primitiveForWorkbenchStep:(NSDictionary*)step {
+    NSString* type = step[@"type"] ?: @"";
+    if ([type isEqualToString:@"readAround"]) return @{ @"method": @"file.readAround", @"params": step };
+    if ([type isEqualToString:@"readRange"]) return @{ @"method": @"file.readRange", @"params": step };
+    if ([type isEqualToString:@"searchFiles"]) return @{ @"method": @"search.files", @"params": step };
+    if ([type isEqualToString:@"searchText"]) return @{ @"method": @"search.text", @"params": step };
+    if ([type isEqualToString:@"patch"]) return @{ @"method": @"patch.apply", @"params": step };
+    if ([type isEqualToString:@"patchBatch"]) return @{ @"method": @"patch.applyBatch", @"params": step };
+    if ([type isEqualToString:@"verify"]) return @{ @"method": @"verify.run", @"params": step };
+    if ([type isEqualToString:@"diffSummary"]) return @{ @"method": @"diff.summary", @"params": @{} };
+    if ([type isEqualToString:@"failures"]) return @{ @"method": @"verify.failures", @"params": @{} };
+    if ([type isEqualToString:@"contextSnapshot"]) return @{ @"method": @"context.snapshot", @"params": @{} };
+    return @{};
+}
+
+- (NSDictionary*)executeWorkbenchStep:(NSDictionary*)step task:(NSMutableDictionary*)task {
+    if ([step[@"confirm"] boolValue]) {
+        return @{ @"ok": @NO, @"error": @{ @"code": @"confirmation_required", @"message": @"Combo steps cannot perform confirmed destructive operations." } };
+    }
+    NSString* err = nil;
+    if (task && ![self task:task canConsumeStep:step error:&err]) {
+        return @{ @"ok": @NO, @"error": @{ @"code": @"budget_exceeded", @"message": err ?: @"Task budget rejected step." } };
+    }
+    NSDictionary* primitive = [self primitiveForWorkbenchStep:step];
+    NSString* method = primitive[@"method"];
+    if (method.length == 0) {
+        return @{ @"ok": @NO, @"error": @{ @"code": @"invalid_params", @"message": @"Unknown step type." } };
+    }
+    __block NSDictionary* result = nil;
+    __block NSString* errCode = nil;
+    __block NSString* errMsg = nil;
+    __block NSString* paths = @"";
+    [self executeMethod:method params:primitive[@"params"] ?: @{} outResult:&result outErrCode:&errCode outErrMsg:&errMsg outPaths:&paths];
+    if (errCode) {
+        return @{ @"ok": @NO, @"method": method, @"error": @{ @"code": errCode, @"message": errMsg ?: @"" } };
+    }
+    if (task) {
+        if ([method isEqualToString:@"patch.apply"] || [method isEqualToString:@"patch.applyBatch"]) {
+            task[@"patchBatchesUsed"] = @([task[@"patchBatchesUsed"] integerValue] + 1);
+        } else if ([method isEqualToString:@"verify.run"]) {
+            task[@"verifyRunsUsed"] = @([task[@"verifyRunsUsed"] integerValue] + 1);
+        }
+    }
+    return @{ @"ok": @YES, @"method": method, @"result": result ?: @{} };
+}
+
+- (NSDictionary*)repairContextForFailure:(NSString*)failure params:(NSDictionary*)params {
+    NSMutableArray* files = [NSMutableArray array];
+    for (NSDictionary* file in params[@"files"] ?: @[]) {
+        NSString* path = file[@"path"];
+        NSMutableArray* ranges = [NSMutableArray array];
+        for (NSDictionary* range in file[@"ranges"] ?: @[]) {
+            NSInteger start = [range[@"startLine"] integerValue];
+            NSInteger end = [range[@"endLine"] integerValue];
+            NSString* text = nil;
+            NSString* absPath = AbsolutePathForRPCPath(path, [_windowController workspacePath]);
+            NSString* full = [_windowController textForFileAtPath:absPath];
+            if (full) text = TextForLineRange(LinesFromText(full), start, end);
+            [ranges addObject:@{ @"startLine": @(start), @"endLine": @(end), @"text": text ?: @"" }];
+        }
+        [files addObject:@{ @"path": path ?: @"", @"ranges": ranges }];
+    }
+    return @{
+        @"failure": failure ?: @"unknown",
+        @"files": files,
+        @"diagnostics": params[@"diagnostics"] ?: ([_windowController problemsList] ?: @[]),
+        @"failures": [self verificationFailureLines]
     };
 }
 
@@ -689,6 +1069,11 @@ NSArray<NSString*>* ContextLines(const std::vector<std::string>& lines, NSIntege
     if ([method isEqualToString:@"editor.applyPatch"]) {
         BOOL confirmParam = [params[@"confirm"] boolValue];
         if (confirmParam) {
+            return @"Destructive";
+        }
+    }
+    if ([method isEqualToString:@"patch.apply"] || [method isEqualToString:@"patch.applyBatch"]) {
+        if ([params[@"confirm"] boolValue]) {
             return @"Destructive";
         }
     }
@@ -711,6 +1096,8 @@ NSArray<NSString*>* ContextLines(const std::vector<std::string>& lines, NSIntege
     
     if ([method hasPrefix:@"terminal."] ||
         [method isEqualToString:@"verify.run"] ||
+        [method isEqualToString:@"task.runLoop"] ||
+        [method isEqualToString:@"edit.executePlan"] ||
         [method isEqualToString:@"language.lint"] ||
         [method isEqualToString:@"language.format"]) {
         return @"Execute";
@@ -720,6 +1107,10 @@ NSArray<NSString*>* ContextLines(const std::vector<std::string>& lines, NSIntege
         [method isEqualToString:@"editor.replaceSelection"] || 
         [method isEqualToString:@"editor.replaceRange"] || 
         [method isEqualToString:@"editor.applyPatch"] || 
+        [method isEqualToString:@"patch.apply"] ||
+        [method isEqualToString:@"patch.applyBatch"] ||
+        [method isEqualToString:@"patch.revertLast"] ||
+        [method isEqualToString:@"task.step"] ||
         [method isEqualToString:@"git.stage"] || 
         [method isEqualToString:@"git.unstage"] ||
         [method isEqualToString:@"editor.closeFile"] ||
@@ -743,7 +1134,9 @@ NSArray<NSString*>* ContextLines(const std::vector<std::string>& lines, NSIntege
     if (path &&
         ![method isEqualToString:@"workspace.openFolder"] &&
         ![method isEqualToString:@"diff.validatePatch"] &&
-        ![method isEqualToString:@"diff.applyPatchPreview"]) {
+        ![method isEqualToString:@"diff.applyPatchPreview"] &&
+        ![method isEqualToString:@"patch.validate"] &&
+        ![method isEqualToString:@"patch.preview"]) {
         NSString* ws = [_windowController workspacePath];
         NSString* checkedPath = AbsolutePathForRPCPath(path, ws);
         *outPaths = checkedPath;
@@ -973,6 +1366,256 @@ NSArray<NSString*>* ContextLines(const std::vector<std::string>& lines, NSIntege
         *outResult = @{ @"files": recents };
         return;
     }
+
+    // Search primitives
+    if ([method isEqualToString:@"search.files"]) {
+        NSString* ws = [_windowController workspacePath];
+        NSString* query = params[@"query"] ?: @"";
+        if (!ws || query.length == 0) {
+            *outErrCode = @"invalid_params";
+            *outErrMsg = @"query and workspace required.";
+            return;
+        }
+        NSInteger maxResults = params[@"maxResults"] ? [params[@"maxResults"] integerValue] : 100;
+        if (maxResults > kMaxGrepResults) {
+            *outErrCode = @"too_many_results";
+            *outErrMsg = [NSString stringWithFormat:@"maxResults exceeds limit of %ld.", (long)kMaxGrepResults];
+            return;
+        }
+        std::string folder = StdStringFromNSString(ws);
+        std::string needle = StdStringFromNSString([query lowercaseString]);
+        NSArray* includes = params[@"include"] ?: @[];
+        NSArray* excludes = params[@"exclude"] ?: @[];
+        NSMutableArray* results = [NSMutableArray array];
+        std::error_code ec;
+        for (const auto& entry : std::filesystem::recursive_directory_iterator(folder, ec)) {
+            if (results.count >= (NSUInteger)maxResults) break;
+            if (!entry.is_regular_file()) continue;
+            std::filesystem::path p = entry.path();
+            std::string relPath = std::filesystem::relative(p, folder).string();
+            if (ShouldSkipSearchPath(p, relPath, includes, excludes)) continue;
+            std::string lowerRel = relPath;
+            std::transform(lowerRel.begin(), lowerRel.end(), lowerRel.begin(), ::tolower);
+            size_t pos = lowerRel.find(needle);
+            if (pos == std::string::npos) continue;
+            double score = pos == 0 ? 1.0 : 0.75;
+            if (p.filename().string().find(StdStringFromNSString(query)) != std::string::npos) score += 0.2;
+            [results addObject:@{ @"path": NSStringFromStdString(relPath), @"score": @(MIN(score, 1.0)) }];
+        }
+        *outResult = @{ @"results": results };
+        return;
+    }
+
+    if ([method isEqualToString:@"search.text"]) {
+        NSString* ws = [_windowController workspacePath];
+        NSString* query = params[@"query"] ?: @"";
+        if (!ws || query.length == 0) {
+            *outErrCode = @"invalid_params";
+            *outErrMsg = @"query and workspace required.";
+            return;
+        }
+        NSInteger maxResults = params[@"maxResults"] ? [params[@"maxResults"] integerValue] : 200;
+        if (maxResults > kMaxGrepResults) {
+            *outErrCode = @"too_many_results";
+            *outErrMsg = [NSString stringWithFormat:@"maxResults exceeds limit of %ld.", (long)kMaxGrepResults];
+            return;
+        }
+        NSInteger before = params[@"before"] ? [params[@"before"] integerValue] : 2;
+        NSInteger after = params[@"after"] ? [params[@"after"] integerValue] : 2;
+        BOOL caseSensitive = [params[@"caseSensitive"] boolValue];
+        NSArray* includes = params[@"include"] ?: @[];
+        NSArray* excludes = params[@"exclude"] ?: @[];
+        std::string folder = StdStringFromNSString(ws);
+        std::string needle = StdStringFromNSString(query);
+        if (!caseSensitive) std::transform(needle.begin(), needle.end(), needle.begin(), ::tolower);
+        NSMutableArray* results = [NSMutableArray array];
+        std::error_code ec;
+        for (const auto& entry : std::filesystem::recursive_directory_iterator(folder, ec)) {
+            if (results.count >= (NSUInteger)maxResults) break;
+            if (!entry.is_regular_file()) continue;
+            std::filesystem::path p = entry.path();
+            std::string relPath = std::filesystem::relative(p, folder).string();
+            if (ShouldSkipSearchPath(p, relPath, includes, excludes)) continue;
+            NSString* text = [_windowController textForFileAtPath:NSStringFromStdString(p.string())];
+            if (!text) continue;
+            std::vector<std::string> lines;
+            std::istringstream stream(StdStringFromNSString(text));
+            std::string line;
+            while (std::getline(stream, line)) lines.push_back(line);
+            for (size_t i = 0; i < lines.size(); i++) {
+                std::string haystack = lines[i];
+                if (!caseSensitive) std::transform(haystack.begin(), haystack.end(), haystack.begin(), ::tolower);
+                size_t pos = haystack.find(needle);
+                if (pos == std::string::npos) continue;
+                [results addObject:@{
+                    @"path": NSStringFromStdString(relPath),
+                    @"line": @(i + 1),
+                    @"column": @(pos + 1),
+                    @"preview": NSStringFromStdString(lines[i]),
+                    @"contextBefore": ContextLines(lines, (NSInteger)i - before, (NSInteger)i - 1),
+                    @"contextAfter": ContextLines(lines, (NSInteger)i + 1, (NSInteger)i + after)
+                }];
+                if (results.count >= (NSUInteger)maxResults) break;
+            }
+        }
+        *outResult = @{ @"results": results };
+        return;
+    }
+
+    if ([method isEqualToString:@"search.todo"]) {
+        NSString* workspace = [_windowController workspacePath];
+        if (!workspace) {
+            *outErrCode = @"invalid_request";
+            *outErrMsg = @"No open workspace.";
+            return;
+        }
+        NSMutableDictionary* todoParams = [params mutableCopy] ?: [NSMutableDictionary dictionary];
+        todoParams[@"query"] = @"TODO";
+        NSArray* markers = @[@"TODO", @"FIXME", @"HACK", @"NOTE"];
+        NSMutableArray* all = [NSMutableArray array];
+        for (NSString* marker in markers) {
+            NSMutableDictionary* markerParams = [todoParams mutableCopy];
+            markerParams[@"query"] = marker;
+            markerParams[@"maxResults"] = params[@"maxResults"] ?: @100;
+            NSDictionary* subParams = markerParams;
+            NSString* ws = workspace;
+            NSInteger maxResults = [subParams[@"maxResults"] integerValue];
+            if (maxResults > kMaxGrepResults) maxResults = kMaxGrepResults;
+            std::string folder = StdStringFromNSString(ws);
+            NSArray* includes = subParams[@"include"] ?: @[];
+            NSArray* excludes = subParams[@"exclude"] ?: @[];
+            std::string needle = StdStringFromNSString([marker lowercaseString]);
+            std::error_code ec;
+            for (const auto& entry : std::filesystem::recursive_directory_iterator(folder, ec)) {
+                if (all.count >= (NSUInteger)maxResults) break;
+                if (!entry.is_regular_file()) continue;
+                std::filesystem::path p = entry.path();
+                std::string relPath = std::filesystem::relative(p, folder).string();
+                if (ShouldSkipSearchPath(p, relPath, includes, excludes)) continue;
+                NSString* text = [_windowController textForFileAtPath:NSStringFromStdString(p.string())];
+                if (!text) continue;
+                NSArray<NSString*>* lines = LinesFromText(text);
+                for (NSUInteger i = 0; i < lines.count; i++) {
+                    NSString* lower = [lines[i] lowercaseString];
+                    NSRange r = [lower rangeOfString:NSStringFromStdString(needle)];
+                    if (r.location == NSNotFound) continue;
+                    [all addObject:@{
+                        @"path": NSStringFromStdString(relPath),
+                        @"line": @(i + 1),
+                        @"column": @(r.location + 1),
+                        @"marker": marker,
+                        @"preview": lines[i]
+                    }];
+                    if (all.count >= (NSUInteger)maxResults) break;
+                }
+            }
+        }
+        *outResult = @{ @"results": all };
+        return;
+    }
+
+    if ([method isEqualToString:@"search.diagnostics"]) {
+        NSString* severity = [params[@"severity"] lowercaseString];
+        NSString* source = params[@"source"];
+        NSMutableArray* matches = [NSMutableArray array];
+        for (NSDictionary* problem in [_windowController problemsList] ?: @[]) {
+            if (severity.length > 0 && ![[problem[@"severity"] lowercaseString] isEqualToString:severity]) continue;
+            if (source.length > 0 && ![problem[@"source"] isEqualToString:source]) continue;
+            [matches addObject:problem];
+        }
+        *outResult = @{ @"results": matches };
+        return;
+    }
+
+    // File reading primitives
+    if ([method isEqualToString:@"file.read"] || [method isEqualToString:@"file.readRange"] || [method isEqualToString:@"file.readAround"] || [method isEqualToString:@"file.getChunks"] || [method isEqualToString:@"file.stat"]) {
+        NSString* ws = [_windowController workspacePath];
+        NSString* targetPath = AbsolutePathForRPCPath(params[@"path"], ws);
+        if (!targetPath) {
+            *outErrCode = @"invalid_params";
+            *outErrMsg = @"path parameter required.";
+            return;
+        }
+        NSString* text = [_windowController textForFileAtPath:targetPath];
+        if (!text) {
+            *outErrCode = @"invalid_request";
+            *outErrMsg = @"File is not readable.";
+            return;
+        }
+        NSArray<NSString*>* lines = LinesFromText(text);
+        NSDictionary* attrs = [[NSFileManager defaultManager] attributesOfItemAtPath:targetPath error:nil];
+        NSUInteger sizeBytes = [text lengthOfBytesUsingEncoding:NSUTF8StringEncoding];
+        BOOL open = [[_windowController openFilePaths] containsObject:targetPath];
+        BOOL dirty = [DirtyFilePathsFromTabs(_windowController.openTabs ?: @[]) containsObject:targetPath];
+        if ([method isEqualToString:@"file.stat"]) {
+            *outResult = @{
+                @"path": targetPath,
+                @"sizeBytes": @(attrs.fileSize ?: sizeBytes),
+                @"lineCount": @(lines.count),
+                @"modified": @(attrs.fileModificationDate != nil),
+                @"open": @(open),
+                @"dirty": @(dirty)
+            };
+            return;
+        }
+        if ([method isEqualToString:@"file.read"]) {
+            if (sizeBytes > kMaxFileTextBytes) {
+                *outErrCode = @"file_too_large";
+                *outErrMsg = @"File exceeds read cap; use file.getChunks or file.readRange.";
+                return;
+            }
+            *outResult = @{ @"path": targetPath, @"text": text, @"lineCount": @(lines.count), @"sizeBytes": @(sizeBytes) };
+            return;
+        }
+        if ([method isEqualToString:@"file.readRange"]) {
+            NSInteger startLine = [params[@"startLine"] integerValue];
+            NSInteger endLine = [params[@"endLine"] integerValue];
+            NSString* rangeText = TextForLineRange(lines, startLine, endLine);
+            if (!rangeText) {
+                *outErrCode = @"invalid_range";
+                *outErrMsg = @"Invalid line range.";
+                return;
+            }
+            if ([rangeText lengthOfBytesUsingEncoding:NSUTF8StringEncoding] > kMaxFileTextBytes) {
+                *outErrCode = @"response_too_large";
+                *outErrMsg = @"Requested range exceeds response size cap.";
+                return;
+            }
+            *outResult = @{ @"path": targetPath, @"startLine": @(startLine), @"endLine": @(endLine), @"text": rangeText };
+            return;
+        }
+        if ([method isEqualToString:@"file.readAround"]) {
+            NSInteger line = [params[@"line"] integerValue];
+            NSInteger before = params[@"before"] ? [params[@"before"] integerValue] : 40;
+            NSInteger after = params[@"after"] ? [params[@"after"] integerValue] : 80;
+            NSInteger startLine = MAX(1, line - before);
+            NSInteger endLine = MIN((NSInteger)lines.count, line + after);
+            NSString* rangeText = TextForLineRange(lines, startLine, endLine);
+            if (!rangeText || line < 1 || line > (NSInteger)lines.count) {
+                *outErrCode = @"invalid_range";
+                *outErrMsg = @"Invalid line.";
+                return;
+            }
+            *outResult = @{ @"path": targetPath, @"startLine": @(startLine), @"endLine": @(endLine), @"text": rangeText };
+            return;
+        }
+        if ([method isEqualToString:@"file.getChunks"]) {
+            NSInteger chunkSize = params[@"chunkSize"] ? [params[@"chunkSize"] integerValue] : 120;
+            if (chunkSize < 20) chunkSize = 20;
+            if (chunkSize > 500) chunkSize = 500;
+            NSMutableArray* chunks = [NSMutableArray array];
+            for (NSInteger start = 1, idx = 0; start <= (NSInteger)lines.count; start += chunkSize, idx++) {
+                NSInteger end = MIN(start + chunkSize - 1, (NSInteger)lines.count);
+                NSString* preview = TextForLineRange(lines, start, MIN(end, start + 4)) ?: @"";
+                if (preview.length > kMaxChunkPreviewLength) {
+                    preview = [[preview substringToIndex:kMaxChunkPreviewLength] stringByAppendingString:@"..."];
+                }
+                [chunks addObject:@{ @"index": @(idx), @"startLine": @(start), @"endLine": @(end), @"preview": preview }];
+            }
+            *outResult = @{ @"path": targetPath, @"chunks": chunks };
+            return;
+        }
+    }
     
     // Editor commands
     if ([method isEqualToString:@"editor.getActiveFile"]) {
@@ -1108,13 +1751,17 @@ NSArray<NSString*>* ContextLines(const std::vector<std::string>& lines, NSIntege
             *outErrMsg = @"Patch is large or high impact; call diff.validatePatch and retry with confirm=true after review.";
             return;
         }
+        NSString* ws = [_windowController workspacePath];
+        NSString* absPath = AbsolutePathForRPCPath(targetPath, ws);
+        NSString* beforeText = [_windowController textForFileAtPath:absPath];
         NSString* errStr = nil;
-        BOOL ok = [_windowController applyPatchAtPath:targetPath patchString:patchStr errorOut:&errStr];
+        BOOL ok = [_windowController applyPatchAtPath:absPath patchString:patchStr errorOut:&errStr];
         if (!ok) {
             *outErrCode = @"patch_failed";
             *outErrMsg = errStr ?: @"Unknown patch application error.";
             return;
         }
+        [self recordLastRPCPatchPaths:@[@{ @"path": absPath, @"beforeText": beforeText ?: @"" }]];
         *outResult = @{ @"patched": @YES, @"validation": validation };
         return;
     }
@@ -1360,6 +2007,40 @@ NSArray<NSString*>* ContextLines(const std::vector<std::string>& lines, NSIntege
         return;
     }
 
+    if ([method isEqualToString:@"diff.current"]) {
+        NSString* ws = [_windowController workspacePath] ?: @"";
+        *outResult = @{
+            @"changes": [self currentChangesInfo],
+            @"unstagedDiff": RunGitOutput(ws, @[@"diff"]),
+            @"stagedDiff": RunGitOutput(ws, @[@"diff", @"--cached"]),
+            @"unsavedBuffers": [DietCodeBufferStateService snapshotForTabs:_windowController.openTabs ?: @[]]
+        };
+        return;
+    }
+
+    if ([method isEqualToString:@"diff.staged"]) {
+        *outResult = @{ @"diff": RunGitOutput([_windowController workspacePath] ?: @"", @[@"diff", @"--cached"]) };
+        return;
+    }
+
+    if ([method isEqualToString:@"diff.unstaged"]) {
+        *outResult = @{ @"diff": RunGitOutput([_windowController workspacePath] ?: @"", @[@"diff"]) };
+        return;
+    }
+
+    if ([method isEqualToString:@"diff.summary"]) {
+        NSDictionary* changes = [self currentChangesInfo];
+        *outResult = @{
+            @"filesChanged": @([changes[@"modifiedFiles"] count]),
+            @"addedLines": changes[@"totalAdded"] ?: @0,
+            @"removedLines": changes[@"totalDeleted"] ?: @0,
+            @"stagedFiles": @([changes[@"stagedFiles"] count]),
+            @"unstagedFiles": @([changes[@"unstagedFiles"] count]),
+            @"untrackedFiles": @([changes[@"untrackedFiles"] count])
+        };
+        return;
+    }
+
     if ([method isEqualToString:@"diff.validatePatch"] || [method isEqualToString:@"diff.applyPatchPreview"]) {
         NSString* ws = [_windowController workspacePath];
         NSString* targetPath = AbsolutePathForRPCPath(params[@"path"] ?: [_windowController activeFilePath], ws);
@@ -1391,6 +2072,167 @@ NSArray<NSString*>* ContextLines(const std::vector<std::string>& lines, NSIntege
         }
         NSArray* symbols = [DietCodeSymbolIndexService symbolsForFileContent:currentText extension:[[targetPath pathExtension] lowercaseString]];
         *outResult = [DietCodeDiffAnalysisService previewPatchAtPath:targetPath patch:patchStr currentText:currentText symbols:symbols];
+        return;
+    }
+
+    // Patch primitives
+    if ([method isEqualToString:@"patch.validate"] || [method isEqualToString:@"patch.preview"]) {
+        NSString* ws = [_windowController workspacePath];
+        NSString* targetPath = AbsolutePathForRPCPath(params[@"path"] ?: [_windowController activeFilePath], ws);
+        NSString* patchStr = params[@"patch"];
+        if (!targetPath || patchStr.length == 0) {
+            *outErrCode = @"invalid_params";
+            *outErrMsg = @"path and patch parameters required.";
+            return;
+        }
+        if ([patchStr lengthOfBytesUsingEncoding:NSUTF8StringEncoding] > kMaxPatchBytes) {
+            *outErrCode = @"patch_failed";
+            *outErrMsg = @"Patch exceeds maximum RPC patch size.";
+            return;
+        }
+        NSDictionary* validation = [self validatePatchAtPath:targetPath patch:patchStr currentText:params[@"currentText"]];
+        NSDictionary* preview = PatchPreviewSummary(patchStr);
+        if ([method isEqualToString:@"patch.validate"]) {
+            *outResult = @{
+                @"path": targetPath,
+                @"applies": validation[@"patchAppliesCleanly"] ?: @NO,
+                @"changedLines": validation[@"changedLineCount"] ?: @0,
+                @"hunks": @([validation[@"affectedHunks"] count]),
+                @"requiresConfirmation": validation[@"requiresConfirmation"] ?: @NO,
+                @"validation": validation
+            };
+        } else {
+            NSMutableDictionary* result = [preview mutableCopy];
+            result[@"path"] = targetPath;
+            result[@"validation"] = validation;
+            *outResult = result;
+        }
+        return;
+    }
+
+    if ([method isEqualToString:@"patch.apply"]) {
+        NSString* targetPath = params[@"path"];
+        NSString* patchStr = params[@"patch"];
+        if (!targetPath || patchStr.length == 0) {
+            *outErrCode = @"invalid_params";
+            *outErrMsg = @"path and patch parameters required.";
+            return;
+        }
+        NSDictionary* validation = [self validatePatchAtPath:targetPath patch:patchStr currentText:nil];
+        if (![validation[@"ok"] boolValue]) {
+            *outErrCode = @"patch_failed";
+            *outErrMsg = validation[@"rejectedReason"] ?: @"Patch validation failed.";
+            return;
+        }
+        if ([validation[@"requiresConfirmation"] boolValue] && ![params[@"confirm"] boolValue]) {
+            *outErrCode = @"confirmation_required";
+            *outErrMsg = @"Patch requires confirmation.";
+            return;
+        }
+        NSString* ws = [_windowController workspacePath];
+        NSString* absPath = AbsolutePathForRPCPath(targetPath, ws);
+        NSString* beforeText = [_windowController textForFileAtPath:absPath];
+        NSString* errStr = nil;
+        BOOL ok = [_windowController applyPatchAtPath:absPath patchString:patchStr errorOut:&errStr];
+        if (!ok) {
+            *outErrCode = @"patch_failed";
+            *outErrMsg = errStr ?: @"Unknown patch application error.";
+            return;
+        }
+        [self recordLastRPCPatchPaths:@[@{ @"path": absPath, @"beforeText": beforeText ?: @"" }]];
+        *outResult = @{ @"patched": @YES, @"path": absPath, @"validation": validation };
+        return;
+    }
+
+    if ([method isEqualToString:@"patch.applyBatch"]) {
+        NSArray* patches = params[@"patches"];
+        BOOL dryRun = params[@"dryRun"] ? [params[@"dryRun"] boolValue] : YES;
+        if (![patches isKindOfClass:[NSArray class]] || patches.count == 0) {
+            *outErrCode = @"invalid_params";
+            *outErrMsg = @"patches array required.";
+            return;
+        }
+        if (patches.count > (NSUInteger)kMaxBatchPatchCount) {
+            *outErrCode = @"too_many_results";
+            *outErrMsg = [NSString stringWithFormat:@"Batch patch count exceeds limit of %ld.", (long)kMaxBatchPatchCount];
+            return;
+        }
+        NSString* ws = [_windowController workspacePath];
+        NSUInteger combinedBytes = 0;
+        NSMutableArray* results = [NSMutableArray array];
+        NSMutableArray* records = [NSMutableArray array];
+        BOOL needsConfirm = NO;
+        for (NSDictionary* item in patches) {
+            if (![item isKindOfClass:[NSDictionary class]]) {
+                *outErrCode = @"invalid_params";
+                *outErrMsg = @"Each batch patch must be an object.";
+                return;
+            }
+            NSString* relPath = item[@"path"];
+            NSString* patchStr = item[@"patch"];
+            if (relPath.length == 0 || patchStr.length == 0) {
+                *outErrCode = @"invalid_params";
+                *outErrMsg = @"Each batch patch requires path and patch.";
+                return;
+            }
+            NSString* absPath = AbsolutePathForRPCPath(relPath, ws);
+            combinedBytes += [patchStr lengthOfBytesUsingEncoding:NSUTF8StringEncoding];
+            NSDictionary* validation = [self validatePatchAtPath:absPath patch:patchStr currentText:nil];
+            if ([validation[@"requiresConfirmation"] boolValue]) needsConfirm = YES;
+            [results addObject:@{ @"path": absPath ?: @"", @"validation": validation }];
+            if (![validation[@"ok"] boolValue]) {
+                *outResult = @{ @"dryRun": @(dryRun), @"applied": @NO, @"results": results };
+                return;
+            }
+            NSString* beforeText = [_windowController textForFileAtPath:absPath];
+            [records addObject:@{ @"path": absPath ?: @"", @"beforeText": beforeText ?: @"", @"patch": patchStr ?: @"" }];
+        }
+        if ((combinedBytes > kMaxPatchBytesBeforeConfirmation || needsConfirm) && ![params[@"confirm"] boolValue]) {
+            *outErrCode = @"confirmation_required";
+            *outErrMsg = @"Batch patch requires confirmation.";
+            return;
+        }
+        if (dryRun) {
+            *outResult = @{ @"dryRun": @YES, @"applied": @NO, @"results": results };
+            return;
+        }
+        NSMutableArray* applied = [NSMutableArray array];
+        for (NSDictionary* record in records) {
+            NSString* errStr = nil;
+            BOOL ok = [_windowController applyPatchAtPath:record[@"path"] patchString:record[@"patch"] errorOut:&errStr];
+            if (!ok) {
+                NSString* restoreErr = nil;
+                [self restorePatchRecords:applied error:&restoreErr];
+                *outErrCode = @"patch_failed";
+                *outErrMsg = errStr ?: restoreErr ?: @"Batch patch failed.";
+                return;
+            }
+            [applied addObject:record];
+        }
+        [self recordLastRPCPatchPaths:records];
+        *outResult = @{ @"dryRun": @NO, @"applied": @YES, @"results": results };
+        return;
+    }
+
+    if ([method isEqualToString:@"patch.revertLast"]) {
+        if (_lastRPCPatchRecords.count == 0) {
+            *outErrCode = @"invalid_request";
+            *outErrMsg = @"No RPC patch available to revert.";
+            return;
+        }
+        NSString* errStr = nil;
+        BOOL ok = [self restorePatchRecords:_lastRPCPatchRecords error:&errStr];
+        if (!ok) {
+            *outErrCode = @"patch_failed";
+            *outErrMsg = errStr ?: @"Failed to revert last RPC patch.";
+            return;
+        }
+        NSMutableArray* paths = [NSMutableArray array];
+        for (NSDictionary* record in _lastRPCPatchRecords) {
+            [paths addObject:record[@"path"] ?: @""];
+        }
+        [_lastRPCPatchRecords removeAllObjects];
+        *outResult = @{ @"reverted": @YES, @"files": paths };
         return;
     }
 
@@ -1549,15 +2391,246 @@ NSArray<NSString*>* ContextLines(const std::vector<std::string>& lines, NSIntege
             return;
         }
         _lastVerifyCommand = [command copy];
+        _lastVerifyStartedAt = [NSDate date];
+        _lastVerifyFinishedAt = nil;
+        _lastVerifyExitCode = nil;
+        NSString* cwd = params[@"cwd"] ?: [_windowController workspacePath];
+        if (cwd.length > 0 && [_windowController workspacePath] && !PathIsInsideWorkspace(cwd, [_windowController workspacePath])) {
+            *outErrCode = @"outside_workspace";
+            *outErrMsg = @"verify.run cwd must be inside workspace.";
+            return;
+        }
         NSString* shellCommand = [NSString stringWithFormat:@"%@; printf '\\n[DietCode verify] command=%@ exit=%%s\\n' \"$?\"", command, command];
-        [_windowController runTerminalCommand:shellCommand cwd:[_windowController workspacePath] show:YES];
-        *outResult = @{ @"started": @YES, @"command": command, @"visible": @YES, @"stoppable": @YES };
+        [_windowController runTerminalCommand:shellCommand cwd:cwd show:YES];
+        *outResult = @{ @"started": @YES, @"command": command, @"cwd": cwd ?: @"", @"startedAt": ISODateString(_lastVerifyStartedAt), @"visible": @YES, @"stoppable": @YES };
         return;
     }
 
     if ([method isEqualToString:@"verify.last"] || [method isEqualToString:@"verify.status"]) {
         NSDictionary* status = [self verificationStatus];
-        *outResult = @{ @"command": _lastVerifyCommand ?: @"", @"status": status };
+        if ([method isEqualToString:@"verify.last"]) {
+            *outResult = @{
+                @"command": status[@"command"] ?: @"",
+                @"exitCode": status[@"exitCode"] ?: [NSNull null],
+                @"startedAt": status[@"startedAt"] ?: @"",
+                @"finishedAt": status[@"finishedAt"] ?: @"",
+                @"durationMs": status[@"durationMs"] ?: @0,
+                @"status": status
+            };
+        } else {
+            *outResult = @{ @"command": _lastVerifyCommand ?: @"", @"status": status };
+        }
+        return;
+    }
+
+    if ([method isEqualToString:@"verify.failures"]) {
+        *outResult = @{
+            @"failures": [self verificationFailureLines],
+            @"problems": [_windowController problemsList] ?: @[],
+            @"status": [self verificationStatus]
+        };
+        return;
+    }
+
+    // Context primitives
+    if ([method isEqualToString:@"context.snapshot"]) {
+        NSDictionary* snapshot = [self contextSnapshotPayload];
+        NSString* snapshotId = [NSString stringWithFormat:@"snapshot-%ld", (long)++_contextSnapshotCounter];
+        _contextSnapshots[snapshotId] = snapshot;
+        *outResult = @{ @"snapshotId": snapshotId, @"snapshot": snapshot };
+        return;
+    }
+
+    if ([method isEqualToString:@"context.delta"]) {
+        NSString* snapshotId = params[@"snapshotId"];
+        NSDictionary* previous = snapshotId ? _contextSnapshots[snapshotId] : nil;
+        if (!previous) {
+            *outErrCode = @"invalid_params";
+            *outErrMsg = @"Unknown snapshotId.";
+            return;
+        }
+        NSDictionary* current = [self contextSnapshotPayload];
+        NSMutableDictionary* changed = [NSMutableDictionary dictionary];
+        for (NSString* key in current) {
+            id oldValue = previous[key];
+            id newValue = current[key];
+            if (![oldValue isEqual:newValue]) {
+                changed[key] = @{ @"before": oldValue ?: [NSNull null], @"after": newValue ?: [NSNull null] };
+            }
+        }
+        *outResult = @{ @"snapshotId": snapshotId, @"changed": changed, @"current": current };
+        return;
+    }
+
+    // Bounded combo primitives
+    if ([method isEqualToString:@"task.start"]) {
+        NSString* goal = params[@"goal"] ?: @"";
+        if (goal.length == 0) {
+            *outErrCode = @"invalid_params";
+            *outErrMsg = @"goal parameter required.";
+            return;
+        }
+        NSString* taskId = [NSString stringWithFormat:@"task-%ld", (long)++_taskCounter];
+        NSMutableDictionary* task = [@{
+            @"taskId": taskId,
+            @"goal": goal,
+            @"scope": params[@"scope"] ?: @{},
+            @"budget": params[@"budget"] ?: @{},
+            @"verify": params[@"verify"] ?: @[],
+            @"status": @"active",
+            @"startedAt": ISODateString([NSDate date]),
+            @"steps": [NSMutableArray array],
+            @"results": [NSMutableArray array],
+            @"patchBatchesUsed": @0,
+            @"verifyRunsUsed": @0,
+            @"filesTouched": [NSMutableArray array]
+        } mutableCopy];
+        task[@"startedAtDate"] = [NSDate date];
+        task[@"filesTouchedSet"] = [NSMutableSet set];
+        _tasks[taskId] = task;
+        *outResult = @{ @"taskId": taskId, @"task": [self serializableTask:task] };
+        return;
+    }
+
+    if ([method isEqualToString:@"task.status"] || [method isEqualToString:@"task.result"]) {
+        NSString* taskId = params[@"taskId"];
+        NSMutableDictionary* task = taskId ? _tasks[taskId] : nil;
+        if (!task) {
+            *outErrCode = @"invalid_params";
+            *outErrMsg = @"Unknown taskId.";
+            return;
+        }
+        NSDictionary* snapshot = [self serializableTask:task];
+        *outResult = [method isEqualToString:@"task.result"] ? @{ @"result": snapshot, @"finalDiff": [self currentChangesInfo], @"verify": [self verificationStatus] } : @{ @"task": snapshot };
+        return;
+    }
+
+    if ([method isEqualToString:@"task.cancel"]) {
+        NSString* taskId = params[@"taskId"];
+        NSMutableDictionary* task = taskId ? _tasks[taskId] : nil;
+        if (!task) {
+            *outErrCode = @"invalid_params";
+            *outErrMsg = @"Unknown taskId.";
+            return;
+        }
+        task[@"status"] = @"cancelled";
+        task[@"cancelledAt"] = ISODateString([NSDate date]);
+        *outResult = @{ @"cancelled": @YES, @"task": [self serializableTask:task] };
+        return;
+    }
+
+    if ([method isEqualToString:@"task.step"]) {
+        NSString* taskId = params[@"taskId"];
+        NSMutableDictionary* task = taskId ? _tasks[taskId] : nil;
+        NSDictionary* step = params[@"step"];
+        if (!task || ![step isKindOfClass:[NSDictionary class]]) {
+            *outErrCode = @"invalid_params";
+            *outErrMsg = @"taskId and step object required.";
+            return;
+        }
+        NSDictionary* stepResult = [self executeWorkbenchStep:step task:task];
+        [task[@"steps"] addObject:step];
+        [task[@"results"] addObject:stepResult];
+        if (![stepResult[@"ok"] boolValue]) {
+            task[@"status"] = @"blocked";
+        }
+        *outResult = @{ @"stepResult": stepResult, @"task": [self serializableTask:task] };
+        return;
+    }
+
+    if ([method isEqualToString:@"task.runLoop"]) {
+        NSString* taskId = params[@"taskId"];
+        NSMutableDictionary* task = taskId ? _tasks[taskId] : nil;
+        NSArray* steps = params[@"steps"] ?: @[];
+        if (!task || ![steps isKindOfClass:[NSArray class]] || steps.count > kMaxPlanSteps) {
+            *outErrCode = @"invalid_params";
+            *outErrMsg = @"taskId and bounded steps array required.";
+            return;
+        }
+        NSMutableArray* results = [NSMutableArray array];
+        for (NSDictionary* step in steps) {
+            if (![step isKindOfClass:[NSDictionary class]]) {
+                *outErrCode = @"invalid_params";
+                *outErrMsg = @"Every runLoop step must be an object.";
+                return;
+            }
+            NSDictionary* stepResult = [self executeWorkbenchStep:step task:task];
+            [task[@"steps"] addObject:step];
+            [task[@"results"] addObject:stepResult];
+            [results addObject:stepResult];
+            if (![stepResult[@"ok"] boolValue]) {
+                task[@"status"] = @"blocked";
+                break;
+            }
+            if ([step[@"type"] isEqualToString:@"verify"]) {
+                NSDictionary* status = [self verificationStatus];
+                if ([status[@"state"] isEqualToString:@"complete"] && ![status[@"passed"] boolValue]) {
+                    task[@"status"] = @"verify_failed";
+                    break;
+                }
+            }
+        }
+        if ([task[@"status"] isEqualToString:@"active"]) {
+            task[@"status"] = @"complete";
+            task[@"completedAt"] = ISODateString([NSDate date]);
+        }
+        *outResult = @{ @"results": results, @"task": [self serializableTask:task], @"finalDiff": [self currentChangesInfo], @"verify": [self verificationStatus] };
+        return;
+    }
+
+    if ([method isEqualToString:@"edit.plan"]) {
+        NSArray* steps = params[@"steps"];
+        if (![steps isKindOfClass:[NSArray class]] || steps.count == 0 || steps.count > kMaxPlanSteps) {
+            *outErrCode = @"invalid_params";
+            *outErrMsg = @"steps array required and must be bounded.";
+            return;
+        }
+        for (NSDictionary* step in steps) {
+            if (![step isKindOfClass:[NSDictionary class]] || [self primitiveForWorkbenchStep:step].count == 0) {
+                *outErrCode = @"invalid_params";
+                *outErrMsg = @"Plan contains unknown step type.";
+                return;
+            }
+        }
+        NSString* planId = [NSString stringWithFormat:@"plan-%ld", (long)++_editPlanCounter];
+        NSDictionary* plan = @{ @"planId": planId, @"steps": steps, @"createdAt": ISODateString([NSDate date]) };
+        _editPlans[planId] = plan;
+        *outResult = @{ @"planId": planId, @"plan": plan };
+        return;
+    }
+
+    if ([method isEqualToString:@"edit.executePlan"]) {
+        NSString* planId = params[@"planId"];
+        NSDictionary* plan = planId ? _editPlans[planId] : nil;
+        NSArray* steps = params[@"steps"] ?: plan[@"steps"];
+        NSString* taskId = params[@"taskId"];
+        NSMutableDictionary* task = taskId ? _tasks[taskId] : nil;
+        if (![steps isKindOfClass:[NSArray class]] || steps.count == 0 || steps.count > kMaxPlanSteps) {
+            *outErrCode = @"invalid_params";
+            *outErrMsg = @"planId or bounded steps array required.";
+            return;
+        }
+        NSMutableArray* results = [NSMutableArray array];
+        for (NSDictionary* step in steps) {
+            NSDictionary* stepResult = [self executeWorkbenchStep:step task:task];
+            [results addObject:stepResult];
+            if (task) {
+                [task[@"steps"] addObject:step];
+                [task[@"results"] addObject:stepResult];
+            }
+            if (![stepResult[@"ok"] boolValue]) break;
+        }
+        *outResult = @{ @"results": results, @"finalDiff": [self currentChangesInfo], @"verify": [self verificationStatus] };
+        return;
+    }
+
+    if ([method isEqualToString:@"repair.fromCompilerErrors"] ||
+        [method isEqualToString:@"repair.fromTestFailures"] ||
+        [method isEqualToString:@"repair.fromPatchFailure"]) {
+        NSString* failure = @"patch";
+        if ([method isEqualToString:@"repair.fromCompilerErrors"]) failure = @"compiler";
+        else if ([method isEqualToString:@"repair.fromTestFailures"]) failure = @"test";
+        *outResult = [self repairContextForFailure:failure params:params];
         return;
     }
 
