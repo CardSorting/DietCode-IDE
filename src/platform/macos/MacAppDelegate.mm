@@ -18,10 +18,17 @@
     return self;
 }
 
+- (void)setIsHeadless:(BOOL)isHeadless {
+    _isHeadless = isHeadless;
+    self.windowController.isHeadless = isHeadless;
+}
+
 - (void)applicationDidFinishLaunching:(NSNotification*)notification {
     [DietCodeMenuBuilder installMainMenuWithTarget:self.windowController];
-    [self.windowController showWindow:self];
-    [NSApp activateIgnoringOtherApps:YES];
+    if (!self.isHeadless) {
+        [self.windowController showWindow:self];
+        [NSApp activateIgnoringOtherApps:YES];
+    }
     
     if (self.pendingFileToOpen) {
         [self.windowController openFileAtPath:self.pendingFileToOpen line:1 column:1];

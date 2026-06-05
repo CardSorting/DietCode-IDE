@@ -39,9 +39,38 @@ def call(sock, token, method, params=None, request_id=None):
 
 
 def main():
-    if not os.path.exists(SOCKET_PATH):
-        print(f"control socket not found: {SOCKET_PATH}", file=sys.stderr)
-        return 1
+    socket_active = False
+    try:
+        with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as test_sock:
+            test_sock.settimeout(0.5)
+            test_sock.connect(SOCKET_PATH)
+            socket_active = True
+    except (ConnectionRefusedError, FileNotFoundError, socket.timeout):
+        if os.path.exists(SOCKET_PATH):
+            try:
+                os.unlink(SOCKET_PATH)
+            except Exception:
+                pass
+
+    if not socket_active:
+        print("control socket not active, launching DietCode in headless mode...")
+        import subprocess, time
+        app_path = "build/DietCode.app/Contents/MacOS/DietCode"
+        if not os.path.exists(app_path):
+            print(f"DietCode binary not found at {app_path}. Run 'make app' first.", file=sys.stderr)
+            return 1
+        subprocess.Popen([app_path, "--headless"])
+        for _ in range(50):
+            try:
+                with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as test_sock:
+                    test_sock.connect(SOCKET_PATH)
+                    socket_active = True
+                    break
+            except Exception:
+                time.sleep(0.1)
+        if not socket_active:
+            print("Failed to start DietCode headless process or socket did not initialize.", file=sys.stderr)
+            return 1
 
     token = load_token()
     with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as sock:

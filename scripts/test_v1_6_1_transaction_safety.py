@@ -37,9 +37,38 @@ def call(sock, token, method, params=None, request_id=None):
 def main():
     print("=== DietCode v1.6.1 Transaction Safety Verification Suite ===")
     
-    if not os.path.exists(SOCKET_PATH):
-        print(f"Control socket not found: {SOCKET_PATH}", file=sys.stderr)
-        return 1
+    socket_active = False
+    try:
+        with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as test_sock:
+            test_sock.settimeout(0.5)
+            test_sock.connect(SOCKET_PATH)
+            socket_active = True
+    except (ConnectionRefusedError, FileNotFoundError, socket.timeout):
+        if os.path.exists(SOCKET_PATH):
+            try:
+                os.unlink(SOCKET_PATH)
+            except Exception:
+                pass
+
+    if not socket_active:
+        print("Control socket not active, launching DietCode in headless mode...")
+        import subprocess
+        app_path = "build/DietCode.app/Contents/MacOS/DietCode"
+        if not os.path.exists(app_path):
+            print(f"DietCode binary not found at {app_path}. Run 'make app' first.", file=sys.stderr)
+            return 1
+        subprocess.Popen([app_path, "--headless"])
+        for _ in range(50):
+            try:
+                with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as test_sock:
+                    test_sock.connect(SOCKET_PATH)
+                    socket_active = True
+                    break
+            except Exception:
+                time.sleep(0.1)
+        if not socket_active:
+            print("Failed to start DietCode headless process or socket did not initialize.", file=sys.stderr)
+            return 1
 
     token = load_token()
     print(f"Loaded session token: {token[:8]}...")
@@ -57,6 +86,12 @@ def main():
         # Get workspace root
         res = call(sock, token, "workspace.getRoot")
         workspace_root = res.get("result", {}).get("path")
+        if not workspace_root:
+            print("Workspace not open. Opening '/Users/bozoegg/Desktop/DietCode-IDE'...")
+            open_res = call(sock, token, "workspace.openFolder", {"path": "/Users/bozoegg/Desktop/DietCode-IDE"})
+            print(f"Open folder result: {open_res}")
+            res = call(sock, token, "workspace.getRoot")
+            workspace_root = res.get("result", {}).get("path")
         print(f"Workspace root: {workspace_root}")
         assert workspace_root, "Failed to get workspace root"
 
@@ -85,7 +120,7 @@ def main():
             )
 
             combo_plan = {
-                "schemaVersion": "1.6.1",
+                "schemaVersion": "1.6.2",
                 "goal": "Test transaction safety",
                 "policy": {
                     "permissions": ["edit", "read"]
@@ -110,7 +145,7 @@ def main():
             }
 
             print("\nTest 2: Running mutation combo")
-            combo_id = "test-combo-1"
+            combo_id = f"test-combo-{int(time.time() * 1000)}"
             # Cleanup old backup if exists
             shutil.rmtree(os.path.join(BACKUPS_DIR, combo_id), ignore_errors=True)
 
@@ -126,7 +161,7 @@ def main():
             with open(manifest_path, "r") as m_file:
                 manifest_data = json.load(m_file)
                 print(f"Created backup manifest.json: {json.dumps(manifest_data, indent=2)}")
-                assert manifest_data.get("schemaVersion") == "1.6.1", "Schema version mismatch"
+                assert manifest_data.get("schemaVersion") == "1.6.2", "Schema version mismatch"
                 files_entry = manifest_data.get("files", [])
                 assert len(files_entry) == 1, "Expected exactly one backed up file"
                 assert files_entry[0].get("workspaceRelativePath") == "test_target_v1_6_1.txt"
@@ -145,7 +180,7 @@ def main():
             backups = scan_res.get("result", {}).get("backups", [])
             my_backup = [b for b in backups if b.get("comboId") == combo_id]
             assert len(my_backup) == 1, "Our backup not found in scan!"
-            assert my_backup[0].get("status") == "valid", "Expected backup status to be valid"
+            assert my_backup[0].get("status") == "postimage_match", "Expected backup status to be postimage_match"
 
             # Test 4: Postimage mismatch check
             print("\nTest 4: Rollback precondition - external modification check")

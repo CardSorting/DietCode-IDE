@@ -2156,6 +2156,7 @@ static NSString* FindBinaryPath(NSString* name, NSString* fallback) {
 }
 
 - (void)checkForRecoverableFiles {
+    if (self.isHeadless) return;
     NSString* backupDir = [self getBackupDirectory];
     NSArray* files = [[NSFileManager defaultManager] contentsOfDirectoryAtPath:backupDir error:nil];
     NSMutableArray* backups = [NSMutableArray array];
@@ -2240,6 +2241,14 @@ static NSString* FindBinaryPath(NSString* name, NSString* fallback) {
     
     BOOL isDir = NO;
     if (![[NSFileManager defaultManager] fileExistsAtPath:tab.path isDirectory:&isDir]) {
+        if (self.isHeadless) {
+            tab.path = nil;
+            tab.title = [NSString stringWithFormat:@"%@ (Deleted)", tab.title];
+            tab.dirty = YES;
+            [self updateTabHeaderLayout];
+            [self updateWindowTitleAndStatus];
+            return;
+        }
         NSAlert* alert = [[NSAlert alloc] init];
         [alert setMessageText:@"File Deleted Externally"];
         [alert setInformativeText:[NSString stringWithFormat:@"The file '%@' has been deleted externally. Would you like to keep the editor open or close it?", tab.title]];
@@ -2264,6 +2273,19 @@ static NSString* FindBinaryPath(NSString* name, NSString* fallback) {
     NSDictionary* attrs = [[NSFileManager defaultManager] attributesOfItemAtPath:tab.path error:nil];
     NSDate* diskModDate = attrs.fileModificationDate;
     if (tab.lastModifiedDate && [diskModDate compare:tab.lastModifiedDate] == NSOrderedDescending) {
+        if (self.isHeadless) {
+            const auto result = fileService_.readTextFile(std::filesystem::path(StdStringFromNSString(tab.path)));
+            if (result.ok) {
+                self.loadingDocument = YES;
+                [tab.textView setString:NSStringFromStdString(result.contents)];
+                self.loadingDocument = NO;
+                tab.dirty = NO;
+                tab.lastModifiedDate = diskModDate;
+                [self updateTabHeaderLayout];
+                [self updateWindowTitleAndStatus];
+            }
+            return;
+        }
         NSAlert* alert = [[NSAlert alloc] init];
         [alert setMessageText:@"File Modified Externally"];
         [alert setInformativeText:[NSString stringWithFormat:@"The file '%@' has been modified by another program. Do you want to reload it and discard your local edits?", tab.title]];
@@ -2504,20 +2526,25 @@ static NSString* FindBinaryPath(NSString* name, NSString* fallback) {
     BOOL isLargeFile = NO;
     
     if (fileSize >= threshold) {
-        isLargeFile = YES;
-        NSAlert* alert = [[NSAlert alloc] init];
-        [alert setMessageText:@"Large File Warning"];
-        [alert setInformativeText:@"This file is large, so some features are reduced to keep DietCode responsive."];
-        [alert addButtonWithTitle:@"Open"];
-        [alert addButtonWithTitle:@"Open Read-Only"];
-        [alert addButtonWithTitle:@"Cancel"];
-        [alert setAlertStyle:NSAlertStyleWarning];
-        
-        NSModalResponse res = [alert runModal];
-        if (res == NSAlertThirdButtonReturn) {
-            return; // Cancel
-        } else if (res == NSAlertSecondButtonReturn) {
+        if (self.isHeadless) {
             openReadOnly = YES;
+            isLargeFile = YES;
+        } else {
+            isLargeFile = YES;
+            NSAlert* alert = [[NSAlert alloc] init];
+            [alert setMessageText:@"Large File Warning"];
+            [alert setInformativeText:@"This file is large, so some features are reduced to keep DietCode responsive."];
+            [alert addButtonWithTitle:@"Open"];
+            [alert addButtonWithTitle:@"Open Read-Only"];
+            [alert addButtonWithTitle:@"Cancel"];
+            [alert setAlertStyle:NSAlertStyleWarning];
+            
+            NSModalResponse res = [alert runModal];
+            if (res == NSAlertThirdButtonReturn) {
+                return; // Cancel
+            } else if (res == NSAlertSecondButtonReturn) {
+                openReadOnly = YES;
+            }
         }
     }
 
@@ -2707,6 +2734,9 @@ static NSString* FindBinaryPath(NSString* name, NSString* fallback) {
 }
 
 - (BOOL)confirmCloseIfNeeded {
+    if (self.isHeadless) {
+        return YES;
+    }
     if (![self hasUnsavedChanges]) {
         return YES;
     }
@@ -4338,6 +4368,17 @@ static NSString* FindBinaryPath(NSString* name, NSString* fallback) {
         return NO;
     }
     
+    if (self.isHeadless) {
+        if (![choice isEqualToString:@"enable"]) {
+            NSMutableDictionary* newLspSettings = [lspSettings mutableCopy];
+            newLspSettings[key] = @"enable";
+            [defaults setObject:newLspSettings forKey:@"LspSettings"];
+            [defaults synchronize];
+        }
+        [self startLSPForLanguage:language];
+        return YES;
+    }
+    
     // Choice is nil or "not_now" -> Prompt the user
     NSAlert* alert = [[NSAlert alloc] init];
     NSString* langName = [language isEqualToString:@"cpp"] ? @"C++" : ([language isEqualToString:@"python"] ? @"Python" : @"JavaScript/TypeScript");
@@ -5414,20 +5455,24 @@ static NSString* FindBinaryPath(NSString* name, NSString* fallback) {
         BOOL useLargeFileMode = NO;
         
         if (fileSize >= 50 * 1024 * 1024) {
-            NSAlert* alert = [[NSAlert alloc] init];
-            [alert setMessageText:@"Large File Warning"];
-            [alert setInformativeText:[NSString stringWithFormat:@"The file '%@' is %.1f MB. Opening large files normally can cause the editor to become laggy and unresponsive.\n\nWould you like to open it in Large File Mode (Read-Only) to keep scrolling responsive?", [path lastPathComponent], (double)fileSize / (1024.0 * 1024.0)]];
-            [alert addButtonWithTitle:@"Open in Large File Mode (Recommended)"];
-            [alert addButtonWithTitle:@"Open Normally"];
-            [alert addButtonWithTitle:@"Cancel"];
-            [alert setAlertStyle:NSAlertStyleWarning];
-            
-            NSModalResponse res = [alert runModal];
-            if (res == NSAlertThirdButtonReturn) {
-                return; // Cancel opening
-            }
-            if (res == NSAlertFirstButtonReturn) {
+            if (self.isHeadless) {
                 useLargeFileMode = YES;
+            } else {
+                NSAlert* alert = [[NSAlert alloc] init];
+                [alert setMessageText:@"Large File Warning"];
+                [alert setInformativeText:[NSString stringWithFormat:@"The file '%@' is %.1f MB. Opening large files normally can cause the editor to become laggy and unresponsive.\n\nWould you like to open it in Large File Mode (Read-Only) to keep scrolling responsive?", [path lastPathComponent], (double)fileSize / (1024.0 * 1024.0)]];
+                [alert addButtonWithTitle:@"Open in Large File Mode (Recommended)"];
+                [alert addButtonWithTitle:@"Open Normally"];
+                [alert addButtonWithTitle:@"Cancel"];
+                [alert setAlertStyle:NSAlertStyleWarning];
+                
+                NSModalResponse res = [alert runModal];
+                if (res == NSAlertThirdButtonReturn) {
+                    return; // Cancel opening
+                }
+                if (res == NSAlertFirstButtonReturn) {
+                    useLargeFileMode = YES;
+                }
             }
         }
         
@@ -5544,6 +5589,14 @@ static NSString* FindBinaryPath(NSString* name, NSString* fallback) {
 
 - (NSString*)workspacePath {
     return self.openedFolderPath;
+}
+
+- (void)setIsHeadless:(BOOL)isHeadless {
+    _isHeadless = isHeadless;
+    if (isHeadless) {
+        self.externalControlEnabled = YES;
+        [(DietCodeControlServer*)self.controlServer start];
+    }
 }
 
 - (void)openWorkspaceFolder:(NSString*)path {

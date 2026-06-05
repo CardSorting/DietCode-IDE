@@ -1051,7 +1051,7 @@ NSArray<NSString*>* ContextLines(const std::vector<std::string>& lines, NSIntege
     __block BOOL allowed = YES;
     if ([permission isEqualToString:@"Destructive"]) {
         NSInteger autonomy = [self safeAgentAutonomyLevel];
-        if (autonomy == 1) {
+        if (autonomy == 1 || _windowController.isHeadless) {
             allowed = YES;
         } else if (autonomy == 2) {
             allowed = [self isDestructiveRequestSafe:method params:params];

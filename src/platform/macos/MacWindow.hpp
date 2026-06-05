@@ -31,6 +31,7 @@
 // --- Agent Control Surface v1.1 Programmatic API ---
 @property(nonatomic, assign) BOOL externalControlEnabled;
 @property(nonatomic, assign) NSInteger agentAutonomyLevel;
+@property(nonatomic, assign) BOOL isHeadless;
 @property(nonatomic, strong) NSMutableArray* openTabs;
 @property(nonatomic, strong) NSMutableArray<NSString*>* sessionRecentCommands;
 @property(nonatomic, strong) NSMutableArray<NSString*>* sessionLastSearches;

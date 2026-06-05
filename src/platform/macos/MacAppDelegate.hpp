@@ -7,5 +7,6 @@
 @interface DietCodeAppDelegate : NSObject <NSApplicationDelegate>
 
 @property(nonatomic, strong) DietCodeWindowController* windowController;
+@property(nonatomic, assign) BOOL isHeadless;
 
 @end
