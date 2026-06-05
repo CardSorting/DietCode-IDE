@@ -1,0 +1,8 @@
+{
+  "app": "build/DietCode.app/Contents/MacOS/DietCode",
+  "socket": "~/.dietcode/control.sock",
+  "tokenFile": "~/.dietcode/session.token",
+  "timeout": 10,
+  "requestTimeout": 30,
+  "retries": 0
+}

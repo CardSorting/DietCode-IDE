@@ -59,8 +59,13 @@ Headless agent control:
 
 ```sh
 make app
+make agent-self-test
 make ensure-socket
+make agent-ready
+make agent-status
 make agent-ping
+make agent-methods
+make agent-capabilities
 python3 scripts/dietcode_agent_client.py --ensure-only --compact
 python3 scripts/dietcode_agent_client.py --compact rpc.ping
 ```

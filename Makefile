@@ -31,7 +31,7 @@ MACOS_MM := \
 	src/filesystem/GitService.mm \
 	src/core/LSPClient.mm
 
-.PHONY: all app run headless ensure-socket agent-ping control-smoke test clean
+.PHONY: all app run headless ensure-socket agent-ready agent-status agent-ping agent-methods agent-capabilities agent-self-test control-smoke test clean
 
 all: app test
 
@@ -58,8 +58,23 @@ headless: app
 ensure-socket: app
 	$(APP_MACOS)/$(APP_NAME) --ensure-socket
 
+agent-ready: app
+	python3 scripts/dietcode_agent_client.py --wait-ready --compact
+
+agent-status: app
+	python3 scripts/dietcode_agent_client.py --status --compact
+
 agent-ping: app
 	python3 scripts/dietcode_agent_client.py --compact rpc.ping
+
+agent-methods: app
+	python3 scripts/dietcode_agent_client.py --list-methods --compact
+
+agent-capabilities: app
+	python3 scripts/dietcode_agent_client.py --capabilities --compact
+
+agent-self-test:
+	python3 scripts/dietcode_agent_client.py --self-test --compact
 
 control-smoke: app
 	python3 scripts/control_smoke_test.py
@@ -67,7 +82,7 @@ control-smoke: app
 $(TEST_BIN): $(BUILD_DIR) $(CORE_CPP) tests/test_editor.cpp
 	$(CXX) $(CXXFLAGS) $(CORE_CPP) tests/test_editor.cpp -o $(TEST_BIN)
 
-test: $(TEST_BIN)
+test: $(TEST_BIN) agent-self-test
 	$(TEST_BIN)
 
 clean:
