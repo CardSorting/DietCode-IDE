@@ -1,7 +1,7 @@
-# DietCode v1.6.1 Hardened Local Transaction Kernel
+# DietCode v1.6.2 Hardened Local Transaction Kernel
 ## Architecture & Hardened Durable Checkpoint Specification
 
-This specification defines the DietCode v1.6.1 Local Transaction Kernel, establishing strict, crash-safe, durable checkpoint semantics for bounded agent code mutation.
+This specification defines the DietCode v1.6.2 Local Transaction Kernel, establishing strict, crash-safe, durable checkpoint semantics for bounded agent code mutation, with strict manifest discipline.
 
 ---
 
@@ -9,39 +9,40 @@ This specification defines the DietCode v1.6.1 Local Transaction Kernel, establi
 * **Verified Preimages:** Checkpoints are verified transaction preimages. They represent historical snapshots of modified files *before* a specific combo execution and are not general-purpose undo logs or workspace backplanes.
 * **Deterministic Rollback legality:** Reverting changes is only legal when the kernel proves: "This exact combo changed these exact files from this exact preimage into this exact postimage, and nothing else has mutated them since."
 * **Fail-Closed on Mismatch:** Any deviation in manifest validity, file hashes, path canonicalization, workspace containment, or open buffer states must block rollback immediately, failing closed with a stable, machine-readable error.
+* **Manifest Discipline (v1.6.2):** Manifest parsing strictly rejects any unrecognized fields, enforces static type checks, limits maximum file size to 1MB, writes keys in alphabetical canonical order, and signs transactions with a companion checksum file.
 
 ---
 
 ## The Verified Backup Manifest Format
 
-Every transaction creates a backup folder: `~/.dietcode/backups/<combo-id>/`. This folder contains backup blobs of preimages (`[backupBlobHash].blob`) and a committed `manifest.json`.
+Every transaction creates a backup folder: `~/.dietcode/backups/<combo-id>/`. This folder contains backup blobs of preimages (`[backupBlobHash].blob`), a committed `manifest.json`, and a companion `manifest.checksum` file.
 
 ```json
 {
-  "schemaVersion": "1.6.1",
-  "comboId": "combo-1234",
-  "workspaceRootHash": "1469598103934665603ULL",
-  "workspaceRootCanonical": "/Users/user/Desktop/project",
-  "createdAt": "2026-06-05T12:00:00Z",
-  "sessionId": "unix_socket_session_token_hash",
-  "dietcodeVersion": "1.6.1",
   "chipVersions": [
     "patch.apply@1"
   ],
+  "comboId": "combo-1234",
+  "createdAt": "2026-06-05T12:00:00Z",
+  "dietcodeVersion": "1.6.2",
   "files": [
     {
-      "workspaceRelativePath": "src/main.cpp",
+      "backupBlobHash": "df812ca43f0190ab",
       "canonicalPathHash": "a24f0c97de898bf1",
       "domain": "disk",
-      "preimageHash": "df812ca43f0190ab",
       "expectedPostimageHash": "fe8912c98ad23290",
-      "backupBlobHash": "df812ca43f0190ab",
-      "sizeBytes": 2048,
       "newlineMode": "lf",
+      "preimageHash": "df812ca43f0190ab",
+      "sizeBytes": 2048,
+      "wasBinary": false,
       "wasMissing": false,
-      "wasBinary": false
+      "workspaceRelativePath": "src/main.cpp"
     }
-  ]
+  ],
+  "schemaVersion": "1.6.2",
+  "sessionId": "unix_socket_session_token_hash",
+  "workspaceRootCanonical": "/Users/user/Desktop/project",
+  "workspaceRootHash": "1469598103934665603ULL"
 }
 ```
 
@@ -215,7 +216,7 @@ Every transaction creates a backup folder: `~/.dietcode/backups/<combo-id>/`. Th
 * **Replay Rules:** Step trace payloads preserve preimages, exact patches, and postimages for step-by-step transaction replay.
 
 ### 47. RPC Schema Evolution
-* **RPC Rules:** Requests must declare `schemaVersion: 1.6.1`. Mismatches are rejected.
+* **RPC Rules:** Requests must declare `schemaVersion: 1.6.2`. Mismatches are rejected.
 
 ### 48. Abuse Resistance
 * **Rate Limits:** Enforce token-bucket rate limiting of 10 requests per second (max 2 writes/second).

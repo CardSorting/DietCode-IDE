@@ -1,5 +1,6 @@
 #import "MacControlServer.hpp"
 #import "MacWindow.hpp"
+#import <CommonCrypto/CommonDigest.h>
 #import "SymbolIndexService.hpp"
 #import "DiffAnalysisService.hpp"
 #import "WorkspaceAnalysisService.hpp"
@@ -262,8 +263,8 @@ NSString* ISODateString(NSDate* date) {
     return [formatter stringFromDate:date];
 }
 
-NSString* StableHashForString(NSString* text) {
-    NSData* data = [(text ?: @"") dataUsingEncoding:NSUTF8StringEncoding] ?: [NSData data];
+NSString* StableHashForData(NSData* data) {
+    if (!data) data = [NSData data];
     const uint8_t* bytes = (const uint8_t*)data.bytes;
     uint64_t hash = 1469598103934665603ULL;
     for (NSUInteger i = 0; i < data.length; i++) {
@@ -271,6 +272,22 @@ NSString* StableHashForString(NSString* text) {
         hash *= 1099511628211ULL;
     }
     return [NSString stringWithFormat:@"%016llx", hash];
+}
+
+NSString* StableHashForString(NSString* text) {
+    NSData* data = [(text ?: @"") dataUsingEncoding:NSUTF8StringEncoding] ?: [NSData data];
+    return StableHashForData(data);
+}
+
+NSString* SHA256ForData(NSData* data) {
+    if (!data) data = [NSData data];
+    uint8_t hash[CC_SHA256_DIGEST_LENGTH];
+    CC_SHA256(data.bytes, (CC_LONG)data.length, hash);
+    NSMutableString* s = [NSMutableString stringWithCapacity:CC_SHA256_DIGEST_LENGTH * 2];
+    for (int i = 0; i < CC_SHA256_DIGEST_LENGTH; i++) {
+        [s appendFormat:@"%02x", hash[i]];
+    }
+    return s;
 }
 
 NSDictionary* RuntimeError(NSString* code, NSString* message, NSString* stepId, NSString* chip, NSString* phase, BOOL recoverable) {
@@ -448,6 +465,8 @@ NSArray<NSString*>* ContextLines(const std::vector<std::string>& lines, NSIntege
 - (NSDictionary*)runComboWithPlan:(NSDictionary*)plan comboId:(NSString*)comboId;
 - (BOOL)writeManifest:(NSDictionary*)manifest toPath:(NSString*)path error:(NSString**)errorOut;
 - (NSDictionary*)loadManifestFromPath:(NSString*)path error:(NSString**)errorOut;
+- (NSString*)canonicalJsonStringForObject:(id)obj error:(NSString**)errorOut;
+- (BOOL)validateManifestStructure:(NSDictionary*)manifest error:(NSString**)errorOut;
 - (NSDictionary*)validatePatchAtPath:(NSString*)path patch:(NSString*)patch currentText:(NSString*)currentTextOverride;
 - (NSDictionary*)currentChangesInfo;
 - (NSDictionary*)runVerificationCommand:(NSString*)command cwd:(NSString*)cwd;
@@ -1089,6 +1108,12 @@ NSArray<NSString*>* ContextLines(const std::vector<std::string>& lines, NSIntege
 
 - (BOOL)validateCombo:(NSDictionary*)combo normalizedPlan:(NSDictionary**)planOut errors:(NSArray<NSDictionary*>**)errorsOut {
     NSMutableArray<NSDictionary*>* errors = [NSMutableArray array];
+    
+    NSString* planVersion = combo[@"schemaVersion"];
+    if (!planVersion || ![planVersion isEqualToString:@"1.6.2"]) {
+        [errors addObject:RuntimeError(@"invalid_combo", @"Plan must declare schemaVersion '1.6.2'.", nil, nil, @"validate", YES)];
+    }
+    
     NSArray* steps = combo[@"steps"];
     NSDictionary* budget = combo[@"budget"] ?: @{};
     NSDictionary* policy = combo[@"policy"] ?: @{};
@@ -1172,7 +1197,7 @@ NSArray<NSString*>* ContextLines(const std::vector<std::string>& lines, NSIntege
     }
     if (planOut) {
         *planOut = @{
-            @"schemaVersion": combo[@"schemaVersion"] ?: @"1.6",
+            @"schemaVersion": combo[@"schemaVersion"] ?: @"1.6.2",
             @"goal": combo[@"goal"] ?: @"",
             @"scope": scope,
             @"policy": policy,
@@ -1507,11 +1532,260 @@ NSArray<NSString*>* ContextLines(const std::vector<std::string>& lines, NSIntege
 }
 
 
+- (NSString*)canonicalJsonStringForObject:(id)obj error:(NSString**)errorOut {
+    if ([obj isKindOfClass:[NSString class]]) {
+        NSMutableString* s = [NSMutableString stringWithString:obj];
+        [s replaceOccurrencesOfString:@"\\" withString:@"\\\\" options:0 range:NSMakeRange(0, s.length)];
+        [s replaceOccurrencesOfString:@"\"" withString:@"\\\"" options:0 range:NSMakeRange(0, s.length)];
+        [s replaceOccurrencesOfString:@"\n" withString:@"\\n" options:0 range:NSMakeRange(0, s.length)];
+        [s replaceOccurrencesOfString:@"\r" withString:@"\\r" options:0 range:NSMakeRange(0, s.length)];
+        [s replaceOccurrencesOfString:@"\t" withString:@"\\t" options:0 range:NSMakeRange(0, s.length)];
+        return [NSString stringWithFormat:@"\"%@\"", s];
+    } else if ([obj isKindOfClass:[NSNumber class]]) {
+        if (obj == (id)kCFBooleanTrue) {
+            return @"true";
+        } else if (obj == (id)kCFBooleanFalse) {
+            return @"false";
+        }
+        const char* type = [obj objCType];
+        if (type && (type[0] == 'c' || type[0] == 'B')) {
+            return [obj boolValue] ? @"true" : @"false";
+        }
+        return [obj stringValue];
+    } else if ([obj isKindOfClass:[NSArray class]]) {
+        NSMutableArray* parts = [NSMutableArray array];
+        for (id child in obj) {
+            NSString* childJson = [self canonicalJsonStringForObject:child error:errorOut];
+            if (!childJson) return nil;
+            [parts addObject:childJson];
+        }
+        return [NSString stringWithFormat:@"[%@]", [parts componentsJoinedByString:@","]];
+    } else if ([obj isKindOfClass:[NSDictionary class]]) {
+        NSArray* sortedKeys = [[obj allKeys] sortedArrayUsingSelector:@selector(compare:)];
+        NSMutableArray* parts = [NSMutableArray array];
+        for (NSString* key in sortedKeys) {
+            id val = obj[key];
+            NSString* valJson = [self canonicalJsonStringForObject:val error:errorOut];
+            if (!valJson) return nil;
+            [parts addObject:[NSString stringWithFormat:@"\"%@\":%@", key, valJson]];
+        }
+        return [NSString stringWithFormat:@"{%@}", [parts componentsJoinedByString:@","]];
+    } else if (obj == [NSNull null] || obj == nil) {
+        return @"null";
+    } else {
+        if (errorOut) *errorOut = [NSString stringWithFormat:@"Unsupported type for canonical JSON: %@", NSStringFromClass([obj class])];
+        return nil;
+    }
+}
+
+- (BOOL)validateManifestStructure:(NSDictionary*)manifest error:(NSString**)errorOut {
+    if (![manifest isKindOfClass:[NSDictionary class]]) {
+        if (errorOut) *errorOut = @"Manifest is not a JSON object.";
+        return NO;
+    }
+    
+    NSSet* allowedTopLevel = [NSSet setWithArray:@[
+        @"schemaVersion",
+        @"comboId",
+        @"createdAt",
+        @"workspaceRootHash",
+        @"chipVersions",
+        @"files"
+    ]];
+    
+    for (NSString* key in manifest.allKeys) {
+        if (![allowedTopLevel containsObject:key]) {
+            if (errorOut) *errorOut = [NSString stringWithFormat:@"Manifest contains unknown top-level field: %@", key];
+            return NO;
+        }
+    }
+    
+    NSString* schemaVersion = manifest[@"schemaVersion"];
+    if (schemaVersion && ![schemaVersion isKindOfClass:[NSString class]]) {
+        if (errorOut) *errorOut = @"schemaVersion must be a string.";
+        return NO;
+    }
+    
+    if (schemaVersion && ![schemaVersion isEqualToString:@"1.6.1"] && ![schemaVersion isEqualToString:@"1.6.2"]) {
+        if (errorOut) *errorOut = [NSString stringWithFormat:@"Unsupported schema version: %@", schemaVersion];
+        return NO;
+    }
+    
+    NSString* comboId = manifest[@"comboId"];
+    if (comboId) {
+        if (![comboId isKindOfClass:[NSString class]]) {
+            if (errorOut) *errorOut = @"comboId must be a string.";
+            return NO;
+        }
+        if (comboId.length > 128) {
+            if (errorOut) *errorOut = @"comboId exceeds maximum allowed length of 128 characters.";
+            return NO;
+        }
+    }
+    
+    NSString* createdAt = manifest[@"createdAt"];
+    if (createdAt && ![createdAt isKindOfClass:[NSString class]]) {
+        if (errorOut) *errorOut = @"createdAt must be a string.";
+        return NO;
+    }
+    
+    NSString* wsHash = manifest[@"workspaceRootHash"];
+    if (wsHash && ![wsHash isKindOfClass:[NSString class]]) {
+        if (errorOut) *errorOut = @"workspaceRootHash must be a string.";
+        return NO;
+    }
+    
+    NSArray* chipVersions = manifest[@"chipVersions"];
+    if (chipVersions) {
+        if (![chipVersions isKindOfClass:[NSArray class]]) {
+            if (errorOut) *errorOut = @"chipVersions must be an array.";
+            return NO;
+        }
+        if (chipVersions.count > 32) {
+            if (errorOut) *errorOut = @"chipVersions exceeds maximum count of 32 items.";
+            return NO;
+        }
+        for (id item in chipVersions) {
+            if (![item isKindOfClass:[NSString class]]) {
+                if (errorOut) *errorOut = @"All items in chipVersions must be strings.";
+                return NO;
+            }
+        }
+    }
+    
+    NSArray* files = manifest[@"files"];
+    if (files) {
+        if (![files isKindOfClass:[NSArray class]]) {
+            if (errorOut) *errorOut = @"files must be an array.";
+            return NO;
+        }
+        if (files.count > 256) {
+            if (errorOut) *errorOut = @"files array exceeds maximum size of 256 entries.";
+            return NO;
+        }
+    }
+    
+    NSSet* allowedFileKeys = [NSSet setWithArray:@[
+        @"workspaceRelativePath",
+        @"canonicalPathHash",
+        @"domain",
+        @"wasMissing",
+        @"wasBinary",
+        @"sizeBytes",
+        @"newlineMode",
+        @"preimageHash",
+        @"expectedPostimageHash",
+        @"backupBlobHash"
+    ]];
+    
+    for (id fileEntry in files ?: @[]) {
+        if (![fileEntry isKindOfClass:[NSDictionary class]]) {
+            if (errorOut) *errorOut = @"Every entry in files must be a JSON object.";
+            return NO;
+        }
+        
+        NSDictionary* entry = (NSDictionary*)fileEntry;
+        for (NSString* key in entry.allKeys) {
+            if (![allowedFileKeys containsObject:key]) {
+                if (errorOut) *errorOut = [NSString stringWithFormat:@"File entry contains unknown field: %@", key];
+                return NO;
+            }
+        }
+        
+        NSString* relPath = entry[@"workspaceRelativePath"];
+        if (relPath) {
+            if (![relPath isKindOfClass:[NSString class]]) {
+                if (errorOut) *errorOut = @"workspaceRelativePath must be a string.";
+                return NO;
+            }
+            if (relPath.length > 4096) {
+                if (errorOut) *errorOut = @"workspaceRelativePath exceeds maximum allowed length of 4096 characters.";
+                return NO;
+            }
+        }
+        
+        NSString* cPathHash = entry[@"canonicalPathHash"];
+        if (cPathHash && ![cPathHash isKindOfClass:[NSString class]]) {
+            if (errorOut) *errorOut = @"canonicalPathHash must be a string.";
+            return NO;
+        }
+        
+        NSString* domain = entry[@"domain"];
+        if (domain) {
+            if (![domain isKindOfClass:[NSString class]]) {
+                if (errorOut) *errorOut = @"domain must be a string.";
+                return NO;
+            }
+            if (![domain isEqualToString:@"disk"] && ![domain isEqualToString:@"buffer"]) {
+                if (errorOut) *errorOut = [NSString stringWithFormat:@"domain has invalid enum value: %@", domain];
+                return NO;
+            }
+        }
+        
+        NSString* preimageHash = entry[@"preimageHash"];
+        if (preimageHash && ![preimageHash isKindOfClass:[NSString class]]) {
+            if (errorOut) *errorOut = @"preimageHash must be a string.";
+            return NO;
+        }
+        
+        NSString* expPostHash = entry[@"expectedPostimageHash"];
+        if (expPostHash && ![expPostHash isKindOfClass:[NSString class]]) {
+            if (errorOut) *errorOut = @"expectedPostimageHash must be a string.";
+            return NO;
+        }
+        
+        NSString* backupBlobHash = entry[@"backupBlobHash"];
+        if (backupBlobHash && ![backupBlobHash isKindOfClass:[NSString class]]) {
+            if (errorOut) *errorOut = @"backupBlobHash must be a string.";
+            return NO;
+        }
+        
+        NSNumber* sizeBytes = entry[@"sizeBytes"];
+        if (sizeBytes && ![sizeBytes isKindOfClass:[NSNumber class]]) {
+            if (errorOut) *errorOut = @"sizeBytes must be a number.";
+            return NO;
+        }
+        
+        NSString* newlineMode = entry[@"newlineMode"];
+        if (newlineMode) {
+            if (![newlineMode isKindOfClass:[NSString class]]) {
+                if (errorOut) *errorOut = @"newlineMode must be a string.";
+                return NO;
+            }
+            if (![newlineMode isEqualToString:@"lf"] && ![newlineMode isEqualToString:@"crlf"]) {
+                if (errorOut) *errorOut = [NSString stringWithFormat:@"newlineMode has invalid enum value: %@", newlineMode];
+                return NO;
+            }
+        }
+        
+        NSNumber* wasMissing = entry[@"wasMissing"];
+        if (wasMissing && ![wasMissing isKindOfClass:[NSNumber class]]) {
+            if (errorOut) *errorOut = @"wasMissing must be a boolean.";
+            return NO;
+        }
+        
+        NSNumber* wasBinary = entry[@"wasBinary"];
+        if (wasBinary && ![wasBinary isKindOfClass:[NSNumber class]]) {
+            if (errorOut) *errorOut = @"wasBinary must be a boolean.";
+            return NO;
+        }
+    }
+    
+    return YES;
+}
+
 - (BOOL)writeManifest:(NSDictionary*)manifest toPath:(NSString*)path error:(NSString**)errorOut {
-    NSError* err = nil;
-    NSData* data = [NSJSONSerialization dataWithJSONObject:manifest options:NSJSONWritingPrettyPrinted error:&err];
-    if (err || !data) {
-        if (errorOut) *errorOut = [NSString stringWithFormat:@"Serialization failed: %@", err.localizedDescription];
+    NSString* jsonStr = nil;
+    NSString* sErr = nil;
+    jsonStr = [self canonicalJsonStringForObject:manifest error:&sErr];
+    if (!jsonStr) {
+        if (errorOut) *errorOut = [NSString stringWithFormat:@"Canonical serialization failed: %@", sErr];
+        return NO;
+    }
+    
+    NSData* data = [jsonStr dataUsingEncoding:NSUTF8StringEncoding];
+    if (data.length > 256 * 1024) {
+        if (errorOut) *errorOut = @"Manifest exceeds maximum allowed size of 256KB.";
         return NO;
     }
     
@@ -1522,18 +1796,48 @@ NSArray<NSString*>* ContextLines(const std::vector<std::string>& lines, NSIntege
         return NO;
     }
     
-    // fsync the temp file
     int fd = open([tmpPath UTF8String], O_RDONLY);
     if (fd >= 0) {
         fsync(fd);
         close(fd);
     }
     
-    // Rename atomically
     if (rename([tmpPath UTF8String], [path UTF8String]) != 0) {
         if (errorOut) *errorOut = [NSString stringWithFormat:@"Atomically renaming manifest failed: %s", strerror(errno)];
         unlink([tmpPath UTF8String]);
         return NO;
+    }
+    
+    // Compute SHA256 and write manifest.sha256 companion file
+    NSString* checksum = SHA256ForData(data);
+    NSString* checksumPath = [[path stringByDeletingLastPathComponent] stringByAppendingPathComponent:@"manifest.sha256"];
+    NSString* tmpChecksumPath = [checksumPath stringByAppendingPathExtension:@"tmp"];
+    
+    NSError* cErr = nil;
+    BOOL cOk = [checksum writeToFile:tmpChecksumPath atomically:YES encoding:NSUTF8StringEncoding error:&cErr];
+    if (!cOk) {
+        if (errorOut) *errorOut = [NSString stringWithFormat:@"Failed to write sha256 temp file: %@", cErr.localizedDescription];
+        return NO;
+    }
+    
+    int cFd = open([tmpChecksumPath UTF8String], O_RDONLY);
+    if (cFd >= 0) {
+        fsync(cFd);
+        close(cFd);
+    }
+    
+    if (rename([tmpChecksumPath UTF8String], [checksumPath UTF8String]) != 0) {
+        if (errorOut) *errorOut = [NSString stringWithFormat:@"Atomically renaming sha256 failed: %s", strerror(errno)];
+        unlink([tmpChecksumPath UTF8String]);
+        return NO;
+    }
+    
+    // Fsync the parent backup directory to persist the directory metadata changes
+    NSString* parentDir = [path stringByDeletingLastPathComponent];
+    int dirFd = open([parentDir UTF8String], O_RDONLY);
+    if (dirFd >= 0) {
+        fsync(dirFd);
+        close(dirFd);
     }
     
     return YES;
@@ -1544,17 +1848,57 @@ NSArray<NSString*>* ContextLines(const std::vector<std::string>& lines, NSIntege
         if (errorOut) *errorOut = @"Manifest file missing.";
         return nil;
     }
+    
     NSError* err = nil;
+    NSDictionary* attrs = [[NSFileManager defaultManager] attributesOfItemAtPath:path error:&err];
+    if (attrs) {
+        unsigned long long fileSize = [attrs fileSize];
+        if (fileSize > 256 * 1024) {
+            if (errorOut) *errorOut = @"Manifest exceeds maximum allowed size of 256KB.";
+            return nil;
+        }
+    }
+    
     NSData* data = [NSData dataWithContentsOfFile:path options:0 error:&err];
     if (err || !data) {
         if (errorOut) *errorOut = [NSString stringWithFormat:@"Failed to read manifest: %@", err.localizedDescription];
         return nil;
     }
+    
     NSDictionary* manifest = [NSJSONSerialization JSONObjectWithData:data options:0 error:&err];
     if (err || !manifest) {
         if (errorOut) *errorOut = [NSString stringWithFormat:@"Malformed JSON in manifest: %@", err.localizedDescription];
         return nil;
     }
+    
+    NSString* valErr = nil;
+    if (![self validateManifestStructure:manifest error:&valErr]) {
+        if (errorOut) *errorOut = valErr;
+        return nil;
+    }
+    
+    NSString* schemaVersion = manifest[@"schemaVersion"] ?: @"1.6.1";
+    if ([schemaVersion isEqualToString:@"1.6.2"]) {
+        NSString* checksumPath = [[path stringByDeletingLastPathComponent] stringByAppendingPathComponent:@"manifest.sha256"];
+        if (![[NSFileManager defaultManager] fileExistsAtPath:checksumPath]) {
+            if (errorOut) *errorOut = @"manifest.sha256 file missing.";
+            return nil;
+        }
+        
+        NSError* cErr = nil;
+        NSString* expectedChecksum = [[NSString stringWithContentsOfFile:checksumPath encoding:NSUTF8StringEncoding error:&cErr] stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+        if (cErr || !expectedChecksum) {
+            if (errorOut) *errorOut = @"Failed to read manifest.sha256.";
+            return nil;
+        }
+        
+        NSString* computedChecksum = SHA256ForData(data);
+        if (![computedChecksum isEqualToString:expectedChecksum]) {
+            if (errorOut) *errorOut = @"Manifest checksum verification failed.";
+            return nil;
+        }
+    }
+    
     return manifest;
 }
 
@@ -1597,13 +1941,10 @@ static BOOL IsTextBinary(NSString* text) {
     [[NSFileManager defaultManager] setAttributes:@{NSFilePosixPermissions: @(0700)} ofItemAtPath:backupDir error:nil];
     
     NSMutableDictionary* manifest = [NSMutableDictionary dictionary];
-    manifest[@"schemaVersion"] = @"1.6.1";
+    manifest[@"schemaVersion"] = @"1.6.2";
     manifest[@"comboId"] = comboId;
     manifest[@"workspaceRootHash"] = StableHashForString(ws);
-    manifest[@"workspaceRootCanonical"] = ws;
     manifest[@"createdAt"] = ISODateString([NSDate date]);
-    manifest[@"sessionId"] = _sessionToken ?: @"";
-    manifest[@"dietcodeVersion"] = @"1.6.1";
     
     NSMutableArray* chipVersions = [NSMutableArray array];
     for (NSDictionary* step in plan[@"steps"] ?: @[]) {
@@ -1950,56 +2291,84 @@ static BOOL IsTextBinary(NSString* text) {
         NSString* mErr = nil;
         NSDictionary* manifest = [self loadManifestFromPath:manifestPath error:&mErr];
         if (!manifest) {
+            NSString* status = @"invalid_manifest";
+            if ([mErr isEqualToString:@"Manifest file missing."]) {
+                status = @"manifest_missing";
+            } else if ([mErr isEqualToString:@"manifest.sha256 file missing."]) {
+                status = @"checksum_missing";
+            } else if ([mErr isEqualToString:@"Manifest checksum verification failed."] || [mErr isEqualToString:@"Failed to read manifest.sha256."]) {
+                status = @"checksum_mismatch";
+            } else if ([mErr hasPrefix:@"Unsupported schema version"]) {
+                status = @"unsupported_schema";
+            } else if ([mErr hasPrefix:@"Manifest exceeds maximum"]) {
+                status = @"invalid_manifest";
+            }
             [backupsReport addObject:@{
                 @"comboId": comboId,
-                @"status": @"corrupt",
+                @"status": status,
                 @"error": mErr ?: @"manifest.json missing or invalid"
             }];
             continue;
         }
         
+        NSString* schemaVersion = manifest[@"schemaVersion"] ?: @"1.6.1";
+        if (![schemaVersion isEqualToString:@"1.6.2"]) {
+            [backupsReport addObject:@{
+                @"comboId": comboId,
+                @"status": @"unsupported_schema",
+                @"error": [NSString stringWithFormat:@"Unsupported schema version: %@", schemaVersion]
+            }];
+            continue;
+        }
+        
         NSString* manifestWsHash = manifest[@"workspaceRootHash"];
-        NSString* manifestWsCanonical = manifest[@"workspaceRootCanonical"];
         BOOL wsMatches = currentWs.length > 0 && [manifestWsHash isEqualToString:StableHashForString(currentWs)];
+        if (!wsMatches) {
+            [backupsReport addObject:@{
+                @"comboId": comboId,
+                @"status": @"workspace_mismatch",
+                @"error": @"Workspace root hash mismatch."
+            }];
+            continue;
+        }
         
         NSMutableArray* filesReport = [NSMutableArray array];
-        BOOL hasConflict = NO;
-        BOOL hasCorrupt = NO;
+        NSString* finalStatus = @"valid";
         
         NSArray* files = manifest[@"files"] ?: @[];
         for (NSDictionary* fileEntry in files) {
             NSString* relPath = fileEntry[@"workspaceRelativePath"];
             NSString* absPath = currentWs.length > 0 ? AbsolutePathForRPCPath(relPath, currentWs) : nil;
             NSString* expectedPostHash = fileEntry[@"expectedPostimageHash"];
+            NSString* preimageHash = fileEntry[@"preimageHash"];
             NSString* blobHash = fileEntry[@"backupBlobHash"];
             BOOL wasMissing = [fileEntry[@"wasMissing"] boolValue];
-            BOOL wasBinary = [fileEntry[@"wasBinary"] boolValue];
             
             NSMutableDictionary* fileRep = [NSMutableDictionary dictionary];
             fileRep[@"workspaceRelativePath"] = relPath;
             
-            if (!wasMissing && !wasBinary) {
+            if (!wasMissing) {
                 NSString* blobPath = [backupDir stringByAppendingPathComponent:[NSString stringWithFormat:@"%@.blob", blobHash]];
                 if (![[NSFileManager defaultManager] fileExistsAtPath:blobPath]) {
-                    fileRep[@"status"] = @"blob_missing";
-                    hasCorrupt = YES;
-                    [filesReport addObject:fileRep];
-                    continue;
+                    finalStatus = @"blob_missing";
+                    break;
+                }
+                
+                NSData* blobData = [NSData dataWithContentsOfFile:blobPath];
+                if (!blobData) {
+                    finalStatus = @"blob_missing";
+                    break;
+                }
+                NSString* computedBlobHash = StableHashForData(blobData);
+                if (![computedBlobHash isEqualToString:preimageHash]) {
+                    finalStatus = @"blob_hash_mismatch";
+                    break;
                 }
             }
             
-            if (!wsMatches || !absPath) {
-                fileRep[@"status"] = @"workspace_mismatch";
-                hasConflict = YES;
-                [filesReport addObject:fileRep];
-                continue;
-            }
-            
-            if (!PathIsInsideWorkspace(absPath, currentWs)) {
-                fileRep[@"status"] = @"escaped";
-                hasConflict = YES;
-                [filesReport addObject:fileRep];
-                continue;
+            if (!absPath || !PathIsInsideWorkspace(absPath, currentWs)) {
+                finalStatus = @"workspace_mismatch";
+                break;
             }
             
             BOOL exists = [[NSFileManager defaultManager] fileExistsAtPath:absPath];
@@ -2007,51 +2376,67 @@ static BOOL IsTextBinary(NSString* text) {
                 if (exists) {
                     NSString* currentText = [self safeTextForFileAtPath:absPath];
                     NSString* currentHash = StableHashForString(currentText ?: @"");
-                    if ([currentHash isEqualToString:expectedPostHash]) {
-                        fileRep[@"status"] = @"match";
-                    } else {
-                        fileRep[@"status"] = @"mismatch";
-                        hasConflict = YES;
+                    if (![currentHash isEqualToString:expectedPostHash]) {
+                        finalStatus = @"postimage_mismatch";
                     }
-                } else {
-                    fileRep[@"status"] = @"match";
+                    
+                    if ([fileEntry[@"domain"] isEqualToString:@"buffer"]) {
+                        NSData* diskData = [NSData dataWithContentsOfFile:absPath];
+                        if (diskData) {
+                            NSString* diskHash = StableHashForData(diskData);
+                            if (![diskHash isEqualToString:expectedPostHash]) {
+                                finalStatus = @"postimage_mismatch";
+                            }
+                        }
+                    }
                 }
             } else {
                 if (!exists) {
-                    fileRep[@"status"] = @"deleted";
-                    hasConflict = YES;
+                    finalStatus = @"postimage_mismatch";
                 } else {
                     NSString* currentText = [self safeTextForFileAtPath:absPath];
                     if (currentText == nil || IsTextBinary(currentText)) {
-                        fileRep[@"status"] = @"binary_or_unreadable";
-                        hasConflict = YES;
+                        finalStatus = @"postimage_mismatch";
                     } else {
                         NSString* currentHash = StableHashForString(currentText);
-                        if ([currentHash isEqualToString:expectedPostHash]) {
-                            fileRep[@"status"] = @"match";
+                        if (![currentHash isEqualToString:expectedPostHash]) {
+                            finalStatus = @"postimage_mismatch";
+                        }
+                    }
+                    
+                    if ([fileEntry[@"domain"] isEqualToString:@"buffer"]) {
+                        NSData* diskData = [NSData dataWithContentsOfFile:absPath];
+                        if (!diskData) {
+                            finalStatus = @"postimage_mismatch";
                         } else {
-                            fileRep[@"status"] = @"mismatch";
-                            hasConflict = YES;
+                            NSString* diskHash = StableHashForData(diskData);
+                            if (![diskHash isEqualToString:preimageHash] && ![diskHash isEqualToString:expectedPostHash]) {
+                                finalStatus = @"postimage_mismatch";
+                            }
                         }
                     }
                 }
             }
+            
+            fileRep[@"status"] = [finalStatus isEqualToString:@"postimage_mismatch"] ? @"mismatch" : @"match";
             [filesReport addObject:fileRep];
         }
         
-        NSString* backupStatus = @"valid";
-        if (hasCorrupt) {
-            backupStatus = @"corrupt";
-        } else if (hasConflict) {
-            backupStatus = @"conflict";
+        if ([finalStatus isEqualToString:@"valid"]) {
+            BOOL allMatched = YES;
+            for (NSDictionary* r in filesReport) {
+                if ([r[@"status"] isEqualToString:@"mismatch"]) {
+                    allMatched = NO;
+                    break;
+                }
+            }
+            finalStatus = allMatched ? @"postimage_match" : @"postimage_mismatch";
         }
         
         [backupsReport addObject:@{
             @"comboId": comboId,
             @"createdAt": manifest[@"createdAt"] ?: @"",
-            @"workspaceRootCanonical": manifestWsCanonical ?: @"",
-            @"sessionId": manifest[@"sessionId"] ?: @"",
-            @"status": backupStatus,
+            @"status": finalStatus,
             @"files": filesReport
         }];
     }
@@ -2746,8 +3131,21 @@ static BOOL IsTextBinary(NSString* text) {
         NSString* mErr = nil;
         NSDictionary* manifest = [self loadManifestFromPath:manifestPath error:&mErr];
         if (!manifest) {
-            *outErrCode = [mErr isEqualToString:@"Manifest file missing."] ? @"backup_manifest_missing" : @"backup_manifest_invalid";
+            if ([mErr isEqualToString:@"Manifest file missing."]) {
+                *outErrCode = @"backup_manifest_missing";
+            } else if ([mErr isEqualToString:@"manifest.sha256 file missing."] || [mErr isEqualToString:@"Manifest checksum verification failed."]) {
+                *outErrCode = @"backup_corrupt";
+            } else {
+                *outErrCode = @"backup_manifest_invalid";
+            }
             *outErrMsg = mErr ?: @"Manifest missing or invalid.";
+            return;
+        }
+        
+        NSString* schemaVersion = manifest[@"schemaVersion"] ?: @"1.6.1";
+        if (![schemaVersion isEqualToString:@"1.6.2"]) {
+            *outErrCode = @"backup_manifest_invalid";
+            *outErrMsg = [NSString stringWithFormat:@"Unsupported schema version '%@'. Rollback is only supported for schema version 1.6.2.", schemaVersion];
             return;
         }
         
@@ -2764,7 +3162,7 @@ static BOOL IsTextBinary(NSString* text) {
         for (NSDictionary* fileEntry in manifest[@"files"] ?: @[]) {
             [paths addObject:fileEntry[@"workspaceRelativePath"] ?: @""];
         }
-        *outResult = @{ @"schemaVersion": @"1.6.1", @"reverted": @YES, @"files": paths };
+        *outResult = @{ @"schemaVersion": @"1.6.2", @"reverted": @YES, @"files": paths };
         return;
     }
     
@@ -4534,7 +4932,33 @@ static BOOL IsTextBinary(NSString* text) {
                  paths:(NSString*)paths {
     
     NSString* homeDir = NSHomeDirectory();
-    NSString* logPath = [[homeDir stringByAppendingPathComponent:@".dietcode"] stringByAppendingPathComponent:@"control_audit.log"];
+    NSString* dietcodeDir = [homeDir stringByAppendingPathComponent:@".dietcode"];
+    NSString* logPath = [dietcodeDir stringByAppendingPathComponent:@"control_audit.log"];
+    
+    NSFileManager* fm = [NSFileManager defaultManager];
+    NSError* attrErr = nil;
+    NSDictionary* attrs = [fm attributesOfItemAtPath:logPath error:&attrErr];
+    if (attrs) {
+        unsigned long long size = [attrs fileSize];
+        if (size >= 5 * 1024 * 1024) {
+            NSString* logPath3 = [dietcodeDir stringByAppendingPathComponent:@"control_audit.log.3"];
+            NSString* logPath2 = [dietcodeDir stringByAppendingPathComponent:@"control_audit.log.2"];
+            NSString* logPath1 = [dietcodeDir stringByAppendingPathComponent:@"control_audit.log.1"];
+            
+            if ([fm fileExistsAtPath:logPath3]) {
+                [fm removeItemAtPath:logPath3 error:nil];
+            }
+            if ([fm fileExistsAtPath:logPath2]) {
+                [fm moveItemAtPath:logPath2 toPath:logPath3 error:nil];
+            }
+            if ([fm fileExistsAtPath:logPath1]) {
+                [fm moveItemAtPath:logPath1 toPath:logPath2 error:nil];
+            }
+            if ([fm fileExistsAtPath:logPath]) {
+                [fm moveItemAtPath:logPath toPath:logPath1 error:nil];
+            }
+        }
+    }
     
     NSDateFormatter* formatter = [[NSDateFormatter alloc] init];
     [formatter setDateFormat:@"yyyy-MM-dd HH:mm:ss"];
@@ -4542,6 +4966,10 @@ static BOOL IsTextBinary(NSString* text) {
     
     NSString* logLine = [NSString stringWithFormat:@"[%@] caller: %@ | method: %@ | permission: %@ | duration: %lldms | result: %@ | paths: %@\n", 
                          timestamp, caller, method, permission, duration, result, paths ?: @""];
+    
+    if (logLine.length > 8192) {
+        logLine = [[logLine substringToIndex:8191] stringByAppendingString:@"\n"];
+    }
     
     std::ofstream out([logPath UTF8String], std::ios::app);
     if (out.is_open()) {
