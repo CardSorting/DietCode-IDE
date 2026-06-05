@@ -1,238 +1,231 @@
-# DietCode v1.6 Deterministic Local Transaction Kernel
-## Architecture & Hardened Runtime Specification
+# DietCode v1.6.1 Hardened Local Transaction Kernel
+## Architecture & Hardened Durable Checkpoint Specification
 
-This specification defines the DietCode v1.6 Local Transaction Kernel, evolving it from a sequential combo runner into a production-grade, deterministic, fail-closed operations substrate for coding agents.
+This specification defines the DietCode v1.6.1 Local Transaction Kernel, establishing strict, crash-safe, durable checkpoint semantics for bounded agent code mutation.
 
 ---
 
 ### Core Philosophy
-* **Mechanically Constrained:** DietCode does not infer intent, decide repair strategies, or make reasoning assumptions. It validates, constrains, executes, logs, and rolls back only when mechanically safe.
-* **Hermetic and Isolated:** No background watchers, no cloud telemetry, no embedded vectors, and no self-modification.
-* **Explicit Execution Contracts:** All state transitions, budget bounds, path checks, and lock acquisitions must be explicitly validated and fail-closed if invalid.
+* **Verified Preimages:** Checkpoints are verified transaction preimages. They represent historical snapshots of modified files *before* a specific combo execution and are not general-purpose undo logs or workspace backplanes.
+* **Deterministic Rollback legality:** Reverting changes is only legal when the kernel proves: "This exact combo changed these exact files from this exact preimage into this exact postimage, and nothing else has mutated them since."
+* **Fail-Closed on Mismatch:** Any deviation in manifest validity, file hashes, path canonicalization, workspace containment, or open buffer states must block rollback immediately, failing closed with a stable, machine-readable error.
+
+---
+
+## The Verified Backup Manifest Format
+
+Every transaction creates a backup folder: `~/.dietcode/backups/<combo-id>/`. This folder contains backup blobs of preimages (`[backupBlobHash].blob`) and a committed `manifest.json`.
+
+```json
+{
+  "schemaVersion": "1.6.1",
+  "comboId": "combo-1234",
+  "workspaceRootHash": "1469598103934665603ULL",
+  "workspaceRootCanonical": "/Users/user/Desktop/project",
+  "createdAt": "2026-06-05T12:00:00Z",
+  "sessionId": "unix_socket_session_token_hash",
+  "dietcodeVersion": "1.6.1",
+  "chipVersions": [
+    "patch.apply@1"
+  ],
+  "files": [
+    {
+      "workspaceRelativePath": "src/main.cpp",
+      "canonicalPathHash": "a24f0c97de898bf1",
+      "domain": "disk",
+      "preimageHash": "df812ca43f0190ab",
+      "expectedPostimageHash": "fe8912c98ad23290",
+      "backupBlobHash": "df812ca43f0190ab",
+      "sizeBytes": 2048,
+      "newlineMode": "lf",
+      "wasMissing": false,
+      "wasBinary": false
+    }
+  ]
+}
+```
 
 ---
 
 ## Subsystem Specifications (1 - 50)
 
 ### 1. Runtime Boundary
-* **Vulnerability:** Request/response line fragmentation on Unix sockets allows trailing bytes from oversized payloads to pollute subsequent operations.
-* **Specification:** The IPC channel is a local UNIX domain socket at `~/.dietcode/control.sock`. The socket server reads messages using a strict line-based protocol terminated by `\n`. If any incoming stream segment exceeds `kMaxRequestBytes` (1MB) or fails JSON parsing, the server purges the channel buffer, sends a structured `invalid_request` error, and forcibly closes the client socket.
+* **Boundary Rules:** The control Unix socket is bound to `~/.dietcode/control.sock`. Incoming message frames must be parsed line-by-line using a size limit of `kMaxRequestBytes` (1MB). If a frame boundary is breached, the read buffer is cleared and the socket connection is immediately closed to prevent request flooding.
 
 ### 2. Core Runtime Model
-* **Vulnerability:** Sync execution of terminal runners or file operations on the AppKit main UI thread blocks the editor interface.
-* **Specification:** The runtime logic runs on a dedicated background serial queue `com.dietcode.runtime.kernel`. Main thread synchronization is limited to editor document buffer text retrievals and replacements, isolating the UI from long-running command execution.
+* **Model Rules:** The kernel runs long-running operations (such as grep, find, verification, and combo loop execution) on a private serial background thread queue `com.dietcode.runtime.execution`. AppKit UI objects are accessed synchronously on the Cocoa main thread via `dispatch_sync` only during buffer queries and replacements.
 
 ### 3. Static Chip Registry
-* **Vulnerability:** Weakly checked dynamic arrays of dictionaries defining supported commands.
-* **Specification:** The register of supported execution units ("chips") is a static, compile-time table of C++ structures. The registry defines parameter types, permission level, and rollback support. No dynamic additions are permitted.
+* **Registry Rules:** Supported executable units ("chips") are registered in a compiled static structural array. Dynamic registration or dynamic code injection is prohibited.
 
 ### 4. Chip Metadata Schema
-* **Vulnerability:** Typo-prone dynamic lookup maps.
-* **Specification:** Every chip registered must adhere to a strict compiled structure:
-  ```cpp
-  struct ChipDefinition {
-      std::string name;
-      int version;
-      std::string category;
-      PermissionLevel permission;
-      bool deterministic;
-      IdempotencyClass idempotency;
-      SideEffects side_effects;
-      std::vector<std::string> required_params;
-  };
-  ```
+* **Schema Rules:** The static registry defines structural metadata for each chip, detailing input types, capabilities, permission tiers (`Read`, `Edit`, `Execute`, `Destructive`), determinism, and side-effects.
 
 ### 5. Chip Versioning and Compatibility
-* **Vulnerability:** Mismatched versions executed without validation.
-* **Specification:** Steps in a combo payload must declare an exact chip version (e.g., `file.readRange@1`). Mismatches between the step declaration and the compiled registry will trigger immediate validation rejection (`unknown_chip` / `version_mismatch`).
+* **Versioning Rules:** Incoming step requests must specify an exact version string (e.g. `patch.apply@1`). If the requested version is not supported by the static registry, validation fails with `unknown_chip`.
 
 ### 6. Contract Semantics
-* **Vulnerability:** Undefined parameter structures causing downstream runtime assertion crashes.
-* **Specification:** Before executing any chip, parameter keys and types are validated against the registry schema. Type coercion is disabled: integer variables must be numeric JSON types, arrays must be strictly validated for length, and strings must be non-null.
+* **Contract Rules:** Chip input parameter validation is strictly enforced. Schema checks verify keys and value types. No type-coercion is performed. Missing required inputs fail execution immediately.
 
 ### 7. Preconditions and Postconditions
-* **Vulnerability:** Applying changes to files that were edited externally after combo validation.
-* **Specification:** Steps executing writes must declare pre-conditions (preimage hash) and post-conditions (postimage hash). Before mutation, the file is read, and its SHA-256 hash verified. If it mismatches, the step fails immediately.
+* **Verification Rules:** Write steps must declare preconditions (expected target state preimage hash) and postconditions (expected output postimage hash). Steps fail if target preimages differ from actual file hashes.
 
 ### 8. Side-Effect Declarations
-* **Vulnerability:** Declared side-effects (e.g., `runsProcess`) are never actively monitored.
-* **Specification:** The kernel enforces declared constraints during validation. If a plan contains a step whose registry metadata declares `runsProcess: false` but its payload attempts execution, the validation pipeline aborts.
+* **Enforcement Rules:** The kernel inspects steps for side-effect declarations. If a step declares no workspace side-effects (`writesWorkspace: false`), the kernel blocks any filesystem write operations initiated by that step.
 
 ### 9. Idempotency Classes
-* **Vulnerability:** Multiple read-only steps targeting the same file execute repetitive disk I/O.
-* **Specification:** The kernel implements a transient transaction cache for chips marked `conditionally_idempotent`. If no mutation occurred in the current transaction, consecutive read-only steps fetch from the cache.
+* **Idempotency Rules:** Chips are categorized as `non_idempotent` or `conditionally_idempotent`. Pure read queries are cached inside the transactional boundary session and reused if no mutations occur.
 
 ### 10. Output Reference and Wiring Model
-* **Vulnerability:** Hardcoded sequential flow without variable interpolation.
-* **Specification:** Supported dynamic parameters resolve references to previous outputs using strict bracket notation (e.g., `{{steps.step1.result.text}}`). The references are validated statically to prevent circular dependency loops.
+* **Wiring Rules:** Step outputs are wired to subsequent steps using strict templating (e.g., `{{steps.s1.result.text}}`). Graph validation checks for circular references and missing parameters before execution starts.
 
 ### 11. Combo Schema
-* **Vulnerability:** Unrecognized JSON parameters allowed, opening pathways for injection.
-* **Specification:** The incoming plan is validated against a strict schema. Unrecognized top-level or step-level keys trigger immediate plan invalidation.
+* **Schema Rules:** Plan validation checks the entire JSON payload. The presence of unrecognized top-level or step-level keys triggers an immediate `invalid_combo` failure.
 
 ### 12. Combo Validation Pipeline
-* **Vulnerability:** Partial validation checks leading to halfway execution.
-* **Specification:** A five-stage validation pipeline runs atomically before execution:
-  `Structure Checks` -> `Security & Token Checks` -> `Path Normalization & Scope` -> `Dependency Graph Sorting` -> `Dry-run Preimage Check`.
+* **Pipeline Phases:** validation operates as an atomic multi-phase checker:
+  `Structure Checks` -> `Token Validation` -> `Path Canonicalization & Scope Check` -> `Dependency Cycle Check` -> `Preimage Verification`.
 
 ### 13. Immutable Execution Plan Generation
-* **Vulnerability:** Step details updated during execution modify the input plan.
-* **Specification:** Once validated, the plan is copied into a read-only C++ structure. The executor reads exclusively from this immutable structure.
+* **Immutability Rules:** Once validated, the combo plan is compiled into a read-only execution block. No step modification or injection is permitted at runtime.
 
 ### 14. Step Dependency Legality
-* **Vulnerability:** Cyclic needs lists cause infinite loops or invalid execution orders.
-* **Specification:** The dependency graph is topological-sorted. If sorting fails due to cycles, validation throws `cyclic_dependency`.
+* **Dependency Rules:** Dependency graphs must be cycle-free. Cycles or unresolvable needs arrays trigger plan validation failures.
 
 ### 15. Sequential vs Parallel Execution Policy
-* **Vulnerability:** Concurrent combos corrupting mutual paths.
-* **Specification:** The kernel maintains a global sequential lock. Only one combo containing mutation actions is allowed to execute at a time. All other write combos are queued or rejected.
+* **Execution Rules:** The kernel enforces single-transaction write locking. Only one mutation combo can run at a time. Read-only queries can run in parallel if targeting non-locked paths.
 
 ### 16. Execution State Machine
-* **Vulnerability:** State tracked using simple string updates.
-* **Specification:** The combo lifecycle operates under a strict finite state machine:
-  `Validated` -> `Locked` -> `Executing` -> `RollingBack` -> `Terminated`. Direct state changes are enforced through a unified transition manager.
+* **State Table:** State transitions are managed explicitly:
+  `Idle` -> `Validated` -> `Locked` -> `Executing` -> `RollingBack` -> `Terminated`. Illegal transitions trigger transaction abort.
 
 ### 17. Step Lifecycle Phases
-* **Vulnerability:** Phase transitions are implicit and not verified.
-* **Specification:** Steps execute strictly through three phases: `Preflight` (verify lock, preimage, and scope) -> `Action` (execute code) -> `Postflight` (verify postimage and write backup).
+* **Step Phases:** Each step runs through: `Preflight` (scope/lock checks) -> `Execution` (action) -> `Postflight` (update expected postimage hashes, log trace).
 
 ### 18. Append-Only Trace Model
-* **Vulnerability:** Memory trace records are lost during runtime crashes.
-* **Specification:** Every state change and step result is written immediately to a persistent append-only log file at `~/.dietcode/transactions/history.log`.
+* **Trace Rules:** Execution traces are flushed directly to disk at `~/.dietcode/transactions/history.log` in an append-only format immediately after each step completes.
 
 ### 19. Path Normalization
-* **Vulnerability:** Traversal segments (`/../`) and relative paths bypass simple prefix checks.
-* **Specification:** All path inputs are immediately normalized to their absolute canonical path representation using `std::filesystem::canonical`. If a target file does not exist, its parent directory is resolved and canonicalized.
+* **Normalization Rules:** All path inputs are immediately normalized to their absolute canonical paths via `std::filesystem::canonical`. If a target does not exist, the parent path is canonicalized to prevent traversal escapes.
 
 ### 20. Symlink Escape Prevention
-* **Vulnerability:** Symlinks inside the workspace pointing to outside directories allow reading/writing sensitive system files.
-* **Specification:** The canonical resolver resolves all symlinks. If the resolved path points outside the workspace, it is blocked. Creation of symlink files is disallowed.
+* **Symlink Rules:** No operation may create a symlink. If canonical path resolution points to a location outside the workspace root, the operation is blocked. If a target path is replaced by a symlink during execution, rollback is aborted.
 
 ### 21. Scope Enforcement
-- **Vulnerability:** Weak, bypassable prefix tests.
-- **Specification:** Scope limits (include/exclude globs) are evaluated against canonicalized absolute paths relative to the workspace root. Excludes override includes.
+* **Scope Rules:** Folder-level and file-level inclusions/exclusions are evaluated using normalized canonical paths relative to the workspace. Excludes take absolute precedence over includes.
 
 ### 22. Budget Accounting
-* **Vulnerability:** Mutable counters easily bypassed or overwritten.
-* **Specification:** Execution budgets (limits on step counts, patches, and verification tasks) are loaded as read-only constants. Step consumption increments atomic execution counters. Reaching any limit triggers transaction abort.
+* **Budget Rules:** Step limits, patch sizes, verification runs, and files touched are checked against read-only constants. Exceeding any budget limit triggers immediate combo termination and rollback.
 
 ### 23. Permission Model
-* **Vulnerability:** No authentication for socket connections.
-* **Specification:** A session-specific token is written to `~/.dietcode/session.token` (read-only by user, `0600`). Every incoming socket request must present this token, or it is immediately dropped.
+* **Permission Rules:** Every RPC request must pass the active session token. Destructive methods (like `git.discard` or `workspace.openFolder`) require user confirmation via UI prompt.
 
 ### 24. Confirmation Flow Integrity
-* **Vulnerability:** Blocked main thread causes socket read timeouts.
-* **Specification:** Destructive actions requiring user confirmation are run with an asynchronous timer. If user consent is not granted within 60 seconds, the kernel defaults to "Deny", aborts the transaction, and rolls back.
+* **Confirmation Rules:** UI confirmations run with an asynchronous timer. If the user does not respond within 60 seconds, the kernel defaults to "Deny" and aborts the transaction.
 
 ### 25. Dirty Buffer/Editor Synchronization
-* **Vulnerability:** Direct file modification on disk corrupts active editor windows with unsaved changes.
-* **Specification:** The kernel maintains a registry of open tabs. If a path has a dirty editor buffer, disk mutations are rejected. The change must be applied directly to the in-memory document.
+* **Synchronization Rules:** If a target path contains unsaved changes in the editor, disk mutations are rejected. The patch must be applied to the in-memory document first.
 
 ### 26. Disk vs Buffer Mutation Semantics
-* **Vulnerability:** Ambiguity on whether a step modifies the disk or the buffer.
-* **Specification:** Step schemas must define an execution domain: `disk` or `buffer`. If domain is `buffer` and the file is not open, the step fails. If domain is `disk` and the file is open and dirty, the step fails.
+* **Domain Rules:** Steps must declare mutation domain: `disk` or `buffer`. If domain is `buffer` and the file is not open, the step fails. If domain is `disk` and the file is open and dirty, the step fails.
 
 ### 27. Patch Validation and Apply Semantics
-* **Vulnerability:** Validation and application are decoupled, allowing race conditions.
-* **Specification:** The apply step recalculates the diff validation immediately prior to executing the write. If the target file modification timestamp changes during the execution phase, it aborts.
+* **Patch Rules:** The patch validator checks syntax and applies diff previews. Preimage hashes are validated immediately before write application.
 
 ### 28. Checkpoint Model
-* **Vulnerability:** Volatile checkpoints overwritten during batch processes.
-* **Specification:** Before any mutation, a backup copy of the target file is written to `~/.dietcode/backups/<combo-id>/`. This backup directory is tracked inside the transaction context.
+* **Checkpoint Rules:** Checkpoints represent verified transaction preimages stored on disk. Creation follows the atomic protocol:
+  1. Write preimage content to `[backupBlobHash].blob`.
+  2. Fsync the blob.
+  3. Write `manifest.tmp`.
+  4. Fsync `manifest.tmp`.
+  5. Atomically rename `manifest.tmp` to `manifest.json`.
 
 ### 29. Rollback Legality and Conflicts
-* **Vulnerability:** Reverting modified files blindly overwrites external edits.
-* **Specification:** A rollback fails closed if the file's current state on disk does not match the post-mutation state from the execution trace. Manual user resolution is required.
+* **Rollback Preconditions:** Rollback is rejected (failing closed) if:
+  - Manifest is missing or invalid.
+  - Blob preimage hash does not match manifest.
+  - Current file hash does not match `expectedPostimageHash`.
+  - The target file was modified externally after the combo completed.
+  - The target file became binary.
 
 ### 30. Cross-Combo Locking
-* **Vulnerability:** Releasing locks between steps allows concurrent edits to pollute transactions.
-* **Specification:** All paths to be modified are locked upon transaction entry. Locks are held globally and released only when the entire combo achieves a terminal state.
+* **Locking Rules:** All path locks are acquired at the start of `runComboWithPlan` and held globally. They are released only when the combo transitions to a terminal state (`complete` or `rolled_back`).
 
 ### 31. External Edit Detection
-* **Vulnerability:** Git status modification checks are slow and run asynchronously.
-* **Specification:** Record file modification timestamps (`mtime`) and file size on lock acquisition. If subsequent steps detect a change in `mtime` without kernel intervention, it aborts.
+* **Detection Rules:** File modification times (`mtime`) and sizes are checked before any step execution. If they have changed since the combo started (without kernel intervention), the combo aborts.
 
 ### 32. Verify Command Execution
-* **Vulnerability:** Exit status validation is parsed from terminal stdout, allowing agents to spoof success by printing false logs.
-* **Specification:** Verification commands are run using a dedicated `NSTask` pipeline. The process exit code is captured directly from the OS process table. Terminal output parsing for exit code resolution is disallowed.
+* **Verification Rules:** Verify commands are run using a dedicated `NSTask`. The process exit code is fetched directly from the OS process table. Terminal output parsing for exit status resolution is prohibited.
 
 ### 33. Verify Side Effects
-* **Vulnerability:** Compilation side-effects (e.g. build outputs) can overwrite locked source code.
-* **Specification:** Verify commands must run with high-priority read-only source mappings. Write commands from build scripts are restricted to build directories.
+* **Side-Effect Rules:** Verify commands are restricted to build directories. Writes to locked source code locations are blocked.
 
 ### 34. Terminal Process Tracking
-* **Vulnerability:** Spawning shells leaves orphaned processes running upon abort.
-* **Specification:** The kernel tracks task Process Group IDs (PGID). On transaction abort, a `SIGKILL` is dispatched to the entire process group.
+* **Process Rules:** Spawning terminal tasks registers their Process Group ID (PGID). On cancel or abort, `SIGKILL` is sent to the PGID to clean up child processes.
 
 ### 35. Cancellation Semantics
-* **Vulnerability:** Cancellation commands are ignored during active subprocess execution.
-* **Specification:** Sending `combo.cancel` flags the active transaction and dispatches immediate termination signals to the running verify tasks, triggering rollback.
+- **Cancellation Rules:** Receiving `combo.cancel` halts execution and dispatches immediate SIGKILL to active verify tasks, initiating rollback.
 
 ### 36. Timeout Semantics
-* **Vulnerability:** Slow build execution runs indefinitely.
-* **Specification:** A hard timeout limit of 180 seconds is enforced for verification commands. If reached, the subprocess is killed and the transaction aborts.
+* **Timeout Rules:** A hard execution timeout of 180 seconds is enforced for verify commands. Reaching the limit kills the task and aborts the combo.
 
 ### 37. Result Paging and Streaming
-* **Vulnerability:** Giant files read via `file.read` overwhelm socket memory.
-* **Specification:** Socket outputs are capped at `kMaxResponseBytes` (4MB). File reads exceeding `kMaxFileTextBytes` (1MB) must be requested via `file.readRange`.
+* **Paging Rules:** RPC responses are capped at `kMaxResponseBytes` (4MB). File reads over `kMaxFileTextBytes` (1MB) must be paged via `file.readRange`.
 
 ### 38. Result Handle Lifecycle
-* **Vulnerability:** Storing task statuses indefinitely results in memory leaks.
-* **Specification:** Completed transaction payloads and logs are pruned from memory after 1 hour of inactivity.
+* **Lifecycle Rules:** Completed transaction traces and backup registers are deleted from memory after 1 hour of inactivity.
 
 ### 39. Repair Chip Boundaries
-* **Vulnerability:** Repair steps retrieve context files without validation checks.
-* **Specification:** Paths requested in repair parameters are verified against the standard workspace prefix and scope checks.
+* **Repair Rules:** Inputs to repair chips must be checked for workspace containment and glob scopes to prevent text leaks.
 
 ### 40. Failure Propagation
-* **Vulnerability:** Arbitrary string logs returned on failure.
-* **Specification:** Errors are formatted as standard JSON-RPC 2.0 error blocks with numeric error codes.
+* **Propagation Rules:** Failed steps return standard JSON-RPC 2.0 error payloads.
 
 ### 41. Stable Error Taxonomy
-* **Vulnerability:** Inconsistent error naming complicates automated recovery.
-* **Specification:** Static error catalog:
-  - `-32601`: `method_not_found`
-  - `4001`: `outside_workspace`
-  - `4002`: `lock_conflict`
-  - `4003`: `budget_exceeded`
-  - `4004`: `verification_failed`
-  - `4005`: `rollback_conflict`
+* **Error Table:**
+  - `backup_manifest_missing`: The checkpoint `manifest.json` is not found.
+  - `backup_manifest_invalid`: The manifest has invalid JSON or version.
+  - `backup_corrupt`: Backup blobs are missing or fail integrity checks.
+  - `backup_scope_mismatch`: Path escapes canonical boundaries.
+  - `backup_workspace_mismatch`: Checkpoint workspace does not match current workspace.
+  - `rollback_postimage_mismatch`: Current target state does not match expected postimage.
+  - `rollback_preimage_mismatch`: Preimage blob hash mismatch.
+  - `rollback_target_escaped`: Path resolves outside workspace.
+  - `rollback_buffer_conflict`: Unsaved edits exist in target editor buffer.
+  - `rollback_partial_failure`: Failed to restore a subset of files.
+  - `rollback_lock_unavailable`: Path is locked by another combo.
+  - `checkpoint_write_failed`: Failed to write backup blob.
+  - `checkpoint_incomplete`: manifest.json commit failed.
+  - `checkpoint_disk_full`: Checkpoint failed due to disk space exhaustion.
+  - `recovery_scan_only`: Restores are blocked on recovery scan.
 
 ### 42. Crash Recovery Honesty
-* **Vulnerability:** Startup state is corrupt after unhandled IDE crashes.
-* **Specification:** A transactional journal file `~/.dietcode/transactions/pending.journal` logs active combos. On start, the server checks this journal. If a pending combo exists, rollback is automatically triggered from the backup folder.
+* **Crash Policy:** Active transactions write a journal `~/.dietcode/transactions/pending.journal`. After a crash, the kernel does not auto-rollback. It only exposes `recovery.scan` to list orphans. Restores require manual confirmation and full validation checks.
 
 ### 43. Memory Pressure Behavior
-* **Vulnerability:** Parsing large payloads blocks key threads.
-* **Specification:** The Unix socket parser rejects any raw message frame larger than 2MB immediately.
+* **Memory Rules:** Incoming message frames larger than 2MB are rejected by the socket layer immediately.
 
 ### 44. Resource Exhaustion Limits
-* **Vulnerability:** High request counts exhaust open file descriptors.
-* **Specification:** The UNIX socket server accepts a maximum of 2 active client connections at any time.
+* **Exhaustion Rules:** Maximum active socket connections: 2. Maximum concurrent subprocess tasks: 1.
 
 ### 45. Large Repository Behavior
-* **Vulnerability:** Workspace lists hang on massive projects.
-* **Specification:** Directory scanners are limited to a maximum depth of 10. Folders matching the default exclusions list (`.git`, `node_modules`, `build`, `dist`) are skipped immediately before checking contents.
+* **Large Repo Rules:** Directory scanner searches are limited to depth 10. Excluded directories are skipped immediately.
 
 ### 46. Replay and Reproducibility
-* **Vulnerability:** Steps lack the state records needed for replication.
-* **Specification:** Trace logs include inputs, pre-images, post-images, and exit codes, allowing step-by-step transaction replay.
+* **Replay Rules:** Step trace payloads preserve preimages, exact patches, and postimages for step-by-step transaction replay.
 
 ### 47. RPC Schema Evolution
-* **Vulnerability:** Mismatched client/server versions cause parser failures.
-* **Specification:** All requests must declare a version header: `schemaVersion: 1.6`. Mismatches are rejected.
+* **RPC Rules:** Requests must declare `schemaVersion: 1.6.1`. Mismatches are rejected.
 
 ### 48. Abuse Resistance
-* **Vulnerability:** High-speed loops exhaust system cycles.
-* **Specification:** Rate limiting restricts agents to a maximum of 10 requests per second.
+* **Rate Limits:** Enforce token-bucket rate limiting of 10 requests per second (max 2 writes/second).
 
 ### 49. Security Boundaries
-* **Vulnerability:** Improper workspace paths point to sensitive system directories.
-* **Specification:** Workspace roots must reside inside safe home directory structures. Roots in system folders (e.g. `/`, `/var`, `/etc`) are rejected.
+* **Workspace Safety:** Workspace folders are restricted to user home directory paths. System folders are blocked.
 
 ### 50. Explicit Anti-Goals
-* **Specification:**
-  - No background directory indexing.
-  - No network lookups.
+* **Anti-Goals:**
   - No autonomous planner loops.
-  - No self-repair of code without external instruction.
+  - No background project graph indexing.
+  - No internet network requests.
+  - No self-repair of compiler failures without explicit instructions.

@@ -419,6 +419,53 @@ NSArray<NSString*>* ContextLines(const std::vector<std::string>& lines, NSIntege
 }
 }
 
+@interface DietCodeControlServer ()
+
+- (void)acceptLoop;
+- (void)handleClient:(int)clientFd;
+- (void)processRequest:(const std::string&)requestStr clientFd:(int)clientFd;
+- (NSString*)permissionLevelForMethod:(NSString*)method params:(NSDictionary*)params;
+- (void)executeMethod:(NSString*)method params:(NSDictionary*)params outResult:(NSDictionary**)outResult outErrCode:(NSString**)outErrCode outErrMsg:(NSString**)outErrMsg outPaths:(NSString**)outPaths;
+- (void)sendError:(NSString*)reqId code:(id)code message:(NSString*)message clientFd:(int)clientFd;
+- (void)sendSuccess:(NSString*)reqId result:(NSDictionary*)result clientFd:(int)clientFd;
+- (void)logAuditMethod:(NSString*)method caller:(NSString*)caller permission:(NSString*)permission duration:(long long)duration result:(NSString*)result paths:(NSString*)paths;
+- (NSArray<NSDictionary*>*)rpcMethodDescriptions;
+- (NSDictionary*)descriptionForRPCMethod:(NSString*)method;
+- (NSArray<NSDictionary*>*)chipRegistry;
+- (NSDictionary*)metadataForChip:(NSString*)chip;
+- (NSDictionary*)primitiveForChip:(NSString*)chip params:(NSDictionary*)params;
+- (NSString*)chipNameForStep:(NSDictionary*)step;
+- (NSDictionary*)paramsForComboStep:(NSDictionary*)step;
+- (NSArray<NSString*>*)pathsDeclaredByParams:(NSDictionary*)params chip:(NSString*)chip;
+- (BOOL)comboPolicy:(NSDictionary*)policy allowsPermission:(NSString*)permission;
+- (BOOL)validateCombo:(NSDictionary*)combo normalizedPlan:(NSDictionary**)planOut errors:(NSArray<NSDictionary*>**)errorsOut;
+- (NSDictionary*)serializableCombo:(NSMutableDictionary*)combo;
+- (NSUInteger)activeComboCount;
+- (NSArray<NSString*>*)mutationPathsForChip:(NSString*)chip params:(NSDictionary*)params;
+- (BOOL)acquireMutationLocks:(NSArray<NSString*>*)paths comboId:(NSString*)comboId error:(NSString**)errorOut;
+- (void)releaseMutationLocks:(NSArray<NSString*>*)paths comboId:(NSString*)comboId;
+- (NSDictionary*)executeComboStep:(NSDictionary*)step combo:(NSMutableDictionary*)combo sequence:(NSInteger)sequence;
+- (NSDictionary*)runComboWithPlan:(NSDictionary*)plan comboId:(NSString*)comboId;
+- (BOOL)writeManifest:(NSDictionary*)manifest toPath:(NSString*)path error:(NSString**)errorOut;
+- (NSDictionary*)loadManifestFromPath:(NSString*)path error:(NSString**)errorOut;
+- (NSDictionary*)validatePatchAtPath:(NSString*)path patch:(NSString*)patch currentText:(NSString*)currentTextOverride;
+- (NSDictionary*)currentChangesInfo;
+- (NSDictionary*)runVerificationCommand:(NSString*)command cwd:(NSString*)cwd;
+- (NSDictionary*)verificationStatus;
+- (NSDictionary*)contextSnapshotPayload;
+- (NSArray<NSString*>*)verificationFailureLines;
+- (void)recordLastRPCPatchPaths:(NSArray<NSDictionary*>*)records;
+- (BOOL)restorePatchRecords:(NSArray<NSDictionary*>*)records error:(NSString**)errorOut;
+- (BOOL)path:(NSString*)path isAllowedByScope:(NSDictionary*)scope;
+- (BOOL)dirtyBufferExistsAtPath:(NSString*)path;
+- (BOOL)task:(NSMutableDictionary*)task canConsumeStep:(NSDictionary*)step error:(NSString**)errorOut;
+- (NSDictionary*)serializableTask:(NSMutableDictionary*)task;
+- (NSDictionary*)primitiveForWorkbenchStep:(NSDictionary*)step;
+- (NSDictionary*)executeWorkbenchStep:(NSDictionary*)step task:(NSMutableDictionary*)task;
+- (NSDictionary*)repairContextForFailure:(NSString*)failure params:(NSDictionary*)params;
+
+@end
+
 @implementation DietCodeControlServer {
     int _serverFd;
     NSThread* _acceptThread;
@@ -440,6 +487,7 @@ NSArray<NSString*>* ContextLines(const std::vector<std::string>& lines, NSIntege
     dispatch_queue_t _executionQueue;
     BOOL _globalMutationLock;
     NSDictionary* _lastVerifyStatus;
+    NSString* _lastComboId;
 }
 
 - (instancetype)initWithWindowController:(DietCodeWindowController*)controller {
@@ -467,6 +515,7 @@ NSArray<NSString*>* ContextLines(const std::vector<std::string>& lines, NSIntege
             @"exitCode": [NSNull null],
             @"passed": @NO
         };
+        _lastComboId = nil;
     }
     return self;
 }
@@ -489,6 +538,17 @@ NSArray<NSString*>* ContextLines(const std::vector<std::string>& lines, NSIntege
     __block NSString* res = nil;
     dispatch_sync(dispatch_get_main_queue(), ^{
         res = [_windowController textForFileAtPath:path];
+    });
+    return res;
+}
+
+- (BOOL)safeReplaceTextInRange:(NSRange)range withText:(NSString*)text forFileAtPath:(NSString*)path {
+    if ([NSThread isMainThread]) {
+        return [_windowController replaceTextInRange:range withText:text forFileAtPath:path];
+    }
+    __block BOOL res = NO;
+    dispatch_sync(dispatch_get_main_queue(), ^{
+        res = [_windowController replaceTextInRange:range withText:text forFileAtPath:path];
     });
     return res;
 }
@@ -769,6 +829,7 @@ NSArray<NSString*>* ContextLines(const std::vector<std::string>& lines, NSIntege
                               [method isEqualToString:@"search.text"] ||
                               [method isEqualToString:@"search.files"] ||
                               [method isEqualToString:@"workspace.listFiles"] ||
+                              [method isEqualToString:@"recovery.scan"] ||
                               [method isEqualToString:@"combo.run"];
     
     if (isBackgroundMethod) {
@@ -816,6 +877,7 @@ NSArray<NSString*>* ContextLines(const std::vector<std::string>& lines, NSIntege
             @{ @"name": @"combo.result", @"permission": @"Read", @"params": @{ @"comboId": @"string" }, @"returns": @{ @"combo": @"object" } },
             @{ @"name": @"combo.cancel", @"permission": @"Read", @"params": @{ @"comboId": @"string" }, @"returns": @{ @"cancelled": @"boolean" } },
             @{ @"name": @"combo.rollback", @"permission": @"Edit", @"params": @{ @"comboId": @"string optional" }, @"returns": @{ @"reverted": @"boolean" } },
+            @{ @"name": @"recovery.scan", @"permission": @"Read", @"params": @{}, @"returns": @{ @"backups": @"array" } },
             @{ @"name": @"workspace.getRoot", @"permission": @"Read", @"params": @{}, @"returns": @{ @"path": @"string" } },
             @{ @"name": @"workspace.openFolder", @"permission": @"Destructive", @"params": @{ @"path": @"directory path" }, @"returns": @{ @"opened": @"boolean" } },
             @{ @"name": @"workspace.listFiles", @"permission": @"Read", @"params": @{}, @"returns": @{ @"files": @"array" } },
@@ -1222,7 +1284,24 @@ NSArray<NSString*>* ContextLines(const std::vector<std::string>& lines, NSIntege
 
     trace[@"state"] = @"executing";
     trace[@"phase"] = @"executing";
-    [self executeMethod:method params:primitive[@"params"] ?: @{} outResult:&result outErrCode:&errCode outErrMsg:&errMsg outPaths:&affectedPaths];
+    
+    BOOL isBackground = [method isEqualToString:@"verify.run"] ||
+                        [method isEqualToString:@"workspace.grep"] ||
+                        [method isEqualToString:@"search.text"] ||
+                        [method isEqualToString:@"search.files"] ||
+                        [method isEqualToString:@"workspace.listFiles"] ||
+                        [method isEqualToString:@"recovery.scan"];
+                        
+    if (isBackground) {
+        [self executeMethod:method params:primitive[@"params"] ?: @{} outResult:&result outErrCode:&errCode outErrMsg:&errMsg outPaths:&affectedPaths];
+    } else {
+        dispatch_semaphore_t execSem = dispatch_semaphore_create(0);
+        dispatch_async(dispatch_get_main_queue(), ^{
+            [self executeMethod:method params:primitive[@"params"] ?: @{} outResult:&result outErrCode:&errCode outErrMsg:&errMsg outPaths:&affectedPaths];
+            dispatch_semaphore_signal(execSem);
+        });
+        dispatch_semaphore_wait(execSem, DISPATCH_TIME_FOREVER);
+    }
 
     NSDate* finished = [NSDate date];
     trace[@"finishedAt"] = ISODateString(finished);
@@ -1259,6 +1338,7 @@ NSArray<NSString*>* ContextLines(const std::vector<std::string>& lines, NSIntege
     combo[@"startedAtDate"] = [NSDate date];
     combo[@"lockedPathsSet"] = [NSMutableSet set];
     _combos[comboId] = combo;
+    _lastComboId = [comboId copy];
 
     // 1. Gather all mutation paths and determine if there are mutation chips
     BOOL containsMutation = NO;
@@ -1298,23 +1378,18 @@ NSArray<NSString*>* ContextLines(const std::vector<std::string>& lines, NSIntege
     }
 
     // 4. Create Preimage Backup Checkpoint directory and records
-    NSString* backupDir = [[NSHomeDirectory() stringByAppendingPathComponent:@".dietcode/backups"] stringByAppendingPathComponent:comboId];
-    [[NSFileManager defaultManager] createDirectoryAtPath:backupDir withIntermediateDirectories:YES attributes:nil error:nil];
+    __block NSDictionary* manifest = nil;
+    __block NSString* backupDirOut = nil;
+    __block NSString* checkpointErr = nil;
     
-    NSMutableArray* comboPatchRecords = [NSMutableArray array];
-    for (NSString* path in allMutationPaths) {
-        NSString* beforeText = [self safeTextForFileAtPath:path];
-        if (beforeText) {
-            NSString* filename = [path lastPathComponent];
-            NSString* backupFilePath = [backupDir stringByAppendingPathComponent:[NSString stringWithFormat:@"%u_%@", arc4random(), filename]];
-            [beforeText writeToFile:backupFilePath atomically:YES encoding:NSUTF8StringEncoding error:nil];
-            [[NSFileManager defaultManager] setAttributes:@{NSFilePosixPermissions: @(0600)} ofItemAtPath:backupFilePath error:nil];
-            
-            [comboPatchRecords addObject:@{
-                @"path": path,
-                @"beforeText": beforeText
-            }];
-        }
+    BOOL checkpointOk = [self createCheckpointForPaths:allMutationPaths comboId:comboId plan:plan manifestOut:&manifest backupDirOut:&backupDirOut error:&checkpointErr];
+    if (!checkpointOk) {
+        combo[@"status"] = @"failed";
+        [combo[@"errors"] addObject:RuntimeError(@"checkpoint_write_failed", [NSString stringWithFormat:@"Failed to create checkpoint: %@", checkpointErr], nil, nil, @"prechecking", YES)];
+        if (containsMutation) _globalMutationLock = NO;
+        [self releaseMutationLocks:allMutationPaths comboId:comboId];
+        combo[@"finishedAt"] = ISODateString([NSDate date]);
+        return [self serializableCombo:combo];
     }
 
     NSInteger seq = 0;
@@ -1379,15 +1454,37 @@ NSArray<NSString*>* ContextLines(const std::vector<std::string>& lines, NSIntege
             if (trace[@"error"]) [combo[@"errors"] addObject:trace[@"error"]];
             executionFailed = YES;
             break;
+        } else {
+            NSString* ws = [_windowController workspacePath];
+            NSMutableDictionary* mutableManifest = [manifest mutableCopy];
+            NSMutableArray* updatedFiles = [NSMutableArray array];
+            for (NSDictionary* fileEntry in manifest[@"files"] ?: @[]) {
+                NSMutableDictionary* mutFile = [fileEntry mutableCopy];
+                NSString* relPath = fileEntry[@"workspaceRelativePath"];
+                NSString* absPath = AbsolutePathForRPCPath(relPath, ws);
+                if ([[NSFileManager defaultManager] fileExistsAtPath:absPath]) {
+                    NSString* currentText = [self safeTextForFileAtPath:absPath];
+                    if (currentText) {
+                        mutFile[@"expectedPostimageHash"] = StableHashForString(currentText);
+                    }
+                }
+                [updatedFiles addObject:mutFile];
+            }
+            mutableManifest[@"files"] = updatedFiles;
+            manifest = mutableManifest;
+            
+            NSString* manifestPath = [backupDirOut stringByAppendingPathComponent:@"manifest.json"];
+            [self writeManifest:manifest toPath:manifestPath error:nil];
         }
     }
 
     // 5. If failed/expired/cancelled, trigger automatic rollback
     if (executionFailed || [combo[@"status"] isEqualToString:@"cancelled"]) {
         NSString* rollbackErr = nil;
-        BOOL rollbackOk = [self restorePatchRecords:comboPatchRecords error:&rollbackErr];
+        NSString* rollbackErrorCode = nil;
+        BOOL rollbackOk = [self restorePatchFromManifest:manifest backupDir:backupDirOut confirm:YES error:&rollbackErr errorCode:&rollbackErrorCode];
         if (!rollbackOk) {
-            [combo[@"errors"] addObject:RuntimeError(@"rollback_failed", [NSString stringWithFormat:@"Automatic rollback failed: %@", rollbackErr], nil, nil, @"rolling_back", NO)];
+            [combo[@"errors"] addObject:RuntimeError(rollbackErrorCode ?: @"rollback_failed", [NSString stringWithFormat:@"Automatic rollback failed: %@", rollbackErr], nil, nil, @"rolling_back", NO)];
         } else {
             [combo[@"errors"] addObject:RuntimeError(@"rollback_success", @"Automatic rollback completed successfully.", nil, nil, @"rolling_back", YES)];
         }
@@ -1407,6 +1504,559 @@ NSArray<NSString*>* ContextLines(const std::vector<std::string>& lines, NSIntege
     combo[@"finalDiff"] = [self currentChangesInfo];
     combo[@"verify"] = [self verificationStatus];
     return [self serializableCombo:combo];
+}
+
+
+- (BOOL)writeManifest:(NSDictionary*)manifest toPath:(NSString*)path error:(NSString**)errorOut {
+    NSError* err = nil;
+    NSData* data = [NSJSONSerialization dataWithJSONObject:manifest options:NSJSONWritingPrettyPrinted error:&err];
+    if (err || !data) {
+        if (errorOut) *errorOut = [NSString stringWithFormat:@"Serialization failed: %@", err.localizedDescription];
+        return NO;
+    }
+    
+    NSString* tmpPath = [path stringByAppendingPathExtension:@"tmp"];
+    BOOL ok = [data writeToFile:tmpPath atomically:YES];
+    if (!ok) {
+        if (errorOut) *errorOut = @"Failed to write manifest temp file.";
+        return NO;
+    }
+    
+    // fsync the temp file
+    int fd = open([tmpPath UTF8String], O_RDONLY);
+    if (fd >= 0) {
+        fsync(fd);
+        close(fd);
+    }
+    
+    // Rename atomically
+    if (rename([tmpPath UTF8String], [path UTF8String]) != 0) {
+        if (errorOut) *errorOut = [NSString stringWithFormat:@"Atomically renaming manifest failed: %s", strerror(errno)];
+        unlink([tmpPath UTF8String]);
+        return NO;
+    }
+    
+    return YES;
+}
+
+- (NSDictionary*)loadManifestFromPath:(NSString*)path error:(NSString**)errorOut {
+    if (![[NSFileManager defaultManager] fileExistsAtPath:path]) {
+        if (errorOut) *errorOut = @"Manifest file missing.";
+        return nil;
+    }
+    NSError* err = nil;
+    NSData* data = [NSData dataWithContentsOfFile:path options:0 error:&err];
+    if (err || !data) {
+        if (errorOut) *errorOut = [NSString stringWithFormat:@"Failed to read manifest: %@", err.localizedDescription];
+        return nil;
+    }
+    NSDictionary* manifest = [NSJSONSerialization JSONObjectWithData:data options:0 error:&err];
+    if (err || !manifest) {
+        if (errorOut) *errorOut = [NSString stringWithFormat:@"Malformed JSON in manifest: %@", err.localizedDescription];
+        return nil;
+    }
+    return manifest;
+}
+
+static BOOL IsTextBinary(NSString* text) {
+    if (text == nil) return NO;
+    NSUInteger len = [text length];
+    for (NSUInteger i = 0; i < len; i++) {
+        unichar c = [text characterAtIndex:i];
+        if (c == 0) {
+            return YES;
+        }
+    }
+    return NO;
+}
+
+- (BOOL)createCheckpointForPaths:(NSArray<NSString*>*)paths
+                         comboId:(NSString*)comboId
+                            plan:(NSDictionary*)plan
+                     manifestOut:(NSDictionary**)manifestOut
+                    backupDirOut:(NSString**)backupDirOut
+                           error:(NSString**)errorOut {
+    NSString* ws = [_windowController workspacePath];
+    if (ws.length == 0) {
+        if (errorOut) *errorOut = @"Workspace path is empty.";
+        return NO;
+    }
+    
+    std::error_code ec;
+    std::filesystem::path wsPath = std::filesystem::canonical(std::filesystem::path(StdStringFromNSString(ws)), ec);
+    if (ec) {
+        if (errorOut) *errorOut = @"Workspace path cannot be canonicalized.";
+        return NO;
+    }
+    
+    NSString* backupDir = [[NSHomeDirectory() stringByAppendingPathComponent:@".dietcode/backups"] stringByAppendingPathComponent:comboId];
+    if (![[NSFileManager defaultManager] createDirectoryAtPath:backupDir withIntermediateDirectories:YES attributes:@{NSFilePosixPermissions: @(0700)} error:nil]) {
+        if (errorOut) *errorOut = @"Failed to create backup directory.";
+        return NO;
+    }
+    [[NSFileManager defaultManager] setAttributes:@{NSFilePosixPermissions: @(0700)} ofItemAtPath:backupDir error:nil];
+    
+    NSMutableDictionary* manifest = [NSMutableDictionary dictionary];
+    manifest[@"schemaVersion"] = @"1.6.1";
+    manifest[@"comboId"] = comboId;
+    manifest[@"workspaceRootHash"] = StableHashForString(ws);
+    manifest[@"workspaceRootCanonical"] = ws;
+    manifest[@"createdAt"] = ISODateString([NSDate date]);
+    manifest[@"sessionId"] = _sessionToken ?: @"";
+    manifest[@"dietcodeVersion"] = @"1.6.1";
+    
+    NSMutableArray* chipVersions = [NSMutableArray array];
+    for (NSDictionary* step in plan[@"steps"] ?: @[]) {
+        NSString* chip = step[@"chip"];
+        NSString* version = [NSString stringWithFormat:@"%@@%@", chip, step[@"metadata"][@"version"] ?: @1];
+        if (![chipVersions containsObject:version]) {
+            [chipVersions addObject:version];
+        }
+    }
+    manifest[@"chipVersions"] = chipVersions;
+    
+    NSMutableArray* filesArray = [NSMutableArray array];
+    
+    for (NSString* rawPath in paths) {
+        NSString* absPath = AbsolutePathForRPCPath(rawPath, ws);
+        
+        if (!PathIsInsideWorkspace(absPath, ws)) {
+            if (errorOut) *errorOut = [NSString stringWithFormat:@"Path escapes workspace: %@", rawPath];
+            [[NSFileManager defaultManager] removeItemAtPath:backupDir error:nil];
+            return NO;
+        }
+        
+        std::filesystem::path p(StdStringFromNSString(absPath));
+        std::filesystem::path canonicalPath = std::filesystem::exists(p) ? std::filesystem::canonical(p, ec) : std::filesystem::weakly_canonical(p, ec);
+        if (ec) {
+            if (errorOut) *errorOut = [NSString stringWithFormat:@"Failed to canonicalize path: %@", rawPath];
+            [[NSFileManager defaultManager] removeItemAtPath:backupDir error:nil];
+            return NO;
+        }
+        
+        std::filesystem::path rel = std::filesystem::relative(canonicalPath, wsPath, ec);
+        if (ec) {
+            if (errorOut) *errorOut = [NSString stringWithFormat:@"Failed to calculate relative path: %@", rawPath];
+            [[NSFileManager defaultManager] removeItemAtPath:backupDir error:nil];
+            return NO;
+        }
+        NSString* relPath = NSStringFromStdString(rel.string());
+        
+        NSMutableDictionary* fileEntry = [NSMutableDictionary dictionary];
+        fileEntry[@"workspaceRelativePath"] = relPath;
+        fileEntry[@"canonicalPathHash"] = StableHashForString(NSStringFromStdString(canonicalPath.string()));
+        
+        BOOL isOpen = NO;
+        for (NSString* openPath in [self safeOpenFilePaths]) {
+            if ([openPath isEqualToString:absPath]) {
+                isOpen = YES;
+                break;
+            }
+        }
+        fileEntry[@"domain"] = isOpen ? @"buffer" : @"disk";
+        
+        BOOL exists = [[NSFileManager defaultManager] fileExistsAtPath:absPath];
+        if (exists) {
+            NSString* beforeText = [self safeTextForFileAtPath:absPath];
+            if (beforeText == nil) {
+                fileEntry[@"wasBinary"] = @YES;
+                fileEntry[@"wasMissing"] = @NO;
+                fileEntry[@"sizeBytes"] = @0;
+                fileEntry[@"preimageHash"] = @"";
+                fileEntry[@"expectedPostimageHash"] = @"";
+                fileEntry[@"backupBlobHash"] = @"";
+                fileEntry[@"newlineMode"] = @"lf";
+            } else {
+                BOOL isBin = IsTextBinary(beforeText);
+                fileEntry[@"wasBinary"] = @(isBin);
+                fileEntry[@"wasMissing"] = @NO;
+                
+                NSUInteger bytesCount = [beforeText lengthOfBytesUsingEncoding:NSUTF8StringEncoding];
+                fileEntry[@"sizeBytes"] = @(bytesCount);
+                
+                NSString* pHash = StableHashForString(beforeText);
+                fileEntry[@"preimageHash"] = pHash;
+                fileEntry[@"expectedPostimageHash"] = pHash;
+                fileEntry[@"backupBlobHash"] = pHash;
+                
+                BOOL isCrlf = [beforeText rangeOfString:@"\r\n"].location != NSNotFound;
+                fileEntry[@"newlineMode"] = isCrlf ? @"crlf" : @"lf";
+                
+                if (!isBin) {
+                    NSString* blobPath = [backupDir stringByAppendingPathComponent:[NSString stringWithFormat:@"%@.blob", pHash]];
+                    NSError* writeErr = nil;
+                    BOOL writeOk = [beforeText writeToFile:blobPath atomically:YES encoding:NSUTF8StringEncoding error:&writeErr];
+                    if (!writeOk) {
+                        if (errorOut) *errorOut = [NSString stringWithFormat:@"Failed to write preimage blob: %@", writeErr.localizedDescription];
+                        [[NSFileManager defaultManager] removeItemAtPath:backupDir error:nil];
+                        return NO;
+                    }
+                    [[NSFileManager defaultManager] setAttributes:@{NSFilePosixPermissions: @(0600)} ofItemAtPath:blobPath error:nil];
+                    
+                    int fd = open([blobPath UTF8String], O_RDONLY);
+                    if (fd >= 0) {
+                        fsync(fd);
+                        close(fd);
+                    }
+                }
+            }
+        } else {
+            fileEntry[@"wasBinary"] = @NO;
+            fileEntry[@"wasMissing"] = @YES;
+            fileEntry[@"sizeBytes"] = @0;
+            fileEntry[@"preimageHash"] = @"";
+            fileEntry[@"expectedPostimageHash"] = @"";
+            fileEntry[@"backupBlobHash"] = @"";
+            fileEntry[@"newlineMode"] = @"lf";
+        }
+        
+        [filesArray addObject:fileEntry];
+    }
+    
+    manifest[@"files"] = filesArray;
+    
+    NSString* manifestPath = [backupDir stringByAppendingPathComponent:@"manifest.json"];
+    NSString* mErr = nil;
+    if (![self writeManifest:manifest toPath:manifestPath error:&mErr]) {
+        if (errorOut) *errorOut = [NSString stringWithFormat:@"Failed to write manifest: %@", mErr];
+        [[NSFileManager defaultManager] removeItemAtPath:backupDir error:nil];
+        return NO;
+    }
+    
+    if (manifestOut) *manifestOut = manifest;
+    if (backupDirOut) *backupDirOut = backupDir;
+    return YES;
+}
+
+- (BOOL)restorePatchFromManifest:(NSDictionary*)manifest
+                       backupDir:(NSString*)backupDir
+                         confirm:(BOOL)confirm
+                           error:(NSString**)errorOut
+                       errorCode:(NSString**)errorCodeOut {
+    NSString* ws = [_windowController workspacePath];
+    if (ws.length == 0) {
+        if (errorCodeOut) *errorCodeOut = @"backup_workspace_mismatch";
+        if (errorOut) *errorOut = @"No active workspace.";
+        return NO;
+    }
+    
+    NSString* manifestWsHash = manifest[@"workspaceRootHash"];
+    if (![manifestWsHash isEqualToString:StableHashForString(ws)]) {
+        if (errorCodeOut) *errorCodeOut = @"backup_workspace_mismatch";
+        if (errorOut) *errorOut = @"Workspace mismatch: backup was created in a different workspace.";
+        return NO;
+    }
+    
+    NSString* manifestSession = manifest[@"sessionId"];
+    if (manifestSession && _sessionToken && ![manifestSession isEqualToString:_sessionToken]) {
+        if (!confirm) {
+            if (errorCodeOut) *errorCodeOut = @"backup_manifest_invalid";
+            if (errorOut) *errorOut = @"Session token mismatch. Re-run with confirm=true to override.";
+            return NO;
+        }
+    }
+    
+    NSArray* files = manifest[@"files"] ?: @[];
+    NSMutableDictionary* fileBlobs = [NSMutableDictionary dictionary];
+    
+    // First pass: validation (do not write any files)
+    for (NSDictionary* fileEntry in files) {
+        NSString* relPath = fileEntry[@"workspaceRelativePath"];
+        NSString* absPath = AbsolutePathForRPCPath(relPath, ws);
+        
+        if (!PathIsInsideWorkspace(absPath, ws)) {
+            if (errorCodeOut) *errorCodeOut = @"rollback_target_escaped";
+            if (errorOut) *errorOut = [NSString stringWithFormat:@"Target path escapes workspace: %@", relPath];
+            return NO;
+        }
+        
+        BOOL wasMissing = [fileEntry[@"wasMissing"] boolValue];
+        BOOL wasBinary = [fileEntry[@"wasBinary"] boolValue];
+        NSString* expectedPostHash = fileEntry[@"expectedPostimageHash"];
+        NSString* preimageHash = fileEntry[@"preimageHash"];
+        NSString* blobHash = fileEntry[@"backupBlobHash"];
+        
+        BOOL exists = [[NSFileManager defaultManager] fileExistsAtPath:absPath];
+        
+        if (wasMissing) {
+            if (exists) {
+                NSString* currentText = [self safeTextForFileAtPath:absPath];
+                NSString* currentHash = StableHashForString(currentText ?: @"");
+                if (![currentHash isEqualToString:expectedPostHash]) {
+                    if ([self dirtyBufferExistsAtPath:absPath]) {
+                        if (errorCodeOut) *errorCodeOut = @"rollback_buffer_conflict";
+                    } else {
+                        if (errorCodeOut) *errorCodeOut = @"rollback_postimage_mismatch";
+                    }
+                    if (errorOut) *errorOut = [NSString stringWithFormat:@"Postimage hash mismatch for new file %@", relPath];
+                    return NO;
+                }
+
+                if ([fileEntry[@"domain"] isEqualToString:@"buffer"]) {
+                    NSError* readErr = nil;
+                    NSString* diskText = [NSString stringWithContentsOfFile:absPath encoding:NSUTF8StringEncoding error:&readErr];
+                    if (diskText) {
+                        NSString* diskHash = StableHashForString(diskText);
+                        if (![diskHash isEqualToString:expectedPostHash]) {
+                            if (errorCodeOut) *errorCodeOut = @"rollback_postimage_mismatch";
+                            if (errorOut) *errorOut = [NSString stringWithFormat:@"Postimage hash mismatch on disk (modified externally) for new file %@", relPath];
+                            return NO;
+                        }
+                    }
+                }
+            }
+        } else {
+            if (!exists) {
+                if (errorCodeOut) *errorCodeOut = @"rollback_postimage_mismatch";
+                if (errorOut) *errorOut = [NSString stringWithFormat:@"File was deleted externally: %@", relPath];
+                return NO;
+            }
+            
+            NSString* currentText = [self safeTextForFileAtPath:absPath];
+            if (currentText == nil) {
+                if (errorCodeOut) *errorCodeOut = @"rollback_postimage_mismatch";
+                if (errorOut) *errorOut = [NSString stringWithFormat:@"Failed to read current file content: %@", relPath];
+                return NO;
+            }
+            
+            if (IsTextBinary(currentText)) {
+                if (errorCodeOut) *errorCodeOut = @"rollback_postimage_mismatch";
+                if (errorOut) *errorOut = [NSString stringWithFormat:@"File became binary: %@", relPath];
+                return NO;
+            }
+            
+            NSString* currentHash = StableHashForString(currentText);
+            if (![currentHash isEqualToString:expectedPostHash]) {
+                if ([self dirtyBufferExistsAtPath:absPath]) {
+                    if (errorCodeOut) *errorCodeOut = @"rollback_buffer_conflict";
+                } else {
+                    if (errorCodeOut) *errorCodeOut = @"rollback_postimage_mismatch";
+                }
+                if (errorOut) *errorOut = [NSString stringWithFormat:@"Postimage hash mismatch for %@", relPath];
+                return NO;
+            }
+
+            if ([fileEntry[@"domain"] isEqualToString:@"buffer"]) {
+                NSError* readErr = nil;
+                NSString* diskText = [NSString stringWithContentsOfFile:absPath encoding:NSUTF8StringEncoding error:&readErr];
+                if (diskText == nil) {
+                    if (errorCodeOut) *errorCodeOut = @"rollback_postimage_mismatch";
+                    if (errorOut) *errorOut = [NSString stringWithFormat:@"Failed to read disk content for %@", relPath];
+                    return NO;
+                }
+                NSString* diskHash = StableHashForString(diskText);
+                if (![diskHash isEqualToString:preimageHash] && ![diskHash isEqualToString:expectedPostHash]) {
+                    if (errorCodeOut) *errorCodeOut = @"rollback_postimage_mismatch";
+                    if (errorOut) *errorOut = [NSString stringWithFormat:@"Postimage hash mismatch on disk (modified externally) for %@", relPath];
+                    return NO;
+                }
+            }
+            
+            if (!wasBinary) {
+                NSString* blobPath = [backupDir stringByAppendingPathComponent:[NSString stringWithFormat:@"%@.blob", blobHash]];
+                if (![[NSFileManager defaultManager] fileExistsAtPath:blobPath]) {
+                    if (errorCodeOut) *errorCodeOut = @"backup_corrupt";
+                    if (errorOut) *errorOut = [NSString stringWithFormat:@"Preimage backup blob missing for %@", relPath];
+                    return NO;
+                }
+                
+                NSError* readErr = nil;
+                NSString* blobText = [NSString stringWithContentsOfFile:blobPath encoding:NSUTF8StringEncoding error:&readErr];
+                if (readErr || !blobText) {
+                    if (errorCodeOut) *errorCodeOut = @"backup_corrupt";
+                    if (errorOut) *errorOut = [NSString stringWithFormat:@"Failed to read preimage blob for %@", relPath];
+                    return NO;
+                }
+                
+                NSString* computedBlobHash = StableHashForString(blobText);
+                if (![computedBlobHash isEqualToString:preimageHash]) {
+                    if (errorCodeOut) *errorCodeOut = @"rollback_preimage_mismatch";
+                    if (errorOut) *errorOut = [NSString stringWithFormat:@"Blob preimage hash integrity check failed for %@", relPath];
+                    return NO;
+                }
+                
+                fileBlobs[absPath] = blobText;
+            }
+        }
+    }
+    
+    // Second pass: application
+    for (NSDictionary* fileEntry in files) {
+        NSString* relPath = fileEntry[@"workspaceRelativePath"];
+        NSString* absPath = AbsolutePathForRPCPath(relPath, ws);
+        BOOL wasMissing = [fileEntry[@"wasMissing"] boolValue];
+        BOOL wasBinary = [fileEntry[@"wasBinary"] boolValue];
+        
+        if (wasMissing) {
+            if ([[NSFileManager defaultManager] fileExistsAtPath:absPath]) {
+                NSError* deleteErr = nil;
+                [[NSFileManager defaultManager] removeItemAtPath:absPath error:&deleteErr];
+                if (deleteErr) {
+                    if (errorCodeOut) *errorCodeOut = @"rollback_partial_failure";
+                    if (errorOut) *errorOut = [NSString stringWithFormat:@"Failed to remove added file %@: %@", relPath, deleteErr.localizedDescription];
+                    return NO;
+                }
+                
+                NSString* currentText = [_windowController textForFileAtPath:absPath];
+                if (currentText) {
+                    [self safeReplaceTextInRange:NSMakeRange(0, currentText.length) withText:@"" forFileAtPath:absPath];
+                }
+            }
+        } else {
+            if (!wasBinary) {
+                NSString* blobText = fileBlobs[absPath];
+                NSString* currentText = [_windowController textForFileAtPath:absPath];
+                BOOL ok = [self safeReplaceTextInRange:NSMakeRange(0, currentText.length) withText:blobText forFileAtPath:absPath];
+                
+                NSError* writeErr = nil;
+                BOOL writeOk = [blobText writeToFile:absPath atomically:YES encoding:NSUTF8StringEncoding error:&writeErr];
+                if (!writeOk && !ok) {
+                    if (errorCodeOut) *errorCodeOut = @"rollback_partial_failure";
+                    if (errorOut) *errorOut = [NSString stringWithFormat:@"Failed to write rollback content to %@: %@", relPath, writeErr.localizedDescription];
+                    return NO;
+                }
+            }
+        }
+    }
+    
+    return YES;
+}
+
+- (NSDictionary*)performRecoveryScan:(NSString**)errorOut {
+    NSString* backupsDir = [NSHomeDirectory() stringByAppendingPathComponent:@".dietcode/backups"];
+    BOOL isDir = NO;
+    if (![[NSFileManager defaultManager] fileExistsAtPath:backupsDir isDirectory:&isDir] || !isDir) {
+        return @{ @"backups": @[] };
+    }
+    
+    NSError* dirErr = nil;
+    NSArray* contents = [[NSFileManager defaultManager] contentsOfDirectoryAtPath:backupsDir error:&dirErr];
+    if (dirErr) {
+        if (errorOut) *errorOut = [NSString stringWithFormat:@"Failed to list backups directory: %@", dirErr.localizedDescription];
+        return nil;
+    }
+    
+    NSMutableArray* backupsReport = [NSMutableArray array];
+    NSString* currentWs = [_windowController workspacePath];
+    
+    for (NSString* comboId in contents) {
+        NSString* backupDir = [backupsDir stringByAppendingPathComponent:comboId];
+        BOOL isSubDir = NO;
+        if (![[NSFileManager defaultManager] fileExistsAtPath:backupDir isDirectory:&isSubDir] || !isSubDir) {
+            continue;
+        }
+        
+        NSString* manifestPath = [backupDir stringByAppendingPathComponent:@"manifest.json"];
+        NSString* mErr = nil;
+        NSDictionary* manifest = [self loadManifestFromPath:manifestPath error:&mErr];
+        if (!manifest) {
+            [backupsReport addObject:@{
+                @"comboId": comboId,
+                @"status": @"corrupt",
+                @"error": mErr ?: @"manifest.json missing or invalid"
+            }];
+            continue;
+        }
+        
+        NSString* manifestWsHash = manifest[@"workspaceRootHash"];
+        NSString* manifestWsCanonical = manifest[@"workspaceRootCanonical"];
+        BOOL wsMatches = currentWs.length > 0 && [manifestWsHash isEqualToString:StableHashForString(currentWs)];
+        
+        NSMutableArray* filesReport = [NSMutableArray array];
+        BOOL hasConflict = NO;
+        BOOL hasCorrupt = NO;
+        
+        NSArray* files = manifest[@"files"] ?: @[];
+        for (NSDictionary* fileEntry in files) {
+            NSString* relPath = fileEntry[@"workspaceRelativePath"];
+            NSString* absPath = currentWs.length > 0 ? AbsolutePathForRPCPath(relPath, currentWs) : nil;
+            NSString* expectedPostHash = fileEntry[@"expectedPostimageHash"];
+            NSString* blobHash = fileEntry[@"backupBlobHash"];
+            BOOL wasMissing = [fileEntry[@"wasMissing"] boolValue];
+            BOOL wasBinary = [fileEntry[@"wasBinary"] boolValue];
+            
+            NSMutableDictionary* fileRep = [NSMutableDictionary dictionary];
+            fileRep[@"workspaceRelativePath"] = relPath;
+            
+            if (!wasMissing && !wasBinary) {
+                NSString* blobPath = [backupDir stringByAppendingPathComponent:[NSString stringWithFormat:@"%@.blob", blobHash]];
+                if (![[NSFileManager defaultManager] fileExistsAtPath:blobPath]) {
+                    fileRep[@"status"] = @"blob_missing";
+                    hasCorrupt = YES;
+                    [filesReport addObject:fileRep];
+                    continue;
+                }
+            }
+            
+            if (!wsMatches || !absPath) {
+                fileRep[@"status"] = @"workspace_mismatch";
+                hasConflict = YES;
+                [filesReport addObject:fileRep];
+                continue;
+            }
+            
+            if (!PathIsInsideWorkspace(absPath, currentWs)) {
+                fileRep[@"status"] = @"escaped";
+                hasConflict = YES;
+                [filesReport addObject:fileRep];
+                continue;
+            }
+            
+            BOOL exists = [[NSFileManager defaultManager] fileExistsAtPath:absPath];
+            if (wasMissing) {
+                if (exists) {
+                    NSString* currentText = [self safeTextForFileAtPath:absPath];
+                    NSString* currentHash = StableHashForString(currentText ?: @"");
+                    if ([currentHash isEqualToString:expectedPostHash]) {
+                        fileRep[@"status"] = @"match";
+                    } else {
+                        fileRep[@"status"] = @"mismatch";
+                        hasConflict = YES;
+                    }
+                } else {
+                    fileRep[@"status"] = @"match";
+                }
+            } else {
+                if (!exists) {
+                    fileRep[@"status"] = @"deleted";
+                    hasConflict = YES;
+                } else {
+                    NSString* currentText = [self safeTextForFileAtPath:absPath];
+                    if (currentText == nil || IsTextBinary(currentText)) {
+                        fileRep[@"status"] = @"binary_or_unreadable";
+                        hasConflict = YES;
+                    } else {
+                        NSString* currentHash = StableHashForString(currentText);
+                        if ([currentHash isEqualToString:expectedPostHash]) {
+                            fileRep[@"status"] = @"match";
+                        } else {
+                            fileRep[@"status"] = @"mismatch";
+                            hasConflict = YES;
+                        }
+                    }
+                }
+            }
+            [filesReport addObject:fileRep];
+        }
+        
+        NSString* backupStatus = @"valid";
+        if (hasCorrupt) {
+            backupStatus = @"corrupt";
+        } else if (hasConflict) {
+            backupStatus = @"conflict";
+        }
+        
+        [backupsReport addObject:@{
+            @"comboId": comboId,
+            @"createdAt": manifest[@"createdAt"] ?: @"",
+            @"workspaceRootCanonical": manifestWsCanonical ?: @"",
+            @"sessionId": manifest[@"sessionId"] ?: @"",
+            @"status": backupStatus,
+            @"files": filesReport
+        }];
+    }
+    
+    return @{ @"backups": backupsReport };
 }
 
 
@@ -1633,25 +2283,59 @@ NSArray<NSString*>* ContextLines(const std::vector<std::string>& lines, NSIntege
 }
 
 - (BOOL)restorePatchRecords:(NSArray<NSDictionary*>*)records error:(NSString**)errorOut {
+    NSString* ws = [_windowController workspacePath];
+    if (ws.length == 0) {
+        if (errorOut) *errorOut = @"No active workspace.";
+        return NO;
+    }
+    
+    // First pass: validation
     for (NSDictionary* record in records.reverseObjectEnumerator) {
         NSString* path = record[@"path"];
         NSString* beforeText = record[@"beforeText"];
         NSString* expectedPostHash = record[@"postHash"];
-        NSString* currentText = [_windowController textForFileAtPath:path];
-        if (!path || !beforeText || !currentText) {
-            if (errorOut) *errorOut = @"Cannot restore patch because a target buffer is unavailable.";
+        NSString* beforeHash = record[@"beforeHash"];
+        
+        if (!path || beforeText == nil) {
+            if (errorOut) *errorOut = @"Cannot restore patch because a target buffer record is invalid.";
             return NO;
         }
+        
+        NSString* absPath = AbsolutePathForRPCPath(path, ws);
+        if (!PathIsInsideWorkspace(absPath, ws)) {
+            if (errorOut) *errorOut = [NSString stringWithFormat:@"Target path escapes workspace: %@", path];
+            return NO;
+        }
+        
+        NSString* currentText = [_windowController textForFileAtPath:absPath];
+        if (currentText == nil) {
+            if (errorOut) *errorOut = [NSString stringWithFormat:@"Cannot restore patch because target buffer is unavailable: %@", path];
+            return NO;
+        }
+        
+        if (IsTextBinary(currentText)) {
+            if (errorOut) *errorOut = [NSString stringWithFormat:@"File is binary: %@", path];
+            return NO;
+        }
+        
         if (expectedPostHash.length > 0 && ![StableHashForString(currentText) isEqualToString:expectedPostHash]) {
-            if (errorOut) *errorOut = [NSString stringWithFormat:@"Rollback conflict for %@: current buffer no longer matches the RPC patch postimage.", path];
+            if (errorOut) *errorOut = [NSString stringWithFormat:@"Rollback conflict for %@: current buffer no longer matches the expected postimage.", path];
+            return NO;
+        }
+        
+        if (beforeHash.length > 0 && ![StableHashForString(beforeText) isEqualToString:beforeHash]) {
+            if (errorOut) *errorOut = [NSString stringWithFormat:@"Preimage hash mismatch for %@", path];
             return NO;
         }
     }
+    
+    // Second pass: apply
     for (NSDictionary* record in records.reverseObjectEnumerator) {
         NSString* path = record[@"path"];
         NSString* beforeText = record[@"beforeText"];
-        NSString* currentText = [_windowController textForFileAtPath:path];
-        BOOL ok = [_windowController replaceTextInRange:NSMakeRange(0, currentText.length) withText:beforeText forFileAtPath:path];
+        NSString* absPath = AbsolutePathForRPCPath(path, ws);
+        NSString* currentText = [_windowController textForFileAtPath:absPath];
+        BOOL ok = [self safeReplaceTextInRange:NSMakeRange(0, currentText.length) withText:beforeText forFileAtPath:absPath];
         if (!ok) {
             if (errorOut) *errorOut = [NSString stringWithFormat:@"Failed to restore %@", path];
             return NO;
@@ -2003,7 +2687,7 @@ NSArray<NSString*>* ContextLines(const std::vector<std::string>& lines, NSIntege
             *outResult = @{ @"schemaVersion": @"1.6", @"valid": @NO, @"errors": errors ?: @[] };
             return;
         }
-        NSString* comboId = combo[@"comboId"] ?: [NSString stringWithFormat:@"combo-%ld", (long)++_comboCounter];
+        NSString* comboId = combo[@"comboId"] ?: (params[@"comboId"] ?: [NSString stringWithFormat:@"combo-%ld", (long)++_comboCounter]);
         if (_combos[comboId]) {
             *outErrCode = @"invalid_combo";
             *outErrMsg = @"comboId already exists in this session.";
@@ -2043,24 +2727,56 @@ NSArray<NSString*>* ContextLines(const std::vector<std::string>& lines, NSIntege
     }
 
     if ([method isEqualToString:@"combo.rollback"]) {
-        if (_lastRPCPatchRecords.count == 0) {
+        NSString* comboId = params[@"comboId"];
+        BOOL confirm = [params[@"confirm"] boolValue];
+        
+        if (comboId.length == 0) {
+            comboId = _lastComboId;
+        }
+        
+        if (comboId.length == 0) {
             *outErrCode = @"invalid_request";
-            *outErrMsg = @"No session patch checkpoint is available to roll back.";
+            *outErrMsg = @"No session combo transaction is available to roll back.";
             return;
         }
-        NSString* errStr = nil;
-        BOOL ok = [self restorePatchRecords:_lastRPCPatchRecords error:&errStr];
+        
+        NSString* backupDir = [[NSHomeDirectory() stringByAppendingPathComponent:@".dietcode/backups"] stringByAppendingPathComponent:comboId];
+        NSString* manifestPath = [backupDir stringByAppendingPathComponent:@"manifest.json"];
+        
+        NSString* mErr = nil;
+        NSDictionary* manifest = [self loadManifestFromPath:manifestPath error:&mErr];
+        if (!manifest) {
+            *outErrCode = [mErr isEqualToString:@"Manifest file missing."] ? @"backup_manifest_missing" : @"backup_manifest_invalid";
+            *outErrMsg = mErr ?: @"Manifest missing or invalid.";
+            return;
+        }
+        
+        NSString* rollbackErr = nil;
+        NSString* rollbackErrorCode = nil;
+        BOOL ok = [self restorePatchFromManifest:manifest backupDir:backupDir confirm:confirm error:&rollbackErr errorCode:&rollbackErrorCode];
         if (!ok) {
-            *outErrCode = [errStr hasPrefix:@"Rollback conflict"] ? @"rollback_conflict" : @"rollback_failed";
-            *outErrMsg = errStr ?: @"Rollback failed.";
+            *outErrCode = rollbackErrorCode ?: @"rollback_failed";
+            *outErrMsg = rollbackErr ?: @"Rollback failed.";
             return;
         }
+        
         NSMutableArray* paths = [NSMutableArray array];
-        for (NSDictionary* record in _lastRPCPatchRecords) {
-            [paths addObject:record[@"path"] ?: @""];
+        for (NSDictionary* fileEntry in manifest[@"files"] ?: @[]) {
+            [paths addObject:fileEntry[@"workspaceRelativePath"] ?: @""];
         }
-        [_lastRPCPatchRecords removeAllObjects];
-        *outResult = @{ @"schemaVersion": @"1.6", @"reverted": @YES, @"files": paths };
+        *outResult = @{ @"schemaVersion": @"1.6.1", @"reverted": @YES, @"files": paths };
+        return;
+    }
+    
+    if ([method isEqualToString:@"recovery.scan"]) {
+        NSString* errStr = nil;
+        NSDictionary* report = [self performRecoveryScan:&errStr];
+        if (errStr) {
+            *outErrCode = @"internal_error";
+            *outErrMsg = errStr;
+            return;
+        }
+        *outResult = report;
         return;
     }
     
@@ -2237,7 +2953,7 @@ NSArray<NSString*>* ContextLines(const std::vector<std::string>& lines, NSIntege
     }
     
     if ([method isEqualToString:@"workspace.openFile"]) {
-        NSString* absPath = params[@"path"];
+        NSString* absPath = AbsolutePathForRPCPath(params[@"path"], [_windowController workspacePath]);
         if (!absPath) {
             *outErrCode = @"invalid_params";
             *outErrMsg = @"path parameter required.";
@@ -2609,7 +3325,7 @@ NSArray<NSString*>* ContextLines(const std::vector<std::string>& lines, NSIntege
             return;
         }
         NSRange range = NSMakeRange(start, end - start);
-        BOOL ok = [_windowController replaceTextInRange:range withText:text forFileAtPath:targetPath];
+        BOOL ok = [self safeReplaceTextInRange:range withText:text forFileAtPath:targetPath];
         if (!ok) {
             *outErrCode = @"invalid_request";
             *outErrMsg = @"Range is out of bounds or file is read-only.";
