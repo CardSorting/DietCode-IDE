@@ -68,6 +68,8 @@ make agent-methods
 make agent-capabilities
 python3 scripts/dietcode_agent_client.py --ensure-only --compact
 python3 scripts/dietcode_agent_client.py --compact rpc.ping
+python3 scripts/dietcode_agent_client.py --diff-source unstaged --diff-hunks --compact
+python3 scripts/dietcode_agent_client.py --diff-source unstaged --offset 0 --max-bytes 65536 --compact
 ```
 
 `--ensure-socket` exits immediately if `~/.dietcode/control.sock` is already accepting connections. Otherwise it starts a detached `--headless` DietCode process and waits for the socket. `--ensure-timeout <seconds>` controls that wait. Python agents can import `scripts/dietcode_agent_client.py` and call `ensure_socket()` before sending JSON-RPC frames.

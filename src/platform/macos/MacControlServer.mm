@@ -20,6 +20,8 @@
 #include <set>
 #include <map>
 #include <signal.h>
+#include <algorithm>
+#include <cctype>
 
 namespace {
 static const NSUInteger kMaxRequestBytes = 1024 * 1024;
@@ -140,6 +142,167 @@ NSArray<NSDictionary*>* HunkSummariesFromPatch(NSString* patch) {
     return hunks;
 }
 
+NSString* CleanUnifiedDiffPath(NSString* rawPath) {
+    NSString* path = [rawPath stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]] ?: @"";
+    NSRange tab = [path rangeOfString:@"\t"];
+    if (tab.location != NSNotFound) {
+        path = [path substringToIndex:tab.location];
+    }
+    if ([path hasPrefix:@"\""] && [path hasSuffix:@"\""] && path.length >= 2) {
+        path = [path substringWithRange:NSMakeRange(1, path.length - 2)];
+    }
+    if ([path isEqualToString:@"/dev/null"]) return path;
+    if ([path hasPrefix:@"a/"] || [path hasPrefix:@"b/"]) {
+        return [path substringFromIndex:2];
+    }
+    return path;
+}
+
+NSDictionary* UnifiedDiffHunksResponse(NSString* diffText, NSInteger maxHunks) {
+    NSInteger limit = maxHunks > 0 ? MIN(maxHunks, 5000) : 500;
+    NSMutableArray* files = [NSMutableArray array];
+    NSError* regErr = nil;
+    NSRegularExpression* hunkRegex = [NSRegularExpression regularExpressionWithPattern:@"^@@ -(\\d+),?(\\d*) \\+(\\d+),?(\\d*) @@" options:0 error:&regErr];
+    NSArray<NSString*>* lines = [diffText componentsSeparatedByString:@"\n"];
+    NSUInteger lineCount = lines.count;
+    if (diffText.length > 0 && [diffText hasSuffix:@"\n"] && lineCount > 0) {
+        lineCount--;
+    }
+
+    __block NSMutableDictionary* currentFile = nil;
+    __block NSMutableArray* currentHunks = nil;
+    __block NSMutableDictionary* currentHunk = nil;
+    __block NSInteger added = 0;
+    __block NSInteger removed = 0;
+    __block NSInteger context = 0;
+    __block NSInteger totalFiles = 0;
+    __block NSInteger totalHunks = 0;
+    __block NSInteger returnedHunks = 0;
+    __block NSInteger totalAdded = 0;
+    __block NSInteger totalRemoved = 0;
+    __block BOOL truncated = NO;
+    __block BOOL currentFileTruncated = NO;
+
+    void (^ensureFile)(NSInteger) = ^(NSInteger lineNumber) {
+        if (currentFile) return;
+        currentHunks = [NSMutableArray array];
+        currentFile = [@{
+            @"oldPath": @"",
+            @"newPath": @"",
+            @"fileHeader": @"",
+            @"lineStart": @(lineNumber)
+        } mutableCopy];
+    };
+
+    void (^finishHunk)(void) = ^{
+        if (!currentHunk) return;
+        currentHunk[@"addedLines"] = @(added);
+        currentHunk[@"removedLines"] = @(removed);
+        currentHunk[@"contextLines"] = @(context);
+        totalHunks++;
+        totalAdded += added;
+        totalRemoved += removed;
+        if (returnedHunks < limit) {
+            [currentHunks addObject:currentHunk];
+            returnedHunks++;
+        } else {
+            truncated = YES;
+            currentFileTruncated = YES;
+        }
+        currentHunk = nil;
+        added = 0;
+        removed = 0;
+        context = 0;
+    };
+
+    void (^finishFile)(void) = ^{
+        if (!currentFile) return;
+        finishHunk();
+        BOOL hasEvidence = [currentFile[@"fileHeader"] length] > 0 || [currentFile[@"oldPath"] length] > 0 || [currentFile[@"newPath"] length] > 0 || currentHunks.count > 0;
+        if (hasEvidence) {
+            totalFiles++;
+            currentFile[@"hunks"] = currentHunks ?: @[];
+            currentFile[@"returnedHunks"] = @(currentHunks.count);
+            currentFile[@"truncated"] = @(currentFileTruncated);
+            [files addObject:currentFile];
+        }
+        currentFile = nil;
+        currentHunks = nil;
+        currentFileTruncated = NO;
+    };
+
+    for (NSUInteger index = 0; index < lineCount; index++) {
+        NSString* line = lines[index] ?: @"";
+        NSInteger lineNumber = (NSInteger)index + 1;
+        if ([line hasPrefix:@"diff --git "]) {
+            finishFile();
+            ensureFile(lineNumber);
+            currentFile[@"fileHeader"] = line;
+            NSArray<NSString*>* parts = [line componentsSeparatedByString:@" "];
+            if (parts.count >= 4) {
+                currentFile[@"oldPath"] = CleanUnifiedDiffPath(parts[2]);
+                currentFile[@"newPath"] = CleanUnifiedDiffPath(parts[3]);
+            }
+            continue;
+        }
+        if ([line hasPrefix:@"--- "]) {
+            ensureFile(lineNumber);
+            currentFile[@"oldPath"] = CleanUnifiedDiffPath([line substringFromIndex:4]);
+            currentFile[@"oldHeaderLine"] = @(lineNumber);
+            continue;
+        }
+        if ([line hasPrefix:@"+++ "]) {
+            ensureFile(lineNumber);
+            currentFile[@"newPath"] = CleanUnifiedDiffPath([line substringFromIndex:4]);
+            currentFile[@"newHeaderLine"] = @(lineNumber);
+            continue;
+        }
+
+        NSTextCheckingResult* match = [hunkRegex firstMatchInString:line options:0 range:NSMakeRange(0, line.length)];
+        if (match) {
+            ensureFile(lineNumber);
+            finishHunk();
+            NSString* oldStart = [line substringWithRange:[match rangeAtIndex:1]];
+            NSString* oldCount = [match rangeAtIndex:2].location == NSNotFound ? @"" : [line substringWithRange:[match rangeAtIndex:2]];
+            NSString* newStart = [line substringWithRange:[match rangeAtIndex:3]];
+            NSString* newCount = [match rangeAtIndex:4].location == NSNotFound ? @"" : [line substringWithRange:[match rangeAtIndex:4]];
+            currentHunk = [@{
+                @"header": line,
+                @"lineStart": @(lineNumber),
+                @"lineEnd": @(lineNumber),
+                @"oldStart": @([oldStart integerValue]),
+                @"oldLines": @(oldCount.length > 0 ? [oldCount integerValue] : 1),
+                @"newStart": @([newStart integerValue]),
+                @"newLines": @(newCount.length > 0 ? [newCount integerValue] : 1)
+            } mutableCopy];
+            continue;
+        }
+
+        if (currentHunk) {
+            currentHunk[@"lineEnd"] = @(lineNumber);
+            if ([line hasPrefix:@"+"] && ![line hasPrefix:@"+++"]) {
+                added++;
+            } else if ([line hasPrefix:@"-"] && ![line hasPrefix:@"---"]) {
+                removed++;
+            } else if ([line hasPrefix:@" "]) {
+                context++;
+            }
+        }
+    }
+
+    finishFile();
+    return @{
+        @"files": files,
+        @"totalFiles": @(totalFiles),
+        @"totalHunks": @(totalHunks),
+        @"returnedHunks": @(returnedHunks),
+        @"totalAddedLines": @(totalAdded),
+        @"totalRemovedLines": @(totalRemoved),
+        @"maxHunks": @(limit),
+        @"truncated": @(truncated)
+    };
+}
+
 NSArray<NSNumber*>* ModifiedNewLinesFromPatch(NSString* patch) {
     NSMutableArray<NSNumber*>* linesOut = [NSMutableArray array];
     NSError* regErr = nil;
@@ -200,6 +363,32 @@ NSArray<NSString*>* LinesFromText(NSString* text) {
     return lines;
 }
 
+NSString* StableHashForString(NSString* text);
+
+std::string LowerASCII(std::string value) {
+    std::transform(value.begin(), value.end(), value.begin(), [](unsigned char c) {
+        return (char)std::tolower(c);
+    });
+    return value;
+}
+
+NSArray<NSDictionary*>* LiteralMatchSpans(const std::string& line, const std::string& query, BOOL caseSensitive) {
+    NSMutableArray* spans = [NSMutableArray array];
+    if (query.empty()) return spans;
+    std::string haystack = caseSensitive ? line : LowerASCII(line);
+    std::string needle = caseSensitive ? query : LowerASCII(query);
+    size_t pos = 0;
+    while ((pos = haystack.find(needle, pos)) != std::string::npos) {
+        [spans addObject:@{
+            @"columnStart": @(pos + 1),
+            @"columnEnd": @(pos + needle.size()),
+            @"text": NSStringFromStdString(line.substr(pos, needle.size()))
+        }];
+        pos += std::max<size_t>(needle.size(), 1);
+    }
+    return spans;
+}
+
 NSString* TextForLineRange(NSArray<NSString*>* lines, NSInteger startLine, NSInteger endLine) {
     if (startLine < 1 || endLine < startLine || endLine > (NSInteger)lines.count) {
         return nil;
@@ -209,6 +398,44 @@ NSString* TextForLineRange(NSArray<NSString*>* lines, NSInteger startLine, NSInt
         [selected addObject:lines[(NSUInteger)i - 1]];
     }
     return [selected componentsJoinedByString:@"\n"];
+}
+
+NSDictionary* TextChunkResponse(NSString* text, NSInteger offset, NSInteger maxBytes) {
+    NSData* data = [text dataUsingEncoding:NSUTF8StringEncoding] ?: [NSData data];
+    NSInteger totalBytes = (NSInteger)data.length;
+    NSInteger safeOffset = MAX(0, MIN(offset, totalBytes));
+    NSInteger safeMax = maxBytes > 0 ? MIN(maxBytes, (NSInteger)kMaxResponseBytes / 2) : 64 * 1024;
+    NSInteger end = MIN(totalBytes, safeOffset + safeMax);
+    NSRange range = NSMakeRange((NSUInteger)safeOffset, (NSUInteger)(end - safeOffset));
+    NSData* chunkData = [data subdataWithRange:range];
+    NSString* chunk = [[NSString alloc] initWithData:chunkData encoding:NSUTF8StringEncoding];
+    while (!chunk && range.length > 0) {
+        range.length--;
+        chunkData = [data subdataWithRange:range];
+        chunk = [[NSString alloc] initWithData:chunkData encoding:NSUTF8StringEncoding];
+        end = safeOffset + (NSInteger)range.length;
+    }
+    if (!chunk) chunk = @"";
+
+    NSString* prefix = @"";
+    if (safeOffset > 0) {
+        NSData* prefixData = [data subdataWithRange:NSMakeRange(0, (NSUInteger)safeOffset)];
+        prefix = [[NSString alloc] initWithData:prefixData encoding:NSUTF8StringEncoding] ?: @"";
+    }
+    NSInteger lineStart = [[prefix componentsSeparatedByString:@"\n"] count];
+    NSInteger lineEnd = lineStart + MAX(0, (NSInteger)[[chunk componentsSeparatedByString:@"\n"] count] - 1);
+
+    return @{
+        @"chunk": chunk,
+        @"offset": @(safeOffset),
+        @"nextOffset": @(end),
+        @"totalBytes": @(totalBytes),
+        @"hasMore": @(end < totalBytes),
+        @"lineStart": @(lineStart),
+        @"lineEnd": @(lineEnd),
+        @"sha256": StableHashForString(text ?: @""),
+        @"chunkSha256": StableHashForString(chunk ?: @"")
+    };
 }
 
 BOOL AnyPatternMatches(NSArray<NSString*>* patterns, const std::string& relPath, const std::string& filename) {
@@ -989,6 +1216,8 @@ NSArray<NSString*>* ContextLines(const std::vector<std::string>& lines, NSIntege
             @"diff.workspaceInfo",
             @"diff.stats",
             @"diff.file",
+            @"diff.chunk",
+            @"diff.hunks",
             @"diff.current",
             @"diff.staged",
             @"diff.unstaged",
@@ -999,6 +1228,8 @@ NSArray<NSString*>* ContextLines(const std::vector<std::string>& lines, NSIntege
             @"buffers.unsavedDiff",
             @"changes.current",
             @"changes.summary",
+            @"patch.chunk",
+            @"patch.hunks",
             @"problems.list",
             @"language.diagnostics",
             @"terminal.status",
@@ -1288,11 +1519,11 @@ NSArray<NSString*>* ContextLines(const std::vector<std::string>& lines, NSIntege
             @{ @"name": @"workspace.getRoot", @"permission": @"Read", @"params": @{}, @"returns": @{ @"path": @"string" } },
             @{ @"name": @"workspace.openFolder", @"permission": @"Destructive", @"params": @{ @"path": @"directory path" }, @"returns": @{ @"opened": @"boolean" } },
             @{ @"name": @"workspace.listFiles", @"permission": @"Read", @"params": @{}, @"returns": @{ @"files": @"array" } },
-            @{ @"name": @"workspace.grep", @"permission": @"Read", @"params": @{ @"query": @"string", @"maxResults": @"number <= 500 optional" }, @"returns": @{ @"matches": @"array with contextBefore/contextAfter" } },
+            @{ @"name": @"workspace.grep", @"permission": @"Read", @"params": @{ @"query": @"literal string", @"maxResults": @"number <= 500 optional" }, @"returns": @{ @"matches": @"array with matchSpans/contextBefore/contextAfter", @"mode": @"literal_substring", @"truncated": @"boolean" } },
             @{ @"name": @"workspace.openFile", @"permission": @"Read", @"params": @{ @"path": @"string" }, @"returns": @{ @"opened": @"boolean" } },
             @{ @"name": @"workspace.getRecentFiles", @"permission": @"Read", @"params": @{}, @"returns": @{ @"files": @"array" } },
             @{ @"name": @"search.files", @"permission": @"Read", @"params": @{ @"query": @"string", @"include": @"array optional", @"exclude": @"array optional", @"maxResults": @"number <= 500 optional" }, @"returns": @{ @"results": @"array" } },
-            @{ @"name": @"search.text", @"permission": @"Read", @"params": @{ @"query": @"string", @"before": @"number optional", @"after": @"number optional", @"maxResults": @"number <= 500 optional" }, @"returns": @{ @"results": @"array" } },
+            @{ @"name": @"search.text", @"permission": @"Read", @"params": @{ @"query": @"literal string", @"before": @"number optional", @"after": @"number optional", @"maxResults": @"number <= 500 optional" }, @"returns": @{ @"results": @"array with matchSpans", @"mode": @"literal_substring", @"truncated": @"boolean" } },
             @{ @"name": @"search.todo", @"permission": @"Read", @"params": @{ @"include": @"array optional", @"maxResults": @"number <= 500 optional" }, @"returns": @{ @"results": @"array" } },
             @{ @"name": @"search.diagnostics", @"permission": @"Read", @"params": @{ @"severity": @"string optional", @"source": @"string optional" }, @"returns": @{ @"results": @"array" } },
             @{ @"name": @"file.read", @"permission": @"Read", @"params": @{ @"path": @"string" }, @"returns": @{ @"text": @"string" } },
@@ -1328,9 +1559,13 @@ NSArray<NSString*>* ContextLines(const std::vector<std::string>& lines, NSIntege
             @{ @"name": @"diff.workspaceInfo", @"permission": @"Read", @"params": @{}, @"returns": @{ @"files": @"array", @"totalAdded": @"number", @"totalDeleted": @"number" } },
             @{ @"name": @"diff.stats", @"permission": @"Read", @"params": @{}, @"returns": @{ @"files": @"array", @"totalAdded": @"number", @"totalDeleted": @"number" } },
             @{ @"name": @"diff.file", @"permission": @"Read", @"params": @{ @"path": @"string" }, @"returns": @{ @"diff": @"string" } },
+            @{ @"name": @"diff.chunk", @"permission": @"Read", @"params": @{ @"source": @"unstaged|staged|file", @"path": @"string optional", @"offset": @"number optional", @"maxBytes": @"number optional" }, @"returns": @{ @"chunk": @"string", @"offset": @"number", @"nextOffset": @"number", @"hasMore": @"boolean", @"sha256": @"string" } },
+            @{ @"name": @"diff.hunks", @"permission": @"Read", @"params": @{ @"source": @"unstaged|staged|file", @"path": @"string optional", @"maxHunks": @"number optional <= 5000" }, @"returns": @{ @"files": @"array with literal unified diff hunk headers", @"totalHunks": @"number", @"truncated": @"boolean", @"sha256": @"string" } },
             @{ @"name": @"diff.previewPatch", @"permission": @"Read", @"params": @{ @"path": @"string", @"patch": @"unified diff" }, @"returns": @{ @"ok": @"boolean", @"risk": @"string" } },
             @{ @"name": @"patch.validate", @"permission": @"Read", @"params": @{ @"path": @"string", @"patch": @"unified diff" }, @"returns": @{ @"applies": @"boolean", @"changedLines": @"number", @"hunks": @"number" } },
             @{ @"name": @"patch.preview", @"permission": @"Read", @"params": @{ @"path": @"string", @"patch": @"unified diff" }, @"returns": @{ @"addedLines": @"number", @"removedLines": @"number", @"hunks": @"array" } },
+            @{ @"name": @"patch.chunk", @"permission": @"Read", @"params": @{ @"patch": @"unified diff", @"offset": @"number optional", @"maxBytes": @"number optional" }, @"returns": @{ @"chunk": @"string", @"offset": @"number", @"nextOffset": @"number", @"hasMore": @"boolean", @"sha256": @"string" } },
+            @{ @"name": @"patch.hunks", @"permission": @"Read", @"params": @{ @"patch": @"unified diff", @"maxHunks": @"number optional <= 5000" }, @"returns": @{ @"files": @"array with literal unified diff hunk headers", @"totalHunks": @"number", @"truncated": @"boolean", @"sha256": @"string" } },
             @{ @"name": @"patch.apply", @"permission": @"Edit/Destructive", @"params": @{ @"path": @"string", @"patch": @"unified diff", @"confirm": @"boolean optional" }, @"returns": @{ @"patched": @"boolean" } },
             @{ @"name": @"patch.applyBatch", @"permission": @"Edit/Destructive", @"params": @{ @"patches": @"array", @"dryRun": @"boolean optional", @"confirm": @"boolean optional" }, @"returns": @{ @"results": @"array" } },
             @{ @"name": @"patch.revertLast", @"permission": @"Edit", @"params": @{}, @"returns": @{ @"reverted": @"boolean" } },
@@ -1419,12 +1654,16 @@ NSArray<NSString*>* ContextLines(const std::vector<std::string>& lines, NSIntege
             @{ @"name": @"search.diagnostics", @"version": @1, @"category": @"read", @"permission": @"read", @"deterministic": @YES, @"idempotency": @"conditionally_idempotent", @"sideEffects": @{ @"readsWorkspace": @NO, @"writesWorkspace": @NO, @"runsProcess": @NO, @"usesTerminal": @NO }, @"rollback": @{ @"supported": @NO }, @"requiredParams": @[] },
             @{ @"name": @"patch.validate", @"version": @1, @"category": @"read", @"permission": @"read", @"deterministic": @YES, @"idempotency": @"conditionally_idempotent", @"sideEffects": @{ @"readsWorkspace": @YES, @"writesWorkspace": @NO, @"runsProcess": @NO, @"usesTerminal": @NO }, @"rollback": @{ @"supported": @NO }, @"requiredParams": @[@"path", @"patch"] },
             @{ @"name": @"patch.preview", @"version": @1, @"category": @"read", @"permission": @"read", @"deterministic": @YES, @"idempotency": @"conditionally_idempotent", @"sideEffects": @{ @"readsWorkspace": @YES, @"writesWorkspace": @NO, @"runsProcess": @NO, @"usesTerminal": @NO }, @"rollback": @{ @"supported": @NO }, @"requiredParams": @[@"path", @"patch"] },
+            @{ @"name": @"patch.chunk", @"version": @1, @"category": @"read", @"permission": @"read", @"deterministic": @YES, @"idempotency": @"conditionally_idempotent", @"sideEffects": @{ @"readsWorkspace": @NO, @"writesWorkspace": @NO, @"runsProcess": @NO, @"usesTerminal": @NO }, @"rollback": @{ @"supported": @NO }, @"requiredParams": @[@"patch"] },
+            @{ @"name": @"patch.hunks", @"version": @1, @"category": @"read", @"permission": @"read", @"deterministic": @YES, @"idempotency": @"conditionally_idempotent", @"sideEffects": @{ @"readsWorkspace": @NO, @"writesWorkspace": @NO, @"runsProcess": @NO, @"usesTerminal": @NO }, @"rollback": @{ @"supported": @NO }, @"requiredParams": @[@"patch"] },
             @{ @"name": @"patch.apply", @"version": @1, @"category": @"mutation", @"permission": @"edit", @"deterministic": @YES, @"idempotency": @"non_idempotent", @"sideEffects": @{ @"readsWorkspace": @YES, @"writesWorkspace": @YES, @"runsProcess": @NO, @"usesTerminal": @NO, @"mayModifyBuffers": @YES }, @"rollback": @{ @"supported": @YES, @"kind": @"content_preimage", @"conflictPolicy": @"fail_closed" }, @"requiredParams": @[@"path", @"patch"] },
             @{ @"name": @"patch.applyBatch", @"version": @1, @"category": @"mutation", @"permission": @"edit", @"deterministic": @YES, @"idempotency": @"non_idempotent", @"sideEffects": @{ @"readsWorkspace": @YES, @"writesWorkspace": @YES, @"runsProcess": @NO, @"usesTerminal": @NO, @"mayModifyBuffers": @YES }, @"rollback": @{ @"supported": @YES, @"kind": @"content_preimage", @"conflictPolicy": @"fail_closed" }, @"requiredParams": @[@"patches"] },
             @{ @"name": @"file.write", @"version": @1, @"category": @"mutation", @"permission": @"edit", @"deterministic": @YES, @"idempotency": @"conditionally_idempotent", @"sideEffects": @{ @"readsWorkspace": @YES, @"writesWorkspace": @YES, @"runsProcess": @NO, @"usesTerminal": @NO, @"mayModifyBuffers": @YES }, @"rollback": @{ @"supported": @YES, @"kind": @"content_preimage", @"conflictPolicy": @"fail_closed" }, @"requiredParams": @[@"path", @"content"] },
             @{ @"name": @"file.create", @"version": @1, @"category": @"mutation", @"permission": @"edit", @"deterministic": @YES, @"idempotency": @"conditionally_idempotent", @"sideEffects": @{ @"readsWorkspace": @YES, @"writesWorkspace": @YES, @"runsProcess": @NO, @"usesTerminal": @NO, @"mayModifyBuffers": @YES }, @"rollback": @{ @"supported": @YES, @"kind": @"content_preimage", @"conflictPolicy": @"fail_closed" }, @"requiredParams": @[@"path", @"content"] },
             @{ @"name": @"diff.summary", @"version": @1, @"category": @"read", @"permission": @"read", @"deterministic": @YES, @"idempotency": @"conditionally_idempotent", @"sideEffects": @{ @"readsWorkspace": @YES, @"writesWorkspace": @NO, @"runsProcess": @NO, @"usesTerminal": @NO }, @"rollback": @{ @"supported": @NO }, @"requiredParams": @[] },
             @{ @"name": @"diff.current", @"version": @1, @"category": @"read", @"permission": @"read", @"deterministic": @YES, @"idempotency": @"conditionally_idempotent", @"sideEffects": @{ @"readsWorkspace": @YES, @"writesWorkspace": @NO, @"runsProcess": @NO, @"usesTerminal": @NO }, @"rollback": @{ @"supported": @NO }, @"requiredParams": @[] },
+            @{ @"name": @"diff.chunk", @"version": @1, @"category": @"read", @"permission": @"read", @"deterministic": @YES, @"idempotency": @"conditionally_idempotent", @"sideEffects": @{ @"readsWorkspace": @YES, @"writesWorkspace": @NO, @"runsProcess": @YES, @"usesTerminal": @NO }, @"rollback": @{ @"supported": @NO }, @"requiredParams": @[@"source"] },
+            @{ @"name": @"diff.hunks", @"version": @1, @"category": @"read", @"permission": @"read", @"deterministic": @YES, @"idempotency": @"conditionally_idempotent", @"sideEffects": @{ @"readsWorkspace": @YES, @"writesWorkspace": @NO, @"runsProcess": @YES, @"usesTerminal": @NO }, @"rollback": @{ @"supported": @NO }, @"requiredParams": @[@"source"] },
             @{ @"name": @"verify.run", @"version": @1, @"category": @"execute", @"permission": @"execute", @"deterministic": @NO, @"idempotency": @"non_idempotent", @"sideEffects": @{ @"readsWorkspace": @YES, @"writesWorkspace": @YES, @"runsProcess": @YES, @"usesTerminal": @YES }, @"rollback": @{ @"supported": @NO }, @"requiredParams": @[@"command"] },
             @{ @"name": @"verify.failures", @"version": @1, @"category": @"read", @"permission": @"read", @"deterministic": @YES, @"idempotency": @"conditionally_idempotent", @"sideEffects": @{ @"readsWorkspace": @NO, @"writesWorkspace": @NO, @"runsProcess": @NO, @"usesTerminal": @NO }, @"rollback": @{ @"supported": @NO }, @"requiredParams": @[] },
             @{ @"name": @"context.snapshot", @"version": @1, @"category": @"read", @"permission": @"read", @"deterministic": @YES, @"idempotency": @"conditionally_idempotent", @"sideEffects": @{ @"readsWorkspace": @YES, @"writesWorkspace": @NO, @"runsProcess": @NO, @"usesTerminal": @NO }, @"rollback": @{ @"supported": @NO }, @"requiredParams": @[] },
@@ -4078,6 +4317,8 @@ static BOOL IsTextBinary(NSString* text) {
         std::string folder = StdStringFromNSString(ws);
         std::string stdQuery = StdStringFromNSString(query);
         NSMutableArray* matches = [NSMutableArray array];
+        BOOL truncated = NO;
+        BOOL scanLimitReached = NO;
         
         std::error_code ec;
         std::filesystem::recursive_directory_iterator it(folder, ec);
@@ -4096,7 +4337,10 @@ static BOOL IsTextBinary(NSString* text) {
                 continue;
             }
             if (entry.is_regular_file()) {
-                if (++scannedFiles > kMaxSearchScanFiles) break;
+                if (++scannedFiles > kMaxSearchScanFiles) {
+                    scanLimitReached = YES;
+                    break;
+                }
                 std::string relPath = relForDir;
                 
                 BOOL skip = false;
@@ -4135,34 +4379,40 @@ static BOOL IsTextBinary(NSString* text) {
 
                     for (size_t lineIdx = 0; lineIdx < fileLines.size(); lineIdx++) {
                         lineText = fileLines[lineIdx];
-                        size_t matchPos = std::string::npos;
-                        if (caseSensitive) {
-                            matchPos = lineText.find(stdQuery);
-                        } else {
-                            std::string lowerLine = lineText;
-                            std::transform(lowerLine.begin(), lowerLine.end(), lowerLine.begin(), ::tolower);
-                            std::string lowerQuery = stdQuery;
-                            std::transform(lowerQuery.begin(), lowerQuery.end(), lowerQuery.begin(), ::tolower);
-                            matchPos = lowerLine.find(lowerQuery);
-                        }
+                        NSArray* spans = LiteralMatchSpans(lineText, stdQuery, caseSensitive);
                         
-                        if (matchPos != std::string::npos) {
+                        if (spans.count > 0) {
                             NSInteger lineNumber = (NSInteger)lineIdx + 1;
+                            NSDictionary* firstSpan = spans.firstObject;
                             [matches addObject:@{
                                 @"path": NSStringFromStdString(relPath),
                                 @"line": @(lineNumber),
-                                @"column": @(matchPos + 1),
+                                @"column": firstSpan[@"columnStart"] ?: @1,
+                                @"matchSpans": spans,
+                                @"matchCountOnLine": @(spans.count),
                                 @"preview": NSStringFromStdString(lineText),
                                 @"contextBefore": ContextLines(fileLines, (NSInteger)lineIdx - 2, (NSInteger)lineIdx - 1),
                                 @"contextAfter": ContextLines(fileLines, (NSInteger)lineIdx + 1, (NSInteger)lineIdx + 2)
                             }];
-                            if (matches.count >= (NSUInteger)maxResults) break;
+                            if (matches.count >= (NSUInteger)maxResults) {
+                                truncated = YES;
+                                break;
+                            }
                         }
                     }
                 }
             }
         }
-        *outResult = @{ @"matches": matches };
+        *outResult = @{
+            @"matches": matches,
+            @"query": query,
+            @"mode": @"literal_substring",
+            @"caseSensitive": @(caseSensitive),
+            @"maxResults": @(maxResults),
+            @"truncated": @(truncated || scanLimitReached),
+            @"scanLimitReached": @(scanLimitReached),
+            @"scannedFiles": @(MIN(scannedFiles, kMaxSearchScanFiles))
+        };
         return;
     }
     
@@ -4260,10 +4510,11 @@ static BOOL IsTextBinary(NSString* text) {
         NSArray* excludes = params[@"exclude"] ?: @[];
         std::string folder = StdStringFromNSString(ws);
         std::string needle = StdStringFromNSString(query);
-        if (!caseSensitive) std::transform(needle.begin(), needle.end(), needle.begin(), ::tolower);
         NSMutableArray* results = [NSMutableArray array];
         std::error_code ec;
         NSInteger scannedFiles = 0;
+        BOOL truncated = NO;
+        BOOL scanLimitReached = NO;
         std::filesystem::recursive_directory_iterator it(folder, ec);
         std::filesystem::recursive_directory_iterator end;
         for (; it != end && !ec; it.increment(ec)) {
@@ -4278,7 +4529,10 @@ static BOOL IsTextBinary(NSString* text) {
                 continue;
             }
             if (!entry.is_regular_file()) continue;
-            if (++scannedFiles > kMaxSearchScanFiles) break;
+            if (++scannedFiles > kMaxSearchScanFiles) {
+                scanLimitReached = YES;
+                break;
+            }
             if (ShouldSkipSearchPath(p, relPath, includes, excludes)) continue;
             if (!FileIsWithinSearchReadCap(p)) continue;
             NSString* text = [self safeTextForFileAtPath:NSStringFromStdString(p.string())];
@@ -4288,22 +4542,35 @@ static BOOL IsTextBinary(NSString* text) {
             std::string line;
             while (std::getline(stream, line)) lines.push_back(line);
             for (size_t i = 0; i < lines.size(); i++) {
-                std::string haystack = lines[i];
-                if (!caseSensitive) std::transform(haystack.begin(), haystack.end(), haystack.begin(), ::tolower);
-                size_t pos = haystack.find(needle);
-                if (pos == std::string::npos) continue;
+                NSArray* spans = LiteralMatchSpans(lines[i], needle, caseSensitive);
+                if (spans.count == 0) continue;
+                NSDictionary* firstSpan = spans.firstObject;
                 [results addObject:@{
                     @"path": NSStringFromStdString(relPath),
                     @"line": @(i + 1),
-                    @"column": @(pos + 1),
+                    @"column": firstSpan[@"columnStart"] ?: @1,
+                    @"matchSpans": spans,
+                    @"matchCountOnLine": @(spans.count),
                     @"preview": NSStringFromStdString(lines[i]),
                     @"contextBefore": ContextLines(lines, (NSInteger)i - before, (NSInteger)i - 1),
                     @"contextAfter": ContextLines(lines, (NSInteger)i + 1, (NSInteger)i + after)
                 }];
-                if (results.count >= (NSUInteger)maxResults) break;
+                if (results.count >= (NSUInteger)maxResults) {
+                    truncated = YES;
+                    break;
+                }
             }
         }
-        *outResult = @{ @"results": results };
+        *outResult = @{
+            @"results": results,
+            @"query": query,
+            @"mode": @"literal_substring",
+            @"caseSensitive": @(caseSensitive),
+            @"maxResults": @(maxResults),
+            @"truncated": @(truncated || scanLimitReached),
+            @"scanLimitReached": @(scanLimitReached),
+            @"scannedFiles": @(MIN(scannedFiles, kMaxSearchScanFiles))
+        };
         return;
     }
 
@@ -4914,7 +5181,87 @@ static BOOL IsTextBinary(NSString* text) {
         NSString* ws = [self safeWorkspacePath];
         NSString* targetPath = AbsolutePathForRPCPath(params[@"path"] ?: @"", ws);
         NSString* diff = [self safeGitDiffForFile:targetPath];
-        *outResult = @{ @"path": targetPath ?: @"", @"diff": diff ?: @"" };
+        *outResult = @{
+            @"path": targetPath ?: @"",
+            @"diff": diff ?: @"",
+            @"mode": @"literal_git_diff",
+            @"sha256": StableHashForString(diff ?: @"")
+        };
+        return;
+    }
+
+    if ([method isEqualToString:@"diff.chunk"]) {
+        NSString* ws = [self safeWorkspacePath];
+        NSString* source = [params[@"source"] lowercaseString] ?: @"unstaged";
+        NSInteger offset = params[@"offset"] ? [params[@"offset"] integerValue] : 0;
+        NSInteger maxBytes = params[@"maxBytes"] ? [params[@"maxBytes"] integerValue] : 64 * 1024;
+        if (!ws) {
+            *outErrCode = @"invalid_request";
+            *outErrMsg = @"No open workspace.";
+            return;
+        }
+        NSString* diff = @"";
+        NSString* absPath = @"";
+        if ([source isEqualToString:@"staged"]) {
+            diff = RunGitOutput(ws, @[@"diff", @"--cached"]);
+        } else if ([source isEqualToString:@"unstaged"]) {
+            diff = RunGitOutput(ws, @[@"diff"]);
+        } else if ([source isEqualToString:@"file"]) {
+            absPath = AbsolutePathForRPCPath(params[@"path"] ?: @"", ws);
+            if (!absPath) {
+                *outErrCode = @"invalid_params";
+                *outErrMsg = @"path required when source=file.";
+                return;
+            }
+            diff = [self safeGitDiffForFile:absPath] ?: @"";
+        } else {
+            *outErrCode = @"invalid_params";
+            *outErrMsg = @"source must be one of unstaged, staged, or file.";
+            return;
+        }
+        NSMutableDictionary* chunk = [TextChunkResponse(diff ?: @"", offset, maxBytes) mutableCopy];
+        chunk[@"source"] = source;
+        chunk[@"path"] = absPath ?: @"";
+        chunk[@"mode"] = @"literal_git_diff_chunk";
+        chunk[@"encoding"] = @"utf-8";
+        *outResult = chunk;
+        return;
+    }
+
+    if ([method isEqualToString:@"diff.hunks"]) {
+        NSString* ws = [self safeWorkspacePath];
+        NSString* source = [params[@"source"] lowercaseString] ?: @"unstaged";
+        NSInteger maxHunks = params[@"maxHunks"] ? [params[@"maxHunks"] integerValue] : 500;
+        if (!ws) {
+            *outErrCode = @"invalid_request";
+            *outErrMsg = @"No open workspace.";
+            return;
+        }
+        NSString* diff = @"";
+        NSString* absPath = @"";
+        if ([source isEqualToString:@"staged"]) {
+            diff = RunGitOutput(ws, @[@"diff", @"--cached"]);
+        } else if ([source isEqualToString:@"unstaged"]) {
+            diff = RunGitOutput(ws, @[@"diff"]);
+        } else if ([source isEqualToString:@"file"]) {
+            absPath = AbsolutePathForRPCPath(params[@"path"] ?: @"", ws);
+            if (!absPath) {
+                *outErrCode = @"invalid_params";
+                *outErrMsg = @"path required when source=file.";
+                return;
+            }
+            diff = [self safeGitDiffForFile:absPath] ?: @"";
+        } else {
+            *outErrCode = @"invalid_params";
+            *outErrMsg = @"source must be one of unstaged, staged, or file.";
+            return;
+        }
+        NSMutableDictionary* response = [UnifiedDiffHunksResponse(diff ?: @"", maxHunks) mutableCopy];
+        response[@"source"] = source;
+        response[@"path"] = absPath ?: @"";
+        response[@"mode"] = @"literal_unified_diff_hunks";
+        response[@"sha256"] = StableHashForString(diff ?: @"");
+        *outResult = response;
         return;
     }
 
@@ -4930,12 +5277,14 @@ static BOOL IsTextBinary(NSString* text) {
     }
 
     if ([method isEqualToString:@"diff.staged"]) {
-        *outResult = @{ @"diff": RunGitOutput([self safeWorkspacePath] ?: @"", @[@"diff", @"--cached"]) };
+        NSString* diff = RunGitOutput([self safeWorkspacePath] ?: @"", @[@"diff", @"--cached"]);
+        *outResult = @{ @"diff": diff, @"mode": @"literal_git_diff", @"sha256": StableHashForString(diff ?: @"") };
         return;
     }
 
     if ([method isEqualToString:@"diff.unstaged"]) {
-        *outResult = @{ @"diff": RunGitOutput([self safeWorkspacePath] ?: @"", @[@"diff"]) };
+        NSString* diff = RunGitOutput([self safeWorkspacePath] ?: @"", @[@"diff"]);
+        *outResult = @{ @"diff": diff, @"mode": @"literal_git_diff", @"sha256": StableHashForString(diff ?: @"") };
         return;
     }
 
@@ -4987,6 +5336,37 @@ static BOOL IsTextBinary(NSString* text) {
     }
 
     // Patch primitives
+    if ([method isEqualToString:@"patch.chunk"]) {
+        NSString* patchStr = params[@"patch"] ?: @"";
+        NSInteger offset = params[@"offset"] ? [params[@"offset"] integerValue] : 0;
+        NSInteger maxBytes = params[@"maxBytes"] ? [params[@"maxBytes"] integerValue] : 64 * 1024;
+        if (patchStr.length == 0) {
+            *outErrCode = @"invalid_params";
+            *outErrMsg = @"patch parameter required.";
+            return;
+        }
+        NSMutableDictionary* chunk = [TextChunkResponse(patchStr, offset, maxBytes) mutableCopy];
+        chunk[@"mode"] = @"literal_patch_chunk";
+        chunk[@"encoding"] = @"utf-8";
+        *outResult = chunk;
+        return;
+    }
+
+    if ([method isEqualToString:@"patch.hunks"]) {
+        NSString* patchStr = params[@"patch"] ?: @"";
+        NSInteger maxHunks = params[@"maxHunks"] ? [params[@"maxHunks"] integerValue] : 500;
+        if (patchStr.length == 0) {
+            *outErrCode = @"invalid_params";
+            *outErrMsg = @"patch parameter required.";
+            return;
+        }
+        NSMutableDictionary* response = [UnifiedDiffHunksResponse(patchStr, maxHunks) mutableCopy];
+        response[@"mode"] = @"literal_unified_diff_hunks";
+        response[@"sha256"] = StableHashForString(patchStr ?: @"");
+        *outResult = response;
+        return;
+    }
+
     if ([method isEqualToString:@"patch.validate"] || [method isEqualToString:@"patch.preview"]) {
         NSString* ws = [self safeWorkspacePath];
         NSString* targetPath = AbsolutePathForRPCPath(params[@"path"] ?: [self safeActiveFilePath], ws);

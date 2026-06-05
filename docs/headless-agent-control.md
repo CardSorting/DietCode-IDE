@@ -122,6 +122,16 @@ Useful flags:
 --request-id ID         set the JSON-RPC request id
 --params-file PATH      load RPC params from a JSON file
 --params-stdin          load RPC params from stdin
+--path PATH             path for patch stdin/file helpers
+--diff-source SOURCE    call diff.chunk for unstaged, staged, or file
+--diff-hunks            use diff.hunks with --diff-source instead of diff.chunk
+--offset BYTES          byte offset for diff.chunk or patch.chunk
+--max-bytes BYTES       maximum bytes for diff.chunk or patch.chunk
+--max-hunks N           maximum hunk summaries for diff.hunks or patch.hunks
+--patch-file PATH       load unified diff text from a file
+--patch-stdin           load unified diff text from stdin
+--patch-hunks           default patch stdin/file calls to patch.hunks
+--confirm               set confirm=true for patch apply calls
 --batch-file PATH       load newline-delimited JSON RPC requests from a file
 --batch-stdin           load newline-delimited JSON RPC requests from stdin
 ```
@@ -200,6 +210,70 @@ python3 scripts/dietcode_agent_client.py --batch-file /tmp/dietcode-batch.jsonl
 ```
 
 Responses are printed as compact JSONL, one response per input request. The process exits nonzero if any response has `ok: false`.
+
+Literal grep and diff evidence
+------------------------------
+
+`workspace.grep` and `search.text` are literal substring scans. They do not use semantic trees, graphs, fuzzy matching, or inferred ranking. Each result includes:
+
+```text
+path
+line
+column
+matchSpans
+preview
+contextBefore/contextAfter
+```
+
+Use `matchSpans` rather than re-inferring columns from `preview`.
+
+For changed files, prefer hunk maps before raw diff text when the agent only needs exact locations:
+
+```sh
+python3 scripts/dietcode_agent_client.py diff.hunks '{"source":"unstaged","maxHunks":200}'
+python3 scripts/dietcode_agent_client.py diff.hunks '{"source":"file","path":"src/app.py","maxHunks":50}'
+python3 scripts/dietcode_agent_client.py --diff-source unstaged --diff-hunks --max-hunks 200 --compact
+```
+
+`diff.hunks` returns literal unified diff file headers, hunk headers, diff-text line ranges, old/new line ranges, added/removed/context counts, `sha256`, and `truncated`. It does not infer symbols, intent, ownership, or fuzzy path matches.
+
+For large diffs, prefer chunked reads:
+
+```sh
+python3 scripts/dietcode_agent_client.py diff.chunk '{"source":"unstaged","offset":0,"maxBytes":65536}'
+python3 scripts/dietcode_agent_client.py diff.chunk '{"source":"staged","offset":0,"maxBytes":65536}'
+python3 scripts/dietcode_agent_client.py diff.chunk '{"source":"file","path":"src/app.py","offset":0}'
+python3 scripts/dietcode_agent_client.py --diff-source unstaged --offset 0 --max-bytes 65536 --compact
+```
+
+Chunk responses include `offset`, `nextOffset`, `hasMore`, `sha256`, and `chunkSha256`.
+
+Patch streaming
+---------------
+
+Agents can pipe streamed unified diff text directly into the helper without JSON escaping:
+
+```sh
+generate_patch | python3 scripts/dietcode_agent_client.py --patch-stdin --path src/app.py patch.validate
+generate_patch | python3 scripts/dietcode_agent_client.py --patch-stdin --path src/app.py patch.preview
+generate_patch | python3 scripts/dietcode_agent_client.py --patch-stdin --path src/app.py --confirm patch.apply
+```
+
+If no method is supplied with `--patch-stdin` or `--patch-file`, the helper defaults to `patch.validate`.
+
+Use `--patch-hunks` to inspect streamed patch structure without applying or validating it against a workspace file:
+
+```sh
+generate_patch | python3 scripts/dietcode_agent_client.py --patch-stdin --patch-hunks --max-hunks 200 --compact
+python3 scripts/dietcode_agent_client.py patch.hunks --patch-file /tmp/change.diff
+```
+
+Patch text can also be chunked for stream consumers:
+
+```sh
+python3 scripts/dietcode_agent_client.py patch.chunk --patch-file /tmp/change.diff
+python3 scripts/dietcode_agent_client.py patch.chunk --patch-file /tmp/change.diff --offset 65536 --max-bytes 65536
+```
 
 Limits
 ------

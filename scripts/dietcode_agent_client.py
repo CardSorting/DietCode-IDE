@@ -249,6 +249,32 @@ def wait_ready(
 
 
 def load_params(args: argparse.Namespace) -> dict[str, Any]:
+    patch_sources = [args.patch_file is not None, args.patch_stdin]
+    if sum(patch_sources) > 1:
+        raise ValueError("provide only one of --patch-file or --patch-stdin")
+    if any(patch_sources):
+        if args.params_json is not None or args.params_file is not None or args.params_stdin:
+            raise ValueError("patch input cannot be combined with params_json, --params-file, or --params-stdin")
+        if args.patch_stdin:
+            patch = sys.stdin.read()
+        else:
+            with open(args.patch_file, "r", encoding="utf-8") as f:
+                patch = f.read()
+        params: dict[str, Any] = {"patch": patch}
+        if args.path:
+            params["path"] = args.path
+        if args.confirm:
+            params["confirm"] = True
+        if args.dry_run is not None:
+            params["dryRun"] = args.dry_run
+        if args.offset is not None:
+            params["offset"] = args.offset
+        if args.max_bytes is not None:
+            params["maxBytes"] = args.max_bytes
+        if args.max_hunks is not None:
+            params["maxHunks"] = args.max_hunks
+        return params
+
     sources = [args.params_json is not None, args.params_file is not None, args.params_stdin]
     if sum(sources) > 1:
         raise ValueError("provide only one of params_json, --params-file, or --params-stdin")
@@ -520,6 +546,26 @@ def run_self_test() -> dict[str, Any]:
     checks.append({"name": "json.compact", "ok": compact == '{"a":1,"b":2}'})
     fake_args = argparse.Namespace(app=None)
     checks.append({"name": "config.value", "ok": config_value(fake_args, {"app": "configured"}, "app", "app", None) == "configured"})
+    patch_args = argparse.Namespace(
+        patch_file=None,
+        patch_stdin=True,
+        params_json=None,
+        params_file=None,
+        params_stdin=False,
+        path="a.txt",
+        confirm=True,
+        dry_run=None,
+        offset=None,
+        max_bytes=None,
+        max_hunks=None,
+    )
+    patch_args.params_json = "{}"
+    try:
+        load_params(patch_args)
+        conflict_ok = False
+    except ValueError:
+        conflict_ok = True
+    checks.append({"name": "patch.params_conflict", "ok": conflict_ok})
 
     ok = all(check["ok"] for check in checks)
     return {"ok": ok, "checks": checks}
@@ -550,6 +596,18 @@ def main() -> int:
     parser.add_argument("--request-id", help="Override the JSON-RPC request id.")
     parser.add_argument("--params-file", help="Read RPC params JSON object from a file.")
     parser.add_argument("--params-stdin", action="store_true", help="Read RPC params JSON object from stdin.")
+    parser.add_argument("--path", help="Path used with --patch-file or --patch-stdin.")
+    parser.add_argument("--diff-source", choices=["unstaged", "staged", "file"], help="Call diff.chunk for unstaged, staged, or file diff.")
+    parser.add_argument("--diff-hunks", action="store_true", help="Use diff.hunks with --diff-source instead of diff.chunk.")
+    parser.add_argument("--offset", type=int, help="Byte offset for diff.chunk or patch.chunk.")
+    parser.add_argument("--max-bytes", type=int, help="Maximum bytes for diff.chunk or patch.chunk.")
+    parser.add_argument("--max-hunks", type=int, help="Maximum hunk summaries for diff.hunks or patch.hunks.")
+    parser.add_argument("--patch-file", help="Read unified diff patch text from a file.")
+    parser.add_argument("--patch-stdin", action="store_true", help="Read unified diff patch text from stdin.")
+    parser.add_argument("--patch-hunks", action="store_true", help="Default patch stdin/file calls to patch.hunks instead of patch.validate.")
+    parser.add_argument("--confirm", action="store_true", help="Set confirm=true for patch apply calls.")
+    parser.add_argument("--dry-run", dest="dry_run", action="store_true", default=None, help="Set dryRun=true for supported calls.")
+    parser.add_argument("--no-dry-run", dest="dry_run", action="store_false", help="Set dryRun=false for supported calls.")
     parser.add_argument("--batch-file", help="Read newline-delimited JSON RPC requests from a file.")
     parser.add_argument("--batch-stdin", action="store_true", help="Read newline-delimited JSON RPC requests from stdin.")
     parser.add_argument("method", nargs="?", default="rpc.ping", help="RPC method to call after ensuring the socket.")
@@ -628,7 +686,18 @@ def main() -> int:
 
         shortcut_method: str | None = None
         shortcut_params: dict[str, Any] = {}
-        if args.capabilities:
+        if args.diff_source:
+            shortcut_method = "diff.hunks" if args.diff_hunks else "diff.chunk"
+            shortcut_params = {"source": args.diff_source}
+            if args.path:
+                shortcut_params["path"] = args.path
+            if args.offset is not None:
+                shortcut_params["offset"] = args.offset
+            if args.max_bytes is not None:
+                shortcut_params["maxBytes"] = args.max_bytes
+            if args.max_hunks is not None:
+                shortcut_params["maxHunks"] = args.max_hunks
+        elif args.capabilities:
             with DietCodeAgentClient(
                 app_path=app_path,
                 socket_path=socket_path,
@@ -642,11 +711,11 @@ def main() -> int:
             print(json_text(response, compact=args.compact))
             return 0
 
-        if args.server_version:
+        if shortcut_method is None and args.server_version:
             shortcut_method = "rpc.version"
-        elif args.list_methods:
+        elif shortcut_method is None and args.list_methods:
             shortcut_method = "rpc.methods"
-        elif args.describe:
+        elif shortcut_method is None and args.describe:
             shortcut_method = "rpc.describe"
             shortcut_params = {"method": args.describe}
 
@@ -667,6 +736,9 @@ def main() -> int:
             print(json_text(response, compact=args.compact))
             return 0
 
+        effective_method = args.method
+        if (args.patch_file or args.patch_stdin) and effective_method == "rpc.ping":
+            effective_method = "patch.hunks" if args.patch_hunks else "patch.validate"
         params = load_params(args)
         with DietCodeAgentClient(
             app_path=app_path,
@@ -678,9 +750,9 @@ def main() -> int:
             retries=retries,
         ) as client:
             if args.raw_response:
-                response = client.raw_call(args.method, params, args.request_id)
+                response = client.raw_call(effective_method, params, args.request_id)
             else:
-                response = client.call(args.method, params, args.request_id)
+                response = client.call(effective_method, params, args.request_id)
         print(json_text(response, compact=args.compact))
         return 0
     except Exception as exc:
