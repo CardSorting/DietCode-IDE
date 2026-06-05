@@ -818,14 +818,27 @@ NSArray<NSString*>* ContextLines(const std::vector<std::string>& lines, NSIntege
     NSString* homeDir = NSHomeDirectory();
     NSString* dcDir = [homeDir stringByAppendingPathComponent:@".dietcode"];
     
-    // Create ~/.dietcode directory with 0700 permissions
-    [[NSFileManager defaultManager] createDirectoryAtPath:dcDir withIntermediateDirectories:YES attributes:@{NSFilePosixPermissions: @(0700)} error:nil];
+    // Pre-verify ~/.dietcode directory owner and symlink safety
+    struct stat st;
+    if (lstat([dcDir UTF8String], &st) == 0) {
+        if (S_ISLNK(st.st_mode)) {
+            [self appendLogLine:@"[Error] ~/.dietcode is a symbolic link. Aborting for security."];
+            return;
+        }
+        if (st.st_uid != getuid()) {
+            [self appendLogLine:@"[Error] ~/.dietcode is owned by a different user. Aborting for security."];
+            return;
+        }
+    } else {
+        [[NSFileManager defaultManager] createDirectoryAtPath:dcDir withIntermediateDirectories:YES attributes:@{NSFilePosixPermissions: @(0700)} error:nil];
+    }
     [[NSFileManager defaultManager] setAttributes:@{NSFilePosixPermissions: @(0700)} ofItemAtPath:dcDir error:nil];
     
     // Generate session token
     NSString* token = [NSString stringWithFormat:@"%08x%08x%08x%08x", 
                        arc4random(), arc4random(), arc4random(), arc4random()];
     NSString* tokenPath = [dcDir stringByAppendingPathComponent:@"session.token"];
+    unlink([tokenPath UTF8String]); // Prevent symlink overwrite write exploits
     [token writeToFile:tokenPath atomically:YES encoding:NSUTF8StringEncoding error:nil];
     [[NSFileManager defaultManager] setAttributes:@{NSFilePosixPermissions: @(0600)} ofItemAtPath:tokenPath error:nil];
     _sessionToken = [token copy];
