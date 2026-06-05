@@ -6,13 +6,22 @@ import sys
 
 
 SOCKET_PATH = os.path.expanduser("~/.dietcode/control.sock")
+TOKEN_PATH = os.path.expanduser("~/.dietcode/session.token")
 
 
-def call(sock, method, params=None, request_id=None):
+def load_token():
+    if not os.path.exists(TOKEN_PATH):
+        raise RuntimeError(f"session token not found: {TOKEN_PATH}")
+    with open(TOKEN_PATH, "r", encoding="utf-8") as f:
+        return f.read().strip()
+
+
+def call(sock, token, method, params=None, request_id=None):
     payload = {
         "id": request_id or method,
         "method": method,
         "params": params or {},
+        "token": token,
     }
     sock.sendall(json.dumps(payload, separators=(",", ":")).encode("utf-8") + b"\n")
     data = bytearray()
@@ -33,6 +42,7 @@ def main():
         print(f"control socket not found: {SOCKET_PATH}", file=sys.stderr)
         return 1
 
+    token = load_token()
     with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as sock:
         sock.connect(SOCKET_PATH)
 
@@ -46,7 +56,7 @@ def main():
         ]
 
         for method, params in checks:
-            result = call(sock, method, params)
+            result = call(sock, token, method, params)
             print(f"ok {method}: {sorted(result.keys())}")
 
     return 0

@@ -7,11 +7,27 @@
 #include <fnmatch.h>
 
 namespace {
+static const NSInteger kMaxAnalysisDepth = 10;
+static const NSInteger kMaxAnalysisFiles = 10000;
+static const unsigned long long kMaxAnalysisReadBytes = 2 * 1024 * 1024;
+
 NSString* NSStringFromStd(const std::string& str) {
     return [NSString stringWithUTF8String:str.c_str()] ?: @"";
 }
 std::string StdFromNSString(NSString* str) {
     return std::string([str UTF8String] ?: "");
+}
+
+bool isSkippedDirName(const std::string& filename) {
+    return filename == ".git" || filename == "node_modules" || filename == "build" ||
+           filename == "dist" || filename == "DerivedData" || filename == ".next" ||
+           filename == "__pycache__";
+}
+
+bool fileWithinReadCap(const std::filesystem::path& p) {
+    std::error_code ec;
+    auto size = std::filesystem::file_size(p, ec);
+    return ec || size <= kMaxAnalysisReadBytes;
 }
 }
 
@@ -32,27 +48,21 @@ std::string StdFromNSString(NSString* str) {
     unsigned long long totalSize = 0;
 
     std::error_code ec;
-    for (const auto& entry : std::filesystem::recursive_directory_iterator(folder, ec)) {
-        if (!entry.is_regular_file()) continue;
-
+    std::filesystem::recursive_directory_iterator it(folder, ec);
+    std::filesystem::recursive_directory_iterator end;
+    for (; it != end && !ec; it.increment(ec)) {
+        const auto& entry = *it;
         std::filesystem::path p = entry.path();
         std::string filename = p.filename().string();
-
-        if (filename == ".git" || filename == "node_modules" || filename == "build" || filename == "dist" || filename == "DerivedData") {
+        if (entry.is_directory(ec)) {
+            if (it.depth() >= kMaxAnalysisDepth || isSkippedDirName(filename)) {
+                it.disable_recursion_pending();
+            }
             continue;
         }
+        if (!entry.is_regular_file()) continue;
+        if (++totalFiles > kMaxAnalysisFiles) break;
 
-        bool skip = false;
-        for (const auto& part : p) {
-            std::string partStr = part.string();
-            if (partStr == ".git" || partStr == "node_modules" || partStr == "build" || partStr == "dist" || partStr == "DerivedData") {
-                skip = true;
-                break;
-            }
-        }
-        if (skip) continue;
-
-        totalFiles++;
         std::error_code sizeEc;
         auto size = std::filesystem::file_size(p, sizeEc);
         if (!sizeEc) totalSize += size;
@@ -142,14 +152,22 @@ std::string StdFromNSString(NSString* str) {
     std::filesystem::path folder([ws UTF8String]);
 
     std::error_code ec;
-    for (const auto& entry : std::filesystem::recursive_directory_iterator(folder, ec)) {
-        if (!entry.is_regular_file()) continue;
-
+    NSInteger scannedFiles = 0;
+    std::filesystem::recursive_directory_iterator it(folder, ec);
+    std::filesystem::recursive_directory_iterator end;
+    for (; it != end && !ec; it.increment(ec)) {
+        const auto& entry = *it;
         std::filesystem::path p = entry.path();
         std::string filenameStr = p.filename().string();
-        if (filenameStr == ".git" || filenameStr == "node_modules" || filenameStr == "build" || filenameStr == "dist") {
+        if (entry.is_directory(ec)) {
+            if (it.depth() >= kMaxAnalysisDepth || isSkippedDirName(filenameStr)) {
+                it.disable_recursion_pending();
+            }
             continue;
         }
+        if (!entry.is_regular_file()) continue;
+        if (++scannedFiles > kMaxAnalysisFiles) break;
+        if (!fileWithinReadCap(p)) continue;
 
         NSString* currentPath = NSStringFromStd(p.string());
         if ([currentPath isEqualToString:path]) continue;
@@ -195,12 +213,23 @@ std::string StdFromNSString(NSString* str) {
     }
 
     std::error_code ec;
-    for (const auto& entry : std::filesystem::recursive_directory_iterator(folder, ec)) {
-        if (!entry.is_regular_file()) continue;
-
+    NSInteger scannedFiles = 0;
+    std::filesystem::recursive_directory_iterator it(folder, ec);
+    std::filesystem::recursive_directory_iterator end;
+    for (; it != end && !ec; it.increment(ec)) {
+        const auto& entry = *it;
         std::filesystem::path p = entry.path();
         std::string filename = p.filename().string();
-        std::string relPath = std::filesystem::relative(p, folder).string();
+        std::string relPath = std::filesystem::relative(p, folder, ec).string();
+        if (entry.is_directory(ec)) {
+            if (it.depth() >= kMaxAnalysisDepth || isSkippedDirName(filename)) {
+                it.disable_recursion_pending();
+            }
+            continue;
+        }
+        if (!entry.is_regular_file()) continue;
+        if (++scannedFiles > kMaxAnalysisFiles) break;
+        if (!fileWithinReadCap(p)) continue;
 
         // Glob matching exclusions
         BOOL skip = false;
@@ -211,7 +240,6 @@ std::string StdFromNSString(NSString* str) {
                 break;
             }
         }
-        if (filename == ".git" || filename == "node_modules" || filename == "build" || filename == "dist") skip = true;
         if (skip) continue;
 
         // Glob matching inclusions

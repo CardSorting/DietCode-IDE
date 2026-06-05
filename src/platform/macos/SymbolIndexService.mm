@@ -8,6 +8,10 @@
 #include <cctype>
 
 namespace {
+static const NSInteger kMaxSymbolSearchDepth = 10;
+static const NSInteger kMaxSymbolSearchFiles = 10000;
+static const unsigned long long kMaxSymbolSearchReadBytes = 2 * 1024 * 1024;
+
 struct LineColumn {
     NSInteger line;
     NSInteger column;
@@ -122,6 +126,18 @@ NSRange findBraceBlockEnd(NSString* text, NSUInteger startIndex) {
         }
     }
     return NSMakeRange(NSNotFound, 0);
+}
+
+bool shouldSkipSymbolDirectory(const std::string& filename) {
+    return filename == ".git" || filename == "node_modules" || filename == "build" ||
+           filename == "dist" || filename == "DerivedData" || filename == ".next" ||
+           filename == "__pycache__";
+}
+
+bool symbolFileWithinReadCap(const std::filesystem::path& p) {
+    std::error_code ec;
+    auto size = std::filesystem::file_size(p, ec);
+    return ec || size <= kMaxSymbolSearchReadBytes;
 }
 }
 
@@ -252,15 +268,22 @@ NSRange findBraceBlockEnd(NSString* text, NSUInteger startIndex) {
     std::string targetSymbol = [symbol UTF8String];
 
     std::error_code ec;
-    for (const auto& entry : std::filesystem::recursive_directory_iterator(folder, ec)) {
-        if (!entry.is_regular_file()) continue;
-
+    NSInteger scannedFiles = 0;
+    std::filesystem::recursive_directory_iterator it(folder, ec);
+    std::filesystem::recursive_directory_iterator end;
+    for (; it != end && !ec; it.increment(ec)) {
+        const auto& entry = *it;
         std::filesystem::path p = entry.path();
         std::string filename = p.filename().string();
-
-        if (filename == ".git" || filename == "node_modules" || filename == "build" || filename == "dist") {
+        if (entry.is_directory(ec)) {
+            if (it.depth() >= kMaxSymbolSearchDepth || shouldSkipSymbolDirectory(filename)) {
+                it.disable_recursion_pending();
+            }
             continue;
         }
+        if (!entry.is_regular_file()) continue;
+        if (++scannedFiles > kMaxSymbolSearchFiles) break;
+        if (!symbolFileWithinReadCap(p)) continue;
 
         std::string absPathStr = p.string();
         NSString* absPath = [NSString stringWithUTF8String:absPathStr.c_str()];

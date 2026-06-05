@@ -30,6 +30,9 @@ static const NSUInteger kMaxPatchBytesBeforeConfirmation = 10 * 1024;
 static const NSUInteger kMaxPatchBytes = 1024 * 1024;
 static const NSInteger kMaxBatchPatchCount = 10;
 static const NSUInteger kMaxChunkPreviewLength = 180;
+static const NSInteger kMaxSearchDepth = 10;
+static const NSInteger kMaxSearchScanFiles = 10000;
+static const NSUInteger kMaxSearchFileBytes = 2 * 1024 * 1024;
 static const NSInteger kMaxPlanSteps = 30;
 static const NSInteger kMaxActiveCombos = 4;
 static NSString* const kDietCodeAppVersion = @"1.6.5";
@@ -234,6 +237,39 @@ BOOL ShouldSkipSearchPath(const std::filesystem::path& path, const std::string& 
         return YES;
     }
     return NO;
+}
+
+BOOL ShouldPruneSearchDirectory(const std::filesystem::path& path, const std::string& relPath, NSArray<NSString*>* excludes) {
+    std::string filename = path.filename().string();
+    NSArray* defaultExcludes = @[@".git", @"build", @"dist", @"node_modules", @"DerivedData", @".next", @"__pycache__"];
+    return AnyPatternMatches(defaultExcludes, relPath, filename) || AnyPatternMatches(excludes, relPath, filename);
+}
+
+BOOL FileIsWithinSearchReadCap(const std::filesystem::path& path) {
+    std::error_code sizeEc;
+    auto size = std::filesystem::file_size(path, sizeEc);
+    return sizeEc || size <= kMaxSearchFileBytes;
+}
+
+NSString* WordAtOffset(NSString* text, NSInteger offset) {
+    if (text.length == 0) return @"";
+    NSUInteger idx = (NSUInteger)MAX(0, MIN(offset, (NSInteger)text.length - 1));
+    NSCharacterSet* wordSet = [NSCharacterSet characterSetWithCharactersInString:@"abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_"];
+    if (![wordSet characterIsMember:[text characterAtIndex:idx]] && idx > 0) {
+        idx--;
+    }
+    if (![wordSet characterIsMember:[text characterAtIndex:idx]]) {
+        return @"";
+    }
+    NSUInteger start = idx;
+    while (start > 0 && [wordSet characterIsMember:[text characterAtIndex:start - 1]]) {
+        start--;
+    }
+    NSUInteger end = idx;
+    while (end + 1 < text.length && [wordSet characterIsMember:[text characterAtIndex:end + 1]]) {
+        end++;
+    }
+    return [text substringWithRange:NSMakeRange(start, end - start + 1)];
 }
 
 NSString* RunGitOutput(NSString* cwd, NSArray<NSString*>* args) {
@@ -678,6 +714,50 @@ NSArray<NSString*>* ContextLines(const std::vector<std::string>& lines, NSIntege
     return res;
 }
 
+- (NSDictionary*)safeActiveSelectionInfo {
+    if ([NSThread isMainThread]) {
+        return [_windowController activeSelectionInfo];
+    }
+    __block NSDictionary* res = nil;
+    dispatch_sync(dispatch_get_main_queue(), ^{
+        res = [_windowController activeSelectionInfo];
+    });
+    return res;
+}
+
+- (NSString*)safeTerminalOutput {
+    if ([NSThread isMainThread]) {
+        return [_windowController terminalOutput];
+    }
+    __block NSString* res = nil;
+    dispatch_sync(dispatch_get_main_queue(), ^{
+        res = [_windowController terminalOutput];
+    });
+    return res;
+}
+
+- (NSArray*)safeSessionRecentCommands {
+    if ([NSThread isMainThread]) {
+        return [_windowController.sessionRecentCommands copy];
+    }
+    __block NSArray* res = nil;
+    dispatch_sync(dispatch_get_main_queue(), ^{
+        res = [_windowController.sessionRecentCommands copy];
+    });
+    return res;
+}
+
+- (NSArray*)safeSessionLastSearches {
+    if ([NSThread isMainThread]) {
+        return [_windowController.sessionLastSearches copy];
+    }
+    __block NSArray* res = nil;
+    dispatch_sync(dispatch_get_main_queue(), ^{
+        res = [_windowController.sessionLastSearches copy];
+    });
+    return res;
+}
+
 - (void)start {
     if (_isRunning) return;
     
@@ -778,6 +858,8 @@ NSArray<NSString*>* ContextLines(const std::vector<std::string>& lines, NSIntege
             @"workspace.grep",
             @"search.text",
             @"search.files",
+            @"search.todo",
+            @"search.diagnostics",
             @"workspace.listFiles",
             @"recovery.scan",
             @"file.read",
@@ -936,9 +1018,15 @@ NSArray<NSString*>* ContextLines(const std::vector<std::string>& lines, NSIntege
                               [method isEqualToString:@"workspace.grep"] ||
                               [method isEqualToString:@"search.text"] ||
                               [method isEqualToString:@"search.files"] ||
+                              [method isEqualToString:@"search.todo"] ||
+                              [method isEqualToString:@"search.diagnostics"] ||
                               [method isEqualToString:@"workspace.listFiles"] ||
                               [method isEqualToString:@"recovery.scan"] ||
                               [method isEqualToString:@"combo.run"] ||
+                              [method isEqualToString:@"combo.status"] ||
+                              [method isEqualToString:@"combo.result"] ||
+                              [method isEqualToString:@"combo.cancel"] ||
+                              [method isEqualToString:@"combo.rollback"] ||
                               [method isEqualToString:@"file.read"] ||
                               [method isEqualToString:@"file.readRange"] ||
                               [method isEqualToString:@"file.readAround"] ||
@@ -958,7 +1046,15 @@ NSArray<NSString*>* ContextLines(const std::vector<std::string>& lines, NSIntege
                               [method isEqualToString:@"editor.getOpenFiles"] ||
                               [method isEqualToString:@"editor.getText"] ||
                               [method isEqualToString:@"session.info"] ||
-                              [method isEqualToString:@"session.workflowState"];
+                              [method isEqualToString:@"session.workflowState"] ||
+                              [method isEqualToString:@"task.start"] ||
+                              [method isEqualToString:@"task.status"] ||
+                              [method isEqualToString:@"task.result"] ||
+                              [method isEqualToString:@"task.cancel"] ||
+                              [method isEqualToString:@"task.step"] ||
+                              [method isEqualToString:@"task.runLoop"] ||
+                              [method isEqualToString:@"edit.plan"] ||
+                              [method isEqualToString:@"edit.executePlan"];
     
     if (isBackgroundMethod) {
         [self executeMethod:method params:params outResult:&result outErrCode:&errCode outErrMsg:&errMsg outPaths:&affectedPaths];
@@ -1111,7 +1207,7 @@ NSArray<NSString*>* ContextLines(const std::vector<std::string>& lines, NSIntege
             @{ @"name": @"language.diagnostics", @"permission": @"Read", @"params": @{ @"path": @"string optional" }, @"returns": @{ @"diagnostics": @"array" } },
             @{ @"name": @"language.format", @"permission": @"Execute", @"params": @{ @"path": @"string optional" }, @"returns": @{ @"formatted": @"boolean" } },
             @{ @"name": @"language.lint", @"permission": @"Execute", @"params": @{ @"path": @"string optional" }, @"returns": @{ @"linted": @"boolean" } },
-            @{ @"name": @"language.gotoDefinition", @"permission": @"Read", @"params": @{}, @"returns": @{ @"action_triggered": @"boolean" } },
+            @{ @"name": @"language.gotoDefinition", @"permission": @"Read", @"params": @{}, @"returns": @{ @"symbol": @"string", @"definition": @"object", @"candidates": @"array" } },
             @{ @"name": @"session.info", @"permission": @"Read", @"params": @{}, @"returns": @{ @"workspace": @"string", @"activeFile": @"string" } },
             @{ @"name": @"session.workflowState", @"permission": @"Read", @"params": @{}, @"returns": @{ @"workspace": @"string", @"activeFile": @"string" } },
             @{ @"name": @"session.recentCommands", @"permission": @"Read", @"params": @{}, @"returns": @{ @"commands": @"array" } },
@@ -1485,12 +1581,7 @@ NSArray<NSString*>* ContextLines(const std::vector<std::string>& lines, NSIntege
     trace[@"state"] = @"executing";
     trace[@"phase"] = @"executing";
     
-    BOOL isBackground = [method isEqualToString:@"verify.run"] ||
-                        [method isEqualToString:@"workspace.grep"] ||
-                        [method isEqualToString:@"search.text"] ||
-                        [method isEqualToString:@"search.files"] ||
-                        [method isEqualToString:@"workspace.listFiles"] ||
-                        [method isEqualToString:@"recovery.scan"];
+    BOOL isBackground = [method isEqualToString:@"verify.run"] || [self isReadQueueMethod:method];
                         
     if (isBackground) {
         [self executeMethod:method params:primitive[@"params"] ?: @{} outResult:&result outErrCode:&errCode outErrMsg:&errMsg outPaths:&affectedPaths];
@@ -2413,7 +2504,7 @@ static BOOL IsTextBinary(NSString* text) {
                     return NO;
                 }
                 
-                NSString* currentText = [_windowController textForFileAtPath:absPath];
+                NSString* currentText = [self safeTextForFileAtPath:absPath];
                 if (currentText) {
                     [self safeReplaceTextInRange:NSMakeRange(0, currentText.length) withText:@"" forFileAtPath:absPath];
                 }
@@ -2421,7 +2512,7 @@ static BOOL IsTextBinary(NSString* text) {
         } else {
             if (!wasBinary) {
                 NSString* blobText = fileBlobs[absPath];
-                NSString* currentText = [_windowController textForFileAtPath:absPath];
+                NSString* currentText = [self safeTextForFileAtPath:absPath];
                 BOOL ok = [self safeReplaceTextInRange:NSMakeRange(0, currentText.length) withText:blobText forFileAtPath:absPath];
                 
                 NSError* writeErr = nil;
@@ -2890,7 +2981,7 @@ static BOOL IsTextBinary(NSString* text) {
         return result;
     }
 
-    NSString* currentText = currentTextOverride ?: [_windowController textForFileAtPath:targetPath];
+    NSString* currentText = currentTextOverride ?: [self safeTextForFileAtPath:targetPath];
     if (!currentText) {
         result[@"rejectedReason"] = @"Target file is not readable.";
         return result;
@@ -3041,15 +3132,15 @@ static BOOL IsTextBinary(NSString* text) {
 }
 
 - (NSDictionary*)contextSnapshotPayload {
-    NSDictionary* git = [_windowController gitStatusInfo] ?: @{};
-    NSArray* problems = [_windowController problemsList] ?: @[];
+    NSDictionary* git = [self safeGitStatusInfo] ?: @{};
+    NSArray* problems = [self safeProblemsList] ?: @[];
     return @{
-        @"activeFile": [_windowController activeFilePath] ?: @"",
-        @"openFiles": [_windowController openFilePaths] ?: @[],
+        @"activeFile": [self safeActiveFilePath] ?: @"",
+        @"openFiles": [self safeOpenFilePaths] ?: @[],
         @"dirtyFiles": DirtyFilePathsFromTabs([self safeOpenTabs] ?: @[]),
         @"currentBranch": git[@"branch"] ?: @"",
-        @"recentSearches": _windowController.sessionLastSearches ?: @[],
-        @"recentCommands": _windowController.sessionRecentCommands ?: @[],
+        @"recentSearches": [self safeSessionLastSearches] ?: @[],
+        @"recentCommands": [self safeSessionRecentCommands] ?: @[],
         @"problemCount": @(problems.count),
         @"changes": [self currentChangesInfo]
     };
@@ -3057,7 +3148,7 @@ static BOOL IsTextBinary(NSString* text) {
 
 - (NSArray<NSString*>*)verificationFailureLines {
     NSMutableArray* failures = [NSMutableArray array];
-    NSString* output = [_windowController terminalOutput] ?: @"";
+    NSString* output = [self safeTerminalOutput] ?: @"";
     NSArray<NSString*>* markers = @[@"error:", @"failed", @"failure", @"FAILED", @"Error:", @"Assertion"];
     [output enumerateLinesUsingBlock:^(NSString* line, BOOL*) {
         for (NSString* marker in markers) {
@@ -3104,7 +3195,7 @@ static BOOL IsTextBinary(NSString* text) {
             return NO;
         }
         
-        NSString* currentText = [_windowController textForFileAtPath:absPath];
+        NSString* currentText = [self safeTextForFileAtPath:absPath];
         if (currentText == nil && existedBefore) {
             if (errorOut) *errorOut = [NSString stringWithFormat:@"Cannot restore patch because target buffer is unavailable: %@", path];
             return NO;
@@ -3141,7 +3232,7 @@ static BOOL IsTextBinary(NSString* text) {
             }
             continue;
         }
-        NSString* currentText = [_windowController textForFileAtPath:absPath];
+        NSString* currentText = [self safeTextForFileAtPath:absPath];
         BOOL ok = currentText != nil && [self safeReplaceTextInRange:NSMakeRange(0, currentText.length) withText:beforeText forFileAtPath:absPath];
         NSError* writeErr = nil;
         BOOL writeOk = [beforeText writeToFile:absPath atomically:YES encoding:NSUTF8StringEncoding error:&writeErr];
@@ -3282,7 +3373,17 @@ static BOOL IsTextBinary(NSString* text) {
     __block NSString* errCode = nil;
     __block NSString* errMsg = nil;
     __block NSString* paths = @"";
-    [self executeMethod:method params:primitive[@"params"] ?: @{} outResult:&result outErrCode:&errCode outErrMsg:&errMsg outPaths:&paths];
+    BOOL isBackground = [method isEqualToString:@"verify.run"] || [self isReadQueueMethod:method];
+    if (isBackground) {
+        [self executeMethod:method params:primitive[@"params"] ?: @{} outResult:&result outErrCode:&errCode outErrMsg:&errMsg outPaths:&paths];
+    } else {
+        dispatch_semaphore_t execSem = dispatch_semaphore_create(0);
+        dispatch_async(dispatch_get_main_queue(), ^{
+            [self executeMethod:method params:primitive[@"params"] ?: @{} outResult:&result outErrCode:&errCode outErrMsg:&errMsg outPaths:&paths];
+            dispatch_semaphore_signal(execSem);
+        });
+        dispatch_semaphore_wait(execSem, DISPATCH_TIME_FOREVER);
+    }
     if (errCode) {
         return @{ @"ok": @NO, @"method": method, @"error": @{ @"code": errCode, @"message": errMsg ?: @"" } };
     }
@@ -3306,7 +3407,7 @@ static BOOL IsTextBinary(NSString* text) {
             NSInteger end = [range[@"endLine"] integerValue];
             NSString* text = nil;
             NSString* absPath = AbsolutePathForRPCPath(path, [_windowController workspacePath]);
-            NSString* full = [_windowController textForFileAtPath:absPath];
+            NSString* full = [self safeTextForFileAtPath:absPath];
             if (full) text = TextForLineRange(LinesFromText(full), start, end);
             [ranges addObject:@{ @"startLine": @(start), @"endLine": @(end), @"text": text ?: @"" }];
         }
@@ -3315,7 +3416,7 @@ static BOOL IsTextBinary(NSString* text) {
     return @{
         @"failure": failure ?: @"unknown",
         @"files": files,
-        @"diagnostics": params[@"diagnostics"] ?: ([_windowController problemsList] ?: @[]),
+        @"diagnostics": params[@"diagnostics"] ?: ([self safeProblemsList] ?: @[]),
         @"failures": [self verificationFailureLines]
     };
 }
@@ -3730,6 +3831,10 @@ static BOOL IsTextBinary(NSString* text) {
             
             std::filesystem::path p = entry.path();
             std::string filename = p.filename().string();
+            if (entry.is_directory(ec) && it.depth() >= kMaxSearchDepth) {
+                it.disable_recursion_pending();
+                continue;
+            }
             
             if (filename == ".git" || filename == "build" || filename == "dist" || 
                 filename == "node_modules" || filename == "DerivedData") {
@@ -3791,17 +3896,22 @@ static BOOL IsTextBinary(NSString* text) {
         std::error_code ec;
         std::filesystem::recursive_directory_iterator it(folder, ec);
         std::filesystem::recursive_directory_iterator end;
+        NSInteger scannedFiles = 0;
         for (; it != end && !ec; it.increment(ec)) {
             const auto& entry = *it;
             if (matches.count >= (NSUInteger)maxResults) break;
             std::filesystem::path p = entry.path();
             std::string filename = p.filename().string();
-            if (entry.is_directory(ec) && (filename == ".git" || filename == "node_modules" || filename == "build" || filename == "dist" || filename == "DerivedData")) {
-                it.disable_recursion_pending();
+            std::string relForDir = std::filesystem::relative(p, folder, ec).string();
+            if (entry.is_directory(ec)) {
+                if (it.depth() >= kMaxSearchDepth || ShouldPruneSearchDirectory(p, relForDir, excludePatterns)) {
+                    it.disable_recursion_pending();
+                }
                 continue;
             }
             if (entry.is_regular_file()) {
-                std::string relPath = std::filesystem::relative(p, folder).string();
+                if (++scannedFiles > kMaxSearchScanFiles) break;
+                std::string relPath = relForDir;
                 
                 BOOL skip = false;
                 for (NSString* ex in excludePatterns) {
@@ -3813,6 +3923,7 @@ static BOOL IsTextBinary(NSString* text) {
                 }
                 if (filename == ".git" || filename == "node_modules" || filename == "build") skip = true;
                 if (skip) continue;
+                if (!FileIsWithinSearchReadCap(p)) continue;
                 
                 if (includePatterns.count > 0) {
                     BOOL matchesInclude = NO;
@@ -3913,11 +4024,22 @@ static BOOL IsTextBinary(NSString* text) {
         NSArray* excludes = params[@"exclude"] ?: @[];
         NSMutableArray* results = [NSMutableArray array];
         std::error_code ec;
-        for (const auto& entry : std::filesystem::recursive_directory_iterator(folder, ec)) {
+        NSInteger scannedFiles = 0;
+        std::filesystem::recursive_directory_iterator it(folder, ec);
+        std::filesystem::recursive_directory_iterator end;
+        for (; it != end && !ec; it.increment(ec)) {
+            const auto& entry = *it;
             if (results.count >= (NSUInteger)maxResults) break;
-            if (!entry.is_regular_file()) continue;
             std::filesystem::path p = entry.path();
-            std::string relPath = std::filesystem::relative(p, folder).string();
+            std::string relPath = std::filesystem::relative(p, folder, ec).string();
+            if (entry.is_directory(ec)) {
+                if (it.depth() >= kMaxSearchDepth || ShouldPruneSearchDirectory(p, relPath, excludes)) {
+                    it.disable_recursion_pending();
+                }
+                continue;
+            }
+            if (!entry.is_regular_file()) continue;
+            if (++scannedFiles > kMaxSearchScanFiles) break;
             if (ShouldSkipSearchPath(p, relPath, includes, excludes)) continue;
             std::string lowerRel = relPath;
             std::transform(lowerRel.begin(), lowerRel.end(), lowerRel.begin(), ::tolower);
@@ -3955,13 +4077,25 @@ static BOOL IsTextBinary(NSString* text) {
         if (!caseSensitive) std::transform(needle.begin(), needle.end(), needle.begin(), ::tolower);
         NSMutableArray* results = [NSMutableArray array];
         std::error_code ec;
-        for (const auto& entry : std::filesystem::recursive_directory_iterator(folder, ec)) {
+        NSInteger scannedFiles = 0;
+        std::filesystem::recursive_directory_iterator it(folder, ec);
+        std::filesystem::recursive_directory_iterator end;
+        for (; it != end && !ec; it.increment(ec)) {
+            const auto& entry = *it;
             if (results.count >= (NSUInteger)maxResults) break;
-            if (!entry.is_regular_file()) continue;
             std::filesystem::path p = entry.path();
-            std::string relPath = std::filesystem::relative(p, folder).string();
+            std::string relPath = std::filesystem::relative(p, folder, ec).string();
+            if (entry.is_directory(ec)) {
+                if (it.depth() >= kMaxSearchDepth || ShouldPruneSearchDirectory(p, relPath, excludes)) {
+                    it.disable_recursion_pending();
+                }
+                continue;
+            }
+            if (!entry.is_regular_file()) continue;
+            if (++scannedFiles > kMaxSearchScanFiles) break;
             if (ShouldSkipSearchPath(p, relPath, includes, excludes)) continue;
-            NSString* text = [_windowController textForFileAtPath:NSStringFromStdString(p.string())];
+            if (!FileIsWithinSearchReadCap(p)) continue;
+            NSString* text = [self safeTextForFileAtPath:NSStringFromStdString(p.string())];
             if (!text) continue;
             std::vector<std::string> lines;
             std::istringstream stream(StdStringFromNSString(text));
@@ -4011,13 +4145,25 @@ static BOOL IsTextBinary(NSString* text) {
             NSArray* excludes = subParams[@"exclude"] ?: @[];
             std::string needle = StdStringFromNSString([marker lowercaseString]);
             std::error_code ec;
-            for (const auto& entry : std::filesystem::recursive_directory_iterator(folder, ec)) {
+            NSInteger scannedFiles = 0;
+            std::filesystem::recursive_directory_iterator it(folder, ec);
+            std::filesystem::recursive_directory_iterator end;
+            for (; it != end && !ec; it.increment(ec)) {
+                const auto& entry = *it;
                 if (all.count >= (NSUInteger)maxResults) break;
-                if (!entry.is_regular_file()) continue;
                 std::filesystem::path p = entry.path();
-                std::string relPath = std::filesystem::relative(p, folder).string();
+                std::string relPath = std::filesystem::relative(p, folder, ec).string();
+                if (entry.is_directory(ec)) {
+                    if (it.depth() >= kMaxSearchDepth || ShouldPruneSearchDirectory(p, relPath, excludes)) {
+                        it.disable_recursion_pending();
+                    }
+                    continue;
+                }
+                if (!entry.is_regular_file()) continue;
+                if (++scannedFiles > kMaxSearchScanFiles) break;
                 if (ShouldSkipSearchPath(p, relPath, includes, excludes)) continue;
-                NSString* text = [_windowController textForFileAtPath:NSStringFromStdString(p.string())];
+                if (!FileIsWithinSearchReadCap(p)) continue;
+                NSString* text = [self safeTextForFileAtPath:NSStringFromStdString(p.string())];
                 if (!text) continue;
                 NSArray<NSString*>* lines = LinesFromText(text);
                 for (NSUInteger i = 0; i < lines.count; i++) {
@@ -4043,7 +4189,7 @@ static BOOL IsTextBinary(NSString* text) {
         NSString* severity = [params[@"severity"] lowercaseString];
         NSString* source = params[@"source"];
         NSMutableArray* matches = [NSMutableArray array];
-        for (NSDictionary* problem in [_windowController problemsList] ?: @[]) {
+        for (NSDictionary* problem in [self safeProblemsList] ?: @[]) {
             if (severity.length > 0 && ![[problem[@"severity"] lowercaseString] isEqualToString:severity]) continue;
             if (source.length > 0 && ![problem[@"source"] isEqualToString:source]) continue;
             [matches addObject:problem];
@@ -5458,13 +5604,51 @@ static BOOL IsTextBinary(NSString* text) {
     }
     
     if ([method isEqualToString:@"language.gotoDefinition"]) {
-        if ([_windowController activeFilePath] == nil) {
+        NSDictionary* sel = [self safeActiveSelectionInfo] ?: @{};
+        NSString* targetPath = [self safeActiveFilePath];
+        NSString* text = targetPath ? [self safeTextForFileAtPath:targetPath] : nil;
+        if (!targetPath || !text) {
             *outErrCode = @"invalid_request";
-            *outErrMsg = @"No active editor tab.";
+            *outErrMsg = @"No active readable editor tab.";
             return;
         }
-        [_windowController goToDefinitionClicked:nil];
-        *outResult = @{ @"action_triggered": @YES };
+        NSString* symbol = params[@"symbol"];
+        if (symbol.length == 0) {
+            symbol = WordAtOffset(text, [sel[@"start"] integerValue]);
+        }
+        if (symbol.length == 0) {
+            *outResult = @{ @"found": @NO, @"symbol": @"", @"definition": @{}, @"candidates": @[] };
+            return;
+        }
+        NSString* ws = [self safeWorkspacePath];
+        NSArray* problems = [self safeProblemsList] ?: @[];
+        NSMutableArray* diagFiles = [NSMutableArray array];
+        for (NSDictionary* problem in problems) {
+            NSString* abs = AbsolutePathForRPCPath(problem[@"path"], ws);
+            if (abs.length > 0 && ![diagFiles containsObject:abs]) {
+                [diagFiles addObject:abs];
+            }
+        }
+        NSArray* references = [DietCodeSymbolIndexService referencesForSymbol:symbol
+                                                                   inWorkspace:ws
+                                                                     openFiles:[self safeOpenFilePaths]
+                                                              diagnosticsFiles:diagFiles];
+        NSDictionary* best = @{};
+        for (NSDictionary* candidate in references) {
+            NSString* preview = [candidate[@"preview"] lowercaseString] ?: @"";
+            NSString* lowerSymbol = [symbol lowercaseString];
+            if ([preview containsString:[NSString stringWithFormat:@"def %@", lowerSymbol]] ||
+                [preview containsString:[NSString stringWithFormat:@"class %@", lowerSymbol]] ||
+                [preview containsString:[NSString stringWithFormat:@"function %@", lowerSymbol]] ||
+                [preview containsString:[NSString stringWithFormat:@"%@(", lowerSymbol]]) {
+                best = candidate;
+                break;
+            }
+        }
+        if (best.count == 0 && references.count > 0) {
+            best = references[0];
+        }
+        *outResult = @{ @"found": @(best.count > 0), @"symbol": symbol, @"definition": best, @"candidates": references };
         return;
     }
     
