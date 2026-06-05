@@ -1,19 +1,11 @@
 #!/usr/bin/env python3
-import socket
-import sys
 
-from dietcode_agent_client import SOCKET_PATH, call, ensure_socket, load_token
+from dietcode_agent_client import call, connect, load_token
 
 
 def main():
-    if not ensure_socket():
-        print("Failed to start DietCode headless process or socket did not initialize.", file=sys.stderr)
-        return 1
-
-    token = load_token()
-    with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as sock:
-        sock.connect(SOCKET_PATH)
-
+    with connect() as sock:
+        token = load_token()
         checks = [
             ("rpc.ping", {}),
             ("workspace.getRoot", {}),

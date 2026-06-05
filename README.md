@@ -60,11 +60,14 @@ Headless agent control:
 ```sh
 make app
 make ensure-socket
-python3 scripts/dietcode_agent_client.py --ensure-only
-python3 scripts/dietcode_agent_client.py rpc.ping
+make agent-ping
+python3 scripts/dietcode_agent_client.py --ensure-only --compact
+python3 scripts/dietcode_agent_client.py --compact rpc.ping
 ```
 
 `--ensure-socket` exits immediately if `~/.dietcode/control.sock` is already accepting connections. Otherwise it starts a detached `--headless` DietCode process and waits for the socket. `--ensure-timeout <seconds>` controls that wait. Python agents can import `scripts/dietcode_agent_client.py` and call `ensure_socket()` before sending JSON-RPC frames.
+
+See `docs/headless-agent-control.md` for the machine-readable CLI contract, environment variables, timeouts, and stdin/file parameter examples.
 
 See `docs/build-instructions.md` for details.
 

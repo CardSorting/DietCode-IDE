@@ -98,6 +98,17 @@ static int ensure_control_socket(const char* executablePath, const char* sockPat
     return 1;
 }
 
+static void print_usage(const char* executablePath) {
+    printf("Usage: %s [--headless] [--ensure-socket] [--ensure-timeout seconds]\n", executablePath);
+    printf("\n");
+    printf("Options:\n");
+    printf("  --headless                 Run without showing the app window.\n");
+    printf("  --ensure-socket            Start headless mode if ~/.dietcode/control.sock is inactive.\n");
+    printf("  --ensure-control-socket    Alias for --ensure-socket.\n");
+    printf("  --ensure-timeout seconds   Seconds to wait for the control socket. Default: 10.\n");
+    printf("  --help                     Show this help.\n");
+}
+
 int main(int argc, const char * argv[]) {
   @autoreleasepool {
     NSString* homeDir = NSHomeDirectory();
@@ -110,6 +121,7 @@ int main(int argc, const char * argv[]) {
 
     BOOL headless = NO;
     BOOL ensureSocket = NO;
+    BOOL showHelp = NO;
     double ensureTimeoutSeconds = 10.0;
     for (int i = 1; i < argc; ++i) {
       if (strcmp(argv[i], "--headless") == 0) {
@@ -118,7 +130,14 @@ int main(int argc, const char * argv[]) {
         ensureSocket = YES;
       } else if (strcmp(argv[i], "--ensure-timeout") == 0 && i + 1 < argc) {
         ensureTimeoutSeconds = atof(argv[++i]);
+      } else if (strcmp(argv[i], "--help") == 0 || strcmp(argv[i], "-h") == 0) {
+        showHelp = YES;
       }
+    }
+
+    if (showHelp) {
+      print_usage(argv[0]);
+      return 0;
     }
 
     if (ensureSocket) {

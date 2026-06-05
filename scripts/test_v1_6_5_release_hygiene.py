@@ -1,14 +1,12 @@
 #!/usr/bin/env python3
 import json
 import os
-import socket
-import sys
 import time
 import shutil
 import hashlib
 import plistlib
 
-from dietcode_agent_client import SOCKET_PATH, ensure_socket, load_token, send_rpc
+from dietcode_agent_client import connect, load_token, send_rpc
 
 BACKUPS_DIR = os.path.expanduser("~/.dietcode/backups")
 AUDIT_LOG_DIR = os.path.expanduser("~/.dietcode")
@@ -24,17 +22,11 @@ def get_sha256(data):
 
 def main():
     print("=== DietCode v1.6.5 Release Constant Hygiene Verification Suite ===")
-    
-    if not ensure_socket():
-        print("Failed to start DietCode headless process or socket did not initialize.", file=sys.stderr)
-        return 1
 
-    token = load_token()
-    print(f"Loaded session token: {token[:8]}...")
+    with connect() as sock:
+        token = load_token()
+        print(f"Loaded session token: {token[:8]}...")
 
-    with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as sock:
-        sock.connect(SOCKET_PATH)
-        
         # Test 1: ping
         print("\nTest 1: Ping control server")
         res = call(sock, token, "rpc.ping")
@@ -228,8 +220,7 @@ def main():
             sock.sendall(json.dumps(payload, separators=(",", ":")).encode("utf-8") + b"\n")
             time.sleep(1.0) # wait for combo to become active
             
-            with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as sock2:
-                sock2.connect(SOCKET_PATH)
+            with connect() as sock2:
                 
                 # Check status
                 list_res = call(sock2, token, "recovery.list")

@@ -13,9 +13,9 @@ Tests the new Bounded Autonomy / Permissionless RPC surface end-to-end:
   - analysis.workspaceSummary (Read, background thread)
 """
 
-import socket, json, os, sys, pathlib, time
+import os, sys, pathlib, time
 
-from dietcode_agent_client import SOCKET_PATH as SOCK, TOKEN_PATH as TOKEN_FILE, ensure_socket
+from dietcode_agent_client import connect, load_token, send_rpc
 
 # ─── Snake game ─────────────────────────────────────────────────────────────
 SNAKE_HTML = """\
@@ -158,20 +158,8 @@ _rid = 0
 def next_id():
     global _rid; _rid += 1; return str(_rid)
 
-def token():
-    return pathlib.Path(TOKEN_FILE).read_text().strip()
-
-def rpc(s, method, params=None):
-    rid = next_id()
-    payload = json.dumps({"id": rid, "schemaVersion": "1.6.2", "token": token(),
-                          "method": method, "params": params or {}}) + "\n"
-    s.sendall(payload.encode())
-    data = b""
-    while b"\n" not in data:
-        chunk = s.recv(131072)
-        if not chunk: break
-        data += chunk
-    return json.loads(data.split(b"\n")[0])
+def rpc(s, token, method, params=None):
+    return send_rpc(s, token, method, params, next_id(), request_timeout=15.0)
 
 def chk(label, r, fatal=False):
     if "error" in r:
@@ -188,34 +176,29 @@ def main():
     print("  DietCode Control Agent — Snake Integration Test")
     print(f"{bar}\n")
 
-    if not ensure_socket():
-        print("  ✗  Failed to start DietCode headless process or socket did not initialize.")
-        sys.exit(1)
-
-    with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as s:
-        s.connect(SOCK)
-        s.settimeout(15)
+    with connect() as s:
+        token = load_token()
 
         # ── 1. Health check ────────────────────────────────────────────────
         print("  [1/6] Health check")
-        r = rpc(s, "rpc.ping");  chk("rpc.ping", r, fatal=True)
-        r = rpc(s, "rpc.version"); chk("rpc.version", r)
+        r = rpc(s, token, "rpc.ping");  chk("rpc.ping", r, fatal=True)
+        r = rpc(s, token, "rpc.version"); chk("rpc.version", r)
         ver = r.get("result", {}).get("appVersion", "?")
         print(f"        appVersion={ver}")
 
         # ── 2. Workspace context ───────────────────────────────────────────
         print("\n  [2/6] Workspace context (background thread — no main-thread wait)")
-        r = rpc(s, "session.info"); chk("session.info", r, fatal=True)
+        r = rpc(s, token, "session.info"); chk("session.info", r, fatal=True)
         ws = r["result"]["workspace"]
         print(f"        workspace={ws or '(none)'}")
 
         if not ws:
             ide_dir = pathlib.Path(__file__).parent.parent.resolve()
             print(f"\n        No workspace open. Opening {ide_dir} (Destructive → Permissionless)")
-            r = rpc(s, "workspace.openFolder", {"path": str(ide_dir)})
+            r = rpc(s, token, "workspace.openFolder", {"path": str(ide_dir)})
             chk("workspace.openFolder [Destructive→auto-allow]", r, fatal=True)
             time.sleep(0.5)
-            r = rpc(s, "session.info"); ws = r["result"]["workspace"]
+            r = rpc(s, token, "session.info"); ws = r["result"]["workspace"]
             print(f"        workspace={ws}")
 
         target_abs = os.path.join(ws, "snake.html")
@@ -223,24 +206,24 @@ def main():
 
         # ── 3. Write snake.html via file.write ─────────────────────────────
         print("\n  [3/6] Writing snake.html via file.write [Edit permission]")
-        r = rpc(s, "file.write", {"path": rel, "content": SNAKE_HTML})
+        r = rpc(s, token, "file.write", {"path": rel, "content": SNAKE_HTML})
         chk("file.write snake.html [Edit]", r, fatal=True)
 
         # ── 4. Stat the file ───────────────────────────────────────────────
         print("\n  [4/6] Verifying file via file.stat [Read, background thread]")
-        r = rpc(s, "file.stat", {"path": rel})
+        r = rpc(s, token, "file.stat", {"path": rel})
         if chk("file.stat snake.html", r):
             info = r["result"]
             print(f"        size={info.get('sizeBytes')} bytes   lines={info.get('lineCount')}")
 
         # ── 5. Open in editor ──────────────────────────────────────────────
         print("\n  [5/6] Opening snake.html in editor [Read]")
-        r = rpc(s, "workspace.openFile", {"path": rel})
+        r = rpc(s, token, "workspace.openFile", {"path": rel})
         chk("workspace.openFile snake.html", r)
 
         # ── 6. Workspace summary ───────────────────────────────────────────
         print("\n  [6/6] Workspace analysis [background thread]")
-        r = rpc(s, "analysis.workspaceSummary")
+        r = rpc(s, token, "analysis.workspaceSummary")
         chk("analysis.workspaceSummary", r)
         if "result" in r:
             res = r["result"]

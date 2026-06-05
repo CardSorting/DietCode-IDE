@@ -31,7 +31,7 @@ MACOS_MM := \
 	src/filesystem/GitService.mm \
 	src/core/LSPClient.mm
 
-.PHONY: all app run headless ensure-socket control-smoke test clean
+.PHONY: all app run headless ensure-socket agent-ping control-smoke test clean
 
 all: app test
 
@@ -57,6 +57,9 @@ headless: app
 
 ensure-socket: app
 	$(APP_MACOS)/$(APP_NAME) --ensure-socket
+
+agent-ping: app
+	python3 scripts/dietcode_agent_client.py --compact rpc.ping
 
 control-smoke: app
 	python3 scripts/control_smoke_test.py

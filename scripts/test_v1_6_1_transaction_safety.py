@@ -1,12 +1,10 @@
 #!/usr/bin/env python3
 import json
 import os
-import socket
-import sys
 import time
 import shutil
 
-from dietcode_agent_client import SOCKET_PATH, ensure_socket, load_token, send_rpc
+from dietcode_agent_client import connect, load_token, send_rpc
 
 BACKUPS_DIR = os.path.expanduser("~/.dietcode/backups")
 
@@ -15,18 +13,12 @@ def call(sock, token, method, params=None, request_id=None):
 
 def main():
     print("=== DietCode v1.6.1 Transaction Safety Verification Suite ===")
-    
-    if not ensure_socket():
-        print("Failed to start DietCode headless process or socket did not initialize.", file=sys.stderr)
-        return 1
-
-    token = load_token()
-    print(f"Loaded session token: {token[:8]}...")
 
     # Establish socket connection
-    with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as sock:
-        sock.connect(SOCKET_PATH)
-        
+    with connect() as sock:
+        token = load_token()
+        print(f"Loaded session token: {token[:8]}...")
+
         # Test 1: ping
         print("\nTest 1: Ping control server")
         res = call(sock, token, "rpc.ping")
