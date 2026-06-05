@@ -126,10 +126,12 @@ BOOL checkBracketBalance(NSString* text) {
     NSString* tempDiffPath = [tempDir stringByAppendingPathComponent:[NSString stringWithFormat:@"dietcode_preview_diff_%u.diff", arc4random()]];
 
     NSError* err = nil;
+    unlink([tempSrcPath UTF8String]);
     [currentText writeToFile:tempSrcPath atomically:YES encoding:NSUTF8StringEncoding error:&err];
     if (err) {
         return @{ @"ok": @NO, @"error": @"Failed to write temp source." };
     }
+    unlink([tempDiffPath UTF8String]);
     [patch writeToFile:tempDiffPath atomically:YES encoding:NSUTF8StringEncoding error:&err];
     if (err) {
         [[NSFileManager defaultManager] removeItemAtPath:tempSrcPath error:nil];
@@ -230,6 +232,7 @@ BOOL checkBracketBalance(NSString* text) {
     // Python-specific compile check
     if ([[path lowercaseString] hasSuffix:@".py"]) {
         NSString* tempPyPath = [tempDir stringByAppendingPathComponent:[NSString stringWithFormat:@"dietcode_syntax_check_%u.py", arc4random()]];
+        unlink([tempPyPath UTF8String]);
         [patchedText writeToFile:tempPyPath atomically:YES encoding:NSUTF8StringEncoding error:nil];
 
         NSTask* pyTask = [[NSTask alloc] init];

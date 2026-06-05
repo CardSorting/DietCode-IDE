@@ -669,7 +669,7 @@ static NSString* FindBinaryPath(NSString* name, NSString* fallback) {
         _ruffPath = [defaults stringForKey:@"RuffPath"] ?: FindBinaryPath(@"ruff", @"/opt/homebrew/bin/ruff");
         _eslintPath = [defaults stringForKey:@"EslintPath"] ?: FindBinaryPath(@"eslint", @"/opt/homebrew/bin/eslint");
         
-        _externalControlEnabled = [defaults boolForKey:@"ExternalControlEnabled"];
+        _externalControlEnabled = [defaults objectForKey:@"ExternalControlEnabled"] ? [defaults boolForKey:@"ExternalControlEnabled"] : YES;
         _agentAutonomyLevel = [defaults objectForKey:@"AgentAutonomyLevel"] ? [defaults integerForKey:@"AgentAutonomyLevel"] : 2; // Default to Bounded Autonomy (2)
         _controlServer = [[DietCodeControlServer alloc] initWithWindowController:self];
         if (_externalControlEnabled) {
@@ -2143,6 +2143,7 @@ static NSString* FindBinaryPath(NSString* name, NSString* fallback) {
     NSString* backupContent = [NSString stringWithFormat:@"%@\n%@\n%@", originalPathStr, titleStr, text];
     
     NSError* error = nil;
+    unlink([backupPath UTF8String]);
     [backupContent writeToFile:backupPath atomically:YES encoding:NSUTF8StringEncoding error:&error];
     if (error) {
         NSLog(@"Failed to write recovery backup: %@", error.localizedDescription);
@@ -5701,11 +5702,13 @@ static NSString* FindBinaryPath(NSString* name, NSString* fallback) {
     NSString* tempDiffPath = [tempDir stringByAppendingPathComponent:[NSString stringWithFormat:@"dietcode_patch_diff_%u.diff", arc4random()]];
     
     NSError* err = nil;
+    unlink([tempSrcPath UTF8String]);
     [currentText writeToFile:tempSrcPath atomically:YES encoding:NSUTF8StringEncoding error:&err];
     if (err) {
         if (errorOut) *errorOut = [NSString stringWithFormat:@"Failed to write temp source: %@", err.localizedDescription];
         return NO;
     }
+    unlink([tempDiffPath UTF8String]);
     [patchString writeToFile:tempDiffPath atomically:YES encoding:NSUTF8StringEncoding error:&err];
     if (err) {
         [[NSFileManager defaultManager] removeItemAtPath:tempSrcPath error:nil];

@@ -26,6 +26,9 @@ FileWriteResult FileService::writeTextFile(const std::filesystem::path& path, co
     auto timestamp = std::chrono::steady_clock::now().time_since_epoch().count();
     std::filesystem::path tempPath = path.parent_path() / (path.filename().string() + ".tmp." + std::to_string(timestamp));
 
+    std::error_code remove_ec;
+    std::filesystem::remove(tempPath, remove_ec);
+
     std::ofstream file(tempPath, std::ios::binary | std::ios::trunc);
     if (!file) {
         return FileWriteResult{false, "Could not open the temporary file for writing."};

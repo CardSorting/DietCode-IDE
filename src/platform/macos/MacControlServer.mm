@@ -79,7 +79,8 @@ BOOL PathIsInsideWorkspace(NSString* path, NSString* workspace) {
     if (std::filesystem::is_symlink(resolvedPath, ec)) {
         std::filesystem::path target = std::filesystem::read_symlink(resolvedPath, ec);
         if (!ec) {
-            std::filesystem::path targetCanonical = std::filesystem::canonical(target, ec);
+            std::filesystem::path targetAbsolute = target.is_absolute() ? target : (resolvedPath.parent_path() / target);
+            std::filesystem::path targetCanonical = std::filesystem::weakly_canonical(targetAbsolute, ec);
             if (!ec) {
                 auto rel = std::filesystem::relative(targetCanonical, ws, ec);
                 if (ec || rel.string().rfind("..", 0) == 0 || rel.is_absolute()) {
@@ -1029,7 +1030,12 @@ NSArray<NSString*>* ContextLines(const std::vector<std::string>& lines, NSIntege
     while (_isRunning && connectionActive) {
         @autoreleasepool {
             ssize_t bytes = read(clientFd, readBuf, sizeof(readBuf));
-            if (bytes <= 0) {
+            if (bytes < 0) {
+                if (errno == EINTR) {
+                    continue;
+                }
+                connectionActive = NO;
+            } else if (bytes == 0) {
                 connectionActive = NO;
             } else {
                 buffer.append(readBuf, bytes);
@@ -2229,6 +2235,7 @@ NSArray<NSString*>* ContextLines(const std::vector<std::string>& lines, NSIntege
     }
     
     NSString* tmpPath = [path stringByAppendingPathExtension:@"tmp"];
+    unlink([tmpPath UTF8String]);
     BOOL ok = [data writeToFile:tmpPath atomically:YES];
     if (!ok) {
         if (errorOut) *errorOut = @"Failed to write manifest temp file.";
@@ -2253,6 +2260,7 @@ NSArray<NSString*>* ContextLines(const std::vector<std::string>& lines, NSIntege
     NSString* tmpChecksumPath = [checksumPath stringByAppendingPathExtension:@"tmp"];
     
     NSError* cErr = nil;
+    unlink([tmpChecksumPath UTF8String]);
     BOOL cOk = [checksum writeToFile:tmpChecksumPath atomically:YES encoding:NSUTF8StringEncoding error:&cErr];
     if (!cOk) {
         if (errorOut) *errorOut = [NSString stringWithFormat:@"Failed to write sha256 temp file: %@", cErr.localizedDescription];
@@ -5919,16 +5927,27 @@ static BOOL IsTextBinary(NSString* text) {
         NSString* dietcodeDir = [homeDir stringByAppendingPathComponent:@".dietcode"];
         NSString* logPath = [dietcodeDir stringByAppendingPathComponent:@"control_audit.log"];
         
+        NSString* logPath3 = [dietcodeDir stringByAppendingPathComponent:@"control_audit.log.3"];
+        NSString* logPath2 = [dietcodeDir stringByAppendingPathComponent:@"control_audit.log.2"];
+        NSString* logPath1 = [dietcodeDir stringByAppendingPathComponent:@"control_audit.log.1"];
+        
+        // Hardening: verify log paths are not symlinks and belong to current user
+        NSArray* pathsToCheck = @[logPath, logPath1, logPath2, logPath3];
+        for (NSString* p in pathsToCheck) {
+            struct stat st;
+            if (lstat([p UTF8String], &st) == 0) {
+                if (S_ISLNK(st.st_mode) || st.st_uid != getuid()) {
+                    unlink([p UTF8String]);
+                }
+            }
+        }
+        
         NSFileManager* fm = [NSFileManager defaultManager];
         NSError* attrErr = nil;
         NSDictionary* attrs = [fm attributesOfItemAtPath:logPath error:&attrErr];
         if (attrs) {
             unsigned long long size = [attrs fileSize];
             if (size >= 5 * 1024 * 1024) {
-                NSString* logPath3 = [dietcodeDir stringByAppendingPathComponent:@"control_audit.log.3"];
-                NSString* logPath2 = [dietcodeDir stringByAppendingPathComponent:@"control_audit.log.2"];
-                NSString* logPath1 = [dietcodeDir stringByAppendingPathComponent:@"control_audit.log.1"];
-                
                 if ([fm fileExistsAtPath:logPath3]) {
                     [fm removeItemAtPath:logPath3 error:nil];
                 }

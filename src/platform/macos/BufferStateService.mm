@@ -16,6 +16,7 @@
     NSString* tempPath = [tempDir stringByAppendingPathComponent:[NSString stringWithFormat:@"dietcode_buffer_diff_%u.txt", arc4random()]];
 
     NSError* err = nil;
+    unlink([tempPath UTF8String]);
     [currentText writeToFile:tempPath atomically:YES encoding:NSUTF8StringEncoding error:&err];
     if (err) return @"";
 
