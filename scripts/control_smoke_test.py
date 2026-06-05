@@ -19,6 +19,7 @@ def load_token():
 def call(sock, token, method, params=None, request_id=None):
     payload = {
         "id": request_id or method,
+        "schemaVersion": "1.6.2",
         "method": method,
         "params": params or {},
         "token": token,

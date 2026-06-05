@@ -23,6 +23,7 @@ def load_token():
 def call(sock, token, method, params=None, request_id=None):
     payload = {
         "id": request_id or method,
+        "schemaVersion": "1.6.2",
         "method": method,
         "params": params or {},
         "token": token
@@ -239,6 +240,7 @@ def main():
             # Start the combo asynchronously
             payload = {
                 "id": "run-active",
+                "schemaVersion": "1.6.2",
                 "method": "combo.run",
                 "params": {"combo": combo_plan, "comboId": active_cid},
                 "token": token

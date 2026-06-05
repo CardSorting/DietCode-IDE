@@ -164,7 +164,7 @@ def token():
 
 def rpc(s, method, params=None):
     rid = next_id()
-    payload = json.dumps({"id": rid, "token": token(),
+    payload = json.dumps({"id": rid, "schemaVersion": "1.6.2", "token": token(),
                           "method": method, "params": params or {}}) + "\n"
     s.sendall(payload.encode())
     data = b""
