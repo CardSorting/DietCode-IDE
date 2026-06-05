@@ -25,12 +25,12 @@
 
     NSPipe* outPipe = [NSPipe pipe];
     [task setStandardOutput:outPipe];
-    [task setStandardError:[NSPipe pipe]];
+    [task setStandardError:outPipe];
 
     @try {
         [task launch];
-        [task waitUntilExit];
         NSData* data = [[outPipe fileHandleForReading] readDataToEndOfFile];
+        [task waitUntilExit];
         NSString* diff = [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
         [[NSFileManager defaultManager] removeItemAtPath:tempPath error:nil];
         return diff ?: @"";

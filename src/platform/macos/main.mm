@@ -4,18 +4,34 @@
 #include <signal.h>
 #include <unistd.h>
 
+static char g_sockPath[1024] = {0};
+static char g_tokenPath[1024] = {0};
+
 void handle_termination_signal(int sig) {
     (void)sig;
-    NSString* dcDir = [NSHomeDirectory() stringByAppendingPathComponent:@".dietcode"];
-    unlink([[dcDir stringByAppendingPathComponent:@"control.sock"] UTF8String]);
-    unlink([[dcDir stringByAppendingPathComponent:@"session.token"] UTF8String]);
+    if (g_sockPath[0] != '\0') {
+        unlink(g_sockPath);
+    }
+    if (g_tokenPath[0] != '\0') {
+        unlink(g_tokenPath);
+    }
     _exit(0);
 }
 
 int main(int argc, const char * argv[]) {
   @autoreleasepool {
+    NSString* homeDir = NSHomeDirectory();
+    NSString* dcDir = [homeDir stringByAppendingPathComponent:@".dietcode"];
+    NSString* sockPathStr = [dcDir stringByAppendingPathComponent:@"control.sock"];
+    NSString* tokenPathStr = [dcDir stringByAppendingPathComponent:@"session.token"];
+    
+    [sockPathStr getFileSystemRepresentation:g_sockPath maxLength:sizeof(g_sockPath)];
+    [tokenPathStr getFileSystemRepresentation:g_tokenPath maxLength:sizeof(g_tokenPath)];
+
     signal(SIGINT, handle_termination_signal);
     signal(SIGTERM, handle_termination_signal);
+    signal(SIGQUIT, handle_termination_signal);
+    signal(SIGHUP, handle_termination_signal);
 
     BOOL headless = NO;
     for (int i = 1; i < argc; ++i) {

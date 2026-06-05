@@ -280,11 +280,11 @@ NSString* RunGitOutput(NSString* cwd, NSArray<NSString*>* args) {
     [task setCurrentDirectoryPath:cwd];
     NSPipe* outPipe = [NSPipe pipe];
     [task setStandardOutput:outPipe];
-    [task setStandardError:[NSPipe pipe]];
+    [task setStandardError:outPipe];
     @try {
         [task launch];
-        [task waitUntilExit];
         NSData* data = [[outPipe fileHandleForReading] readDataToEndOfFile];
+        [task waitUntilExit];
         return [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding] ?: @"";
     } @catch (NSException*) {
         return @"";
@@ -903,34 +903,37 @@ NSArray<NSString*>* ContextLines(const std::vector<std::string>& lines, NSIntege
 
 - (void)acceptLoop {
     while (_isRunning && _serverFd >= 0) {
-        struct sockaddr_un clientAddr;
-        socklen_t clientLen = sizeof(clientAddr);
-        int clientFd = accept(_serverFd, (struct sockaddr*)&clientAddr, &clientLen);
-        if (clientFd < 0) {
-            if (!_isRunning) break;
-            usleep(100000); // 100ms backoff on error
-            continue;
-        }
-        
-        int optval = 1;
-        setsockopt(clientFd, SOL_SOCKET, SO_NOSIGPIPE, &optval, sizeof(optval));
-        
-        DietCodeClientConnection* conn = [[DietCodeClientConnection alloc] init];
-        conn.fd = clientFd;
-        conn.readEOF = NO;
-        conn.pendingRequestsCount = 0;
-        
-        @synchronized(self) {
-            if (!_isRunning) {
-                close(clientFd);
-                continue;
+        @autoreleasepool {
+            struct sockaddr_un clientAddr;
+            socklen_t clientLen = sizeof(clientAddr);
+            int clientFd = accept(_serverFd, (struct sockaddr*)&clientAddr, &clientLen);
+            if (clientFd < 0) {
+                if (!_isRunning) return;
+                if (errno != EINTR) {
+                    [self appendLogLine:[NSString stringWithFormat:@"[Error] accept() failed with errno %d: %s", errno, strerror(errno)]];
+                }
+                usleep(100000); // 100ms backoff on error
+            } else {
+                int optval = 1;
+                setsockopt(clientFd, SOL_SOCKET, SO_NOSIGPIPE, &optval, sizeof(optval));
+                
+                DietCodeClientConnection* conn = [[DietCodeClientConnection alloc] init];
+                conn.fd = clientFd;
+                conn.readEOF = NO;
+                conn.pendingRequestsCount = 0;
+                
+                @synchronized(self) {
+                    if (!_isRunning) {
+                        close(clientFd);
+                    } else {
+                        _activeConnections[@(clientFd)] = conn;
+                        dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
+                            [self handleClient:conn];
+                        });
+                    }
+                }
             }
-            _activeConnections[@(clientFd)] = conn;
         }
-        
-        dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
-            [self handleClient:conn];
-        });
     }
 }
 
@@ -1008,38 +1011,43 @@ NSArray<NSString*>* ContextLines(const std::vector<std::string>& lines, NSIntege
     int clientFd = conn.fd;
     std::string buffer;
     char readBuf[4096];
+    BOOL connectionActive = YES;
     
-    while (_isRunning) {
-        ssize_t bytes = read(clientFd, readBuf, sizeof(readBuf));
-        if (bytes <= 0) break;
-        
-        buffer.append(readBuf, bytes);
-        if (buffer.size() > kMaxRequestBytes) {
-            [self sendError:@"unknown" code:@"request_too_large" message:@"Request exceeds maximum allowed size." clientFd:clientFd];
-            buffer.clear();
-            break;
-        }
-        
-        size_t newlinePos;
-        while ((newlinePos = buffer.find('\n')) != std::string::npos) {
-            std::string line = buffer.substr(0, newlinePos);
-            buffer.erase(0, newlinePos + 1);
-            
-            if (line.empty()) continue;
-            if (line.size() > kMaxRequestBytes) {
-                [self sendError:@"unknown" code:@"request_too_large" message:@"Request exceeds maximum allowed size." clientFd:clientFd];
-                continue;
-            }
-            
-            @synchronized(self) {
-                conn.pendingRequestsCount++;
-            }
-            
-            dispatch_async([self queueForRequestLine:line], ^{
-                @autoreleasepool {
-                    [self processRequest:line connection:conn];
+    while (_isRunning && connectionActive) {
+        @autoreleasepool {
+            ssize_t bytes = read(clientFd, readBuf, sizeof(readBuf));
+            if (bytes <= 0) {
+                connectionActive = NO;
+            } else {
+                buffer.append(readBuf, bytes);
+                if (buffer.size() > kMaxRequestBytes) {
+                    [self sendError:@"unknown" code:@"request_too_large" message:@"Request exceeds maximum allowed size." clientFd:clientFd];
+                    buffer.clear();
+                    connectionActive = NO;
+                } else {
+                    size_t newlinePos;
+                    while ((newlinePos = buffer.find('\n')) != std::string::npos) {
+                        std::string line = buffer.substr(0, newlinePos);
+                        buffer.erase(0, newlinePos + 1);
+                        
+                        if (line.empty()) continue;
+                        if (line.size() > kMaxRequestBytes) {
+                            [self sendError:@"unknown" code:@"request_too_large" message:@"Request exceeds maximum allowed size." clientFd:clientFd];
+                            continue;
+                        }
+                        
+                        @synchronized(self) {
+                            conn.pendingRequestsCount++;
+                        }
+                        
+                        dispatch_async([self queueForRequestLine:line], ^{
+                            @autoreleasepool {
+                                [self processRequest:line connection:conn];
+                            }
+                        });
+                    }
                 }
-            });
+            }
         }
     }
     
@@ -3209,9 +3217,8 @@ static BOOL IsTextBinary(NSString* text) {
     }
     
     NSPipe* outPipe = [NSPipe pipe];
-    NSPipe* errPipe = [NSPipe pipe];
     [task setStandardOutput:outPipe];
-    [task setStandardError:errPipe];
+    [task setStandardError:outPipe];
     
     _lastVerifyCommand = [command copy];
     _lastVerifyStartedAt = [NSDate date];
@@ -3229,23 +3236,18 @@ static BOOL IsTextBinary(NSString* text) {
     @try {
         [self appendLogLine:[NSString stringWithFormat:@"[Verify] Starting command: %@", command]];
         [task launch];
+        
+        NSData* outData = [[outPipe fileHandleForReading] readDataToEndOfFile];
         [task waitUntilExit];
         
         _lastVerifyFinishedAt = [NSDate date];
         int status = [task terminationStatus];
         _lastVerifyExitCode = @(status);
         
-        NSData* outData = [[outPipe fileHandleForReading] readDataToEndOfFile];
         NSString* outStr = [[NSString alloc] initWithData:outData encoding:NSUTF8StringEncoding] ?: @"";
-        
-        NSData* errData = [[errPipe fileHandleForReading] readDataToEndOfFile];
-        NSString* errStr = [[NSString alloc] initWithData:errData encoding:NSUTF8StringEncoding] ?: @"";
         
         if (outStr.length > 0) {
             [self appendLogLine:outStr];
-        }
-        if (errStr.length > 0) {
-            [self appendLogLine:[NSString stringWithFormat:@"[Error] %@", errStr]];
         }
         
         NSTimeInterval duration = [_lastVerifyFinishedAt timeIntervalSinceDate:_lastVerifyStartedAt];

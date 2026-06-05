@@ -13,27 +13,19 @@ static std::string runCommand(const std::string& dir, NSString* launchPath, NSAr
     [task setCurrentDirectoryPath:[NSString stringWithUTF8String:dir.c_str()]];
     
     NSPipe* outPipe = [NSPipe pipe];
-    NSPipe* errPipe = [NSPipe pipe];
     [task setStandardOutput:outPipe];
-    [task setStandardError:errPipe];
+    [task setStandardError:outPipe];
     
     @try {
         [task launch];
-        [task waitUntilExit];
         
         NSData* outData = [[outPipe fileHandleForReading] readDataToEndOfFile];
-        NSString* outStr = [[NSString alloc] initWithData:outData encoding:NSUTF8StringEncoding];
+        [task waitUntilExit];
+        
+        NSString* outStr = [[NSString alloc] initWithData:outData encoding:NSUTF8StringEncoding] ?: @"";
         
         if (exitCodeOut) {
             *exitCodeOut = task.terminationStatus;
-        }
-        
-        if (task.terminationStatus != 0) {
-            NSData* errData = [[errPipe fileHandleForReading] readDataToEndOfFile];
-            NSString* errStr = [[NSString alloc] initWithData:errData encoding:NSUTF8StringEncoding];
-            if (errStr.length > 0) {
-                return std::string([errStr UTF8String]);
-            }
         }
         
         return std::string([outStr UTF8String]);

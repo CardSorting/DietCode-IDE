@@ -13,12 +13,12 @@ NSString* runGitCmd(NSString* dir, NSArray<NSString*>* args) {
 
     NSPipe* outPipe = [NSPipe pipe];
     [task setStandardOutput:outPipe];
-    [task setStandardError:[NSPipe pipe]];
+    [task setStandardError:outPipe];
 
     @try {
         [task launch];
-        [task waitUntilExit];
         NSData* data = [[outPipe fileHandleForReading] readDataToEndOfFile];
+        [task waitUntilExit];
         return [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding] ?: @"";
     } @catch (NSException* e) {
         return @"";
@@ -143,14 +143,14 @@ BOOL checkBracketBalance(NSString* text) {
 
     NSPipe* errPipe = [NSPipe pipe];
     [task setStandardError:errPipe];
-    [task setStandardOutput:[NSPipe pipe]];
+    [task setStandardOutput:errPipe];
 
     [task launch];
+    NSData* errData = [[errPipe fileHandleForReading] readDataToEndOfFile];
     [task waitUntilExit];
 
     int status = [task terminationStatus];
     if (status != 0) {
-        NSData* errData = [[errPipe fileHandleForReading] readDataToEndOfFile];
         NSString* errMsg = [[NSString alloc] initWithData:errData encoding:NSUTF8StringEncoding];
         [[NSFileManager defaultManager] removeItemAtPath:tempSrcPath error:nil];
         [[NSFileManager defaultManager] removeItemAtPath:tempDiffPath error:nil];
@@ -238,14 +238,14 @@ BOOL checkBracketBalance(NSString* text) {
 
         NSPipe* pyErr = [NSPipe pipe];
         [pyTask setStandardError:pyErr];
-        [pyTask setStandardOutput:[NSPipe pipe]];
+        [pyTask setStandardOutput:pyErr];
 
         @try {
             [pyTask launch];
+            NSData* errData = [[pyErr fileHandleForReading] readDataToEndOfFile];
             [pyTask waitUntilExit];
             if ([pyTask terminationStatus] != 0) {
                 syntaxDanger = YES;
-                NSData* errData = [[pyErr fileHandleForReading] readDataToEndOfFile];
                 syntaxErrors = [[NSString alloc] initWithData:errData encoding:NSUTF8StringEncoding] ?: @"Python compile failed.";
             }
         } @catch (NSException* e) {

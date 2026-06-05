@@ -3386,9 +3386,8 @@ static NSString* FindBinaryPath(NSString* name, NSString* fallback) {
     dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
         @try {
             [compileTask launch];
-            [compileTask waitUntilExit];
-            
             NSData* errData = [[errPipe fileHandleForReading] readDataToEndOfFile];
+            [compileTask waitUntilExit];
             NSString* errText = [[NSString alloc] initWithData:errData encoding:NSUTF8StringEncoding];
             
             dispatch_async(dispatch_get_main_queue(), ^{
@@ -5720,14 +5719,14 @@ static NSString* FindBinaryPath(NSString* name, NSString* fallback) {
     
     NSPipe* errPipe = [NSPipe pipe];
     [task setStandardError:errPipe];
-    [task setStandardOutput:[NSPipe pipe]];
+    [task setStandardOutput:errPipe];
     
     [task launch];
+    NSData* errData = [[errPipe fileHandleForReading] readDataToEndOfFile];
     [task waitUntilExit];
     
     int status = [task terminationStatus];
     if (status != 0) {
-        NSData* errData = [[errPipe fileHandleForReading] readDataToEndOfFile];
         NSString* errMsg = [[NSString alloc] initWithData:errData encoding:NSUTF8StringEncoding];
         [[NSFileManager defaultManager] removeItemAtPath:tempSrcPath error:nil];
         [[NSFileManager defaultManager] removeItemAtPath:tempDiffPath error:nil];
