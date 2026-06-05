@@ -55,6 +55,17 @@ make app
 make run
 ```
 
+Headless agent control:
+
+```sh
+make app
+make ensure-socket
+python3 scripts/dietcode_agent_client.py --ensure-only
+python3 scripts/dietcode_agent_client.py rpc.ping
+```
+
+`--ensure-socket` exits immediately if `~/.dietcode/control.sock` is already accepting connections. Otherwise it starts a detached `--headless` DietCode process and waits for the socket. `--ensure-timeout <seconds>` controls that wait. Python agents can import `scripts/dietcode_agent_client.py` and call `ensure_socket()` before sending JSON-RPC frames.
+
 See `docs/build-instructions.md` for details.
 
 Scope guard

@@ -15,8 +15,7 @@ Tests the new Bounded Autonomy / Permissionless RPC surface end-to-end:
 
 import socket, json, os, sys, pathlib, time
 
-SOCK = os.path.expanduser("~/.dietcode/control.sock")
-TOKEN_FILE = os.path.expanduser("~/.dietcode/session.token")
+from dietcode_agent_client import SOCKET_PATH as SOCK, TOKEN_PATH as TOKEN_FILE, ensure_socket
 
 # ─── Snake game ─────────────────────────────────────────────────────────────
 SNAKE_HTML = """\
@@ -189,38 +188,9 @@ def main():
     print("  DietCode Control Agent — Snake Integration Test")
     print(f"{bar}\n")
 
-    socket_active = False
-    try:
-        with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as test_sock:
-            test_sock.settimeout(0.5)
-            test_sock.connect(SOCK)
-            socket_active = True
-    except (ConnectionRefusedError, FileNotFoundError, socket.timeout):
-        if os.path.exists(SOCK):
-            try:
-                os.unlink(SOCK)
-            except Exception:
-                pass
-
-    if not socket_active:
-        print("  ✗  Socket not active — attempting to launch DietCode in headless mode...")
-        import subprocess
-        app_path = "build/DietCode.app/Contents/MacOS/DietCode"
-        if not os.path.exists(app_path):
-            print(f"  ✗  DietCode binary not found at {app_path}. Run 'make app' first.")
-            sys.exit(1)
-        subprocess.Popen([app_path, "--headless"])
-        for _ in range(50):
-            try:
-                with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as test_sock:
-                    test_sock.connect(SOCK)
-                    socket_active = True
-                    break
-            except Exception:
-                time.sleep(0.1)
-        if not socket_active:
-            print("  ✗  Failed to start DietCode headless process or socket did not initialize.")
-            sys.exit(1)
+    if not ensure_socket():
+        print("  ✗  Failed to start DietCode headless process or socket did not initialize.")
+        sys.exit(1)
 
     with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as s:
         s.connect(SOCK)

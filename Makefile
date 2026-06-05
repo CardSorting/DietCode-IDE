@@ -31,7 +31,7 @@ MACOS_MM := \
 	src/filesystem/GitService.mm \
 	src/core/LSPClient.mm
 
-.PHONY: all app run test clean
+.PHONY: all app run headless ensure-socket control-smoke test clean
 
 all: app test
 
@@ -51,6 +51,15 @@ app: $(APP_MACOS) $(APP_RESOURCES)
 
 run: app
 	open $(APP_BUNDLE)
+
+headless: app
+	$(APP_MACOS)/$(APP_NAME) --headless
+
+ensure-socket: app
+	$(APP_MACOS)/$(APP_NAME) --ensure-socket
+
+control-smoke: app
+	python3 scripts/control_smoke_test.py
 
 $(TEST_BIN): $(BUILD_DIR) $(CORE_CPP) tests/test_editor.cpp
 	$(CXX) $(CXXFLAGS) $(CORE_CPP) tests/test_editor.cpp -o $(TEST_BIN)

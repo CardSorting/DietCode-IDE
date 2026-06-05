@@ -8,35 +8,14 @@ import shutil
 import hashlib
 import plistlib
 
-SOCKET_PATH = os.path.expanduser("~/.dietcode/control.sock")
-TOKEN_PATH = os.path.expanduser("~/.dietcode/session.token")
+from dietcode_agent_client import SOCKET_PATH, ensure_socket, load_token, send_rpc
+
 BACKUPS_DIR = os.path.expanduser("~/.dietcode/backups")
 AUDIT_LOG_DIR = os.path.expanduser("~/.dietcode")
 AUDIT_LOG_PATH = os.path.join(AUDIT_LOG_DIR, "control_audit.log")
 
-def load_token():
-    if not os.path.exists(TOKEN_PATH):
-        raise RuntimeError(f"Session token not found at {TOKEN_PATH}")
-    with open(TOKEN_PATH, "r") as f:
-        return f.read().strip()
-
 def call(sock, token, method, params=None, request_id=None):
-    payload = {
-        "id": request_id or method,
-        "schemaVersion": "1.6.2",
-        "method": method,
-        "params": params or {},
-        "token": token
-    }
-    sock.sendall(json.dumps(payload, separators=(",", ":")).encode("utf-8") + b"\n")
-    data = bytearray()
-    while not data.endswith(b"\n"):
-        chunk = sock.recv(65536)
-        if not chunk:
-            raise RuntimeError(f"socket closed while waiting for {method}")
-        data.extend(chunk)
-    response = json.loads(data.decode("utf-8"))
-    return response
+    return send_rpc(sock, token, method, params, request_id)
 
 def get_sha256(data):
     if isinstance(data, str):
@@ -46,38 +25,9 @@ def get_sha256(data):
 def main():
     print("=== DietCode v1.6.5 Release Constant Hygiene Verification Suite ===")
     
-    socket_active = False
-    try:
-        with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as test_sock:
-            test_sock.settimeout(0.5)
-            test_sock.connect(SOCKET_PATH)
-            socket_active = True
-    except (ConnectionRefusedError, FileNotFoundError, socket.timeout):
-        if os.path.exists(SOCKET_PATH):
-            try:
-                os.unlink(SOCKET_PATH)
-            except Exception:
-                pass
-
-    if not socket_active:
-        print("Control socket not active, launching DietCode in headless mode...")
-        import subprocess
-        app_path = "build/DietCode.app/Contents/MacOS/DietCode"
-        if not os.path.exists(app_path):
-            print(f"DietCode binary not found at {app_path}. Run 'make app' first.", file=sys.stderr)
-            return 1
-        subprocess.Popen([app_path, "--headless"])
-        for _ in range(50):
-            try:
-                with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as test_sock:
-                    test_sock.connect(SOCKET_PATH)
-                    socket_active = True
-                    break
-            except Exception:
-                time.sleep(0.1)
-        if not socket_active:
-            print("Failed to start DietCode headless process or socket did not initialize.", file=sys.stderr)
-            return 1
+    if not ensure_socket():
+        print("Failed to start DietCode headless process or socket did not initialize.", file=sys.stderr)
+        return 1
 
     token = load_token()
     print(f"Loaded session token: {token[:8]}...")
