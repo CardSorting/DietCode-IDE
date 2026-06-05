@@ -50,15 +50,20 @@ def main():
         checks = [
             ("rpc.ping", {}),
             ("workspace.getRoot", {}),
-            ("workspace.grep", {"query": "DietCode", "maxResults": 1}),
             ("editor.getOpenFiles", {}),
             ("problems.list", {}),
-            ("git.status", {}),
         ]
 
         for method, params in checks:
             result = call(sock, token, method, params)
             print(f"ok {method}: {sorted(result.keys())}")
+            if method == "workspace.getRoot" and result.get("path"):
+                for workspace_method, workspace_params in [
+                    ("workspace.grep", {"query": "DietCode", "maxResults": 1}),
+                    ("git.status", {}),
+                ]:
+                    workspace_result = call(sock, token, workspace_method, workspace_params)
+                    print(f"ok {workspace_method}: {sorted(workspace_result.keys())}")
 
     return 0
 

@@ -764,6 +764,28 @@ NSArray<NSString*>* ContextLines(const std::vector<std::string>& lines, NSIntege
     return res;
 }
 
+- (pid_t)safeTerminalPid {
+    if ([NSThread isMainThread]) {
+        return [_windowController terminalPid];
+    }
+    __block pid_t res = 0;
+    dispatch_sync(dispatch_get_main_queue(), ^{
+        res = [_windowController terminalPid];
+    });
+    return res;
+}
+
+- (NSArray*)safeLanguageDiagnosticsForPath:(NSString*)path {
+    if ([NSThread isMainThread]) {
+        return [_windowController languageDiagnosticsForPath:path];
+    }
+    __block NSArray* res = nil;
+    dispatch_sync(dispatch_get_main_queue(), ^{
+        res = [_windowController languageDiagnosticsForPath:path];
+    });
+    return res;
+}
+
 - (NSInteger)safeAgentAutonomyLevel {
     if ([NSThread isMainThread]) {
         return [_windowController agentAutonomyLevel];
@@ -901,8 +923,30 @@ NSArray<NSString*>* ContextLines(const std::vector<std::string>& lines, NSIntege
             @"editor.getActiveFile",
             @"editor.getOpenFiles",
             @"editor.getText",
+            @"editor.getSelection",
+            @"diff.workspaceInfo",
+            @"diff.stats",
+            @"diff.file",
+            @"diff.current",
+            @"diff.staged",
+            @"diff.unstaged",
+            @"diff.summary",
+            @"buffers.snapshot",
+            @"buffers.dirty",
+            @"buffers.active",
+            @"buffers.unsavedDiff",
+            @"changes.current",
+            @"changes.summary",
+            @"problems.list",
+            @"language.diagnostics",
+            @"terminal.status",
+            @"terminal.jobs",
+            @"terminal.history",
+            @"terminal.getOutput",
             @"session.info",
-            @"session.workflowState"
+            @"session.workflowState",
+            @"session.recentCommands",
+            @"session.lastSearches"
         ]];
     });
     return [readMethods containsObject:method];
@@ -1054,44 +1098,19 @@ NSArray<NSString*>* ContextLines(const std::vector<std::string>& lines, NSIntege
     __block NSString* errMsg = nil;
     __block NSString* affectedPaths = @"";
     
-    // Check if the method runs on background serial queue or needs main thread
+    // Check if the method runs on a worker queue or needs main-thread mutation APIs.
     BOOL isBackgroundMethod = [method isEqualToString:@"verify.run"] ||
-                              [method isEqualToString:@"workspace.grep"] ||
-                              [method isEqualToString:@"search.text"] ||
-                              [method isEqualToString:@"search.files"] ||
-                              [method isEqualToString:@"search.todo"] ||
-                              [method isEqualToString:@"search.diagnostics"] ||
-                              [method isEqualToString:@"diagnostics.list"] ||
-                              [method isEqualToString:@"diagnostics.summary"] ||
-                              [method isEqualToString:@"diagnostics.cluster"] ||
-                              [method isEqualToString:@"diagnostics.forFile"] ||
-                              [method isEqualToString:@"workspace.listFiles"] ||
-                              [method isEqualToString:@"recovery.scan"] ||
+                              [self isReadQueueMethod:method] ||
                               [method isEqualToString:@"combo.run"] ||
                               [method isEqualToString:@"combo.status"] ||
                               [method isEqualToString:@"combo.result"] ||
                               [method isEqualToString:@"combo.cancel"] ||
                               [method isEqualToString:@"combo.rollback"] ||
-                              [method isEqualToString:@"file.read"] ||
-                              [method isEqualToString:@"file.readRange"] ||
-                              [method isEqualToString:@"file.readAround"] ||
-                              [method isEqualToString:@"file.getChunks"] ||
-                              [method isEqualToString:@"file.stat"] ||
-                              [method isEqualToString:@"git.status"] ||
-                              [method isEqualToString:@"git.diff"] ||
-                              [method isEqualToString:@"analysis.workspaceSummary"] ||
-                              [method isEqualToString:@"analysis.searchRanked"] ||
-                              [method isEqualToString:@"analysis.fileSummary"] ||
-                              [method isEqualToString:@"analysis.relatedFiles"] ||
-                              [method isEqualToString:@"symbols.document"] ||
-                              [method isEqualToString:@"symbols.outline"] ||
-                              [method isEqualToString:@"symbols.activeDocument"] ||
-                              [method isEqualToString:@"symbols.references"] ||
-                              [method isEqualToString:@"editor.getActiveFile"] ||
-                              [method isEqualToString:@"editor.getOpenFiles"] ||
-                              [method isEqualToString:@"editor.getText"] ||
-                              [method isEqualToString:@"session.info"] ||
-                              [method isEqualToString:@"session.workflowState"] ||
+                              [method isEqualToString:@"verify.last"] ||
+                              [method isEqualToString:@"verify.status"] ||
+                              [method isEqualToString:@"verify.failures"] ||
+                              [method isEqualToString:@"context.snapshot"] ||
+                              [method isEqualToString:@"context.delta"] ||
                               [method isEqualToString:@"task.start"] ||
                               [method isEqualToString:@"task.status"] ||
                               [method isEqualToString:@"task.result"] ||
@@ -3121,7 +3140,7 @@ static BOOL IsTextBinary(NSString* text) {
     };
     
     @try {
-        [_windowController appendControlLogLine:[NSString stringWithFormat:@"[Verify] Starting command: %@", command]];
+        [self appendLogLine:[NSString stringWithFormat:@"[Verify] Starting command: %@", command]];
         [task launch];
         [task waitUntilExit];
         
@@ -3136,10 +3155,10 @@ static BOOL IsTextBinary(NSString* text) {
         NSString* errStr = [[NSString alloc] initWithData:errData encoding:NSUTF8StringEncoding] ?: @"";
         
         if (outStr.length > 0) {
-            [_windowController appendControlLogLine:outStr];
+            [self appendLogLine:outStr];
         }
         if (errStr.length > 0) {
-            [_windowController appendControlLogLine:[NSString stringWithFormat:@"[Error] %@", errStr]];
+            [self appendLogLine:[NSString stringWithFormat:@"[Error] %@", errStr]];
         }
         
         NSTimeInterval duration = [_lastVerifyFinishedAt timeIntervalSinceDate:_lastVerifyStartedAt];
@@ -3518,6 +3537,13 @@ static BOOL IsTextBinary(NSString* text) {
             }
         }
         return @"Execute";
+    }
+
+    if ([method isEqualToString:@"terminal.status"] ||
+        [method isEqualToString:@"terminal.jobs"] ||
+        [method isEqualToString:@"terminal.history"] ||
+        [method isEqualToString:@"terminal.getOutput"]) {
+        return @"Read";
     }
     
     if ([method hasPrefix:@"terminal."] ||
@@ -5162,19 +5188,13 @@ static BOOL IsTextBinary(NSString* text) {
     }
 
     if ([method isEqualToString:@"session.recentCommands"]) {
-        __block NSArray* recentCmds = nil;
-        dispatch_sync(dispatch_get_main_queue(), ^{
-            recentCmds = [_windowController.sessionRecentCommands copy];
-        });
+        NSArray* recentCmds = [self safeSessionRecentCommands];
         *outResult = @{ @"commands": recentCmds ?: @[] };
         return;
     }
 
     if ([method isEqualToString:@"session.lastSearches"]) {
-        __block NSArray* lastSearches = nil;
-        dispatch_sync(dispatch_get_main_queue(), ^{
-            lastSearches = [_windowController.sessionLastSearches copy];
-        });
+        NSArray* lastSearches = [self safeSessionLastSearches];
         *outResult = @{ @"searches": lastSearches ?: @[] };
         return;
     }
@@ -5439,7 +5459,7 @@ static BOOL IsTextBinary(NSString* text) {
 
     // Terminal commands
     if ([method isEqualToString:@"terminal.status"]) {
-        pid_t pid = [_windowController terminalPid];
+        pid_t pid = [self safeTerminalPid];
         *outResult = @{
             @"pid": @(pid),
             @"running": @(pid > 0),
@@ -5449,14 +5469,14 @@ static BOOL IsTextBinary(NSString* text) {
     }
 
     if ([method isEqualToString:@"terminal.jobs"]) {
-        pid_t pid = [_windowController terminalPid];
+        pid_t pid = [self safeTerminalPid];
         NSArray* jobs = pid > 0 ? @[@{ @"id": @"terminal", @"pid": @(pid), @"status": @"running" }] : @[];
         *outResult = @{ @"jobs": jobs };
         return;
     }
 
     if ([method isEqualToString:@"terminal.history"]) {
-        *outResult = @{ @"commands": _windowController.sessionRecentCommands ?: @[] };
+        *outResult = @{ @"commands": [self safeSessionRecentCommands] ?: @[] };
         return;
     }
 
@@ -5477,7 +5497,7 @@ static BOOL IsTextBinary(NSString* text) {
             *outErrMsg = errStr ?: @"Failed to start terminal command.";
             return;
         }
-        *outResult = @{ @"run": @YES, @"pid": @([_windowController terminalPid]) };
+        *outResult = @{ @"run": @YES, @"pid": @([self safeTerminalPid]) };
         return;
     }
     
@@ -5624,7 +5644,7 @@ static BOOL IsTextBinary(NSString* text) {
             *outErrMsg = @"path parameter required.";
             return;
         }
-        NSArray* diags = [_windowController languageDiagnosticsForPath:targetPath] ?: @[];
+        NSArray* diags = [self safeLanguageDiagnosticsForPath:targetPath] ?: @[];
         *outResult = @{ @"diagnostics": diags };
         return;
     }
@@ -5777,7 +5797,13 @@ static BOOL IsTextBinary(NSString* text) {
 }
 
 - (void)appendLogLine:(NSString*)line {
-    [_windowController appendControlLogLine:line];
+    if ([NSThread isMainThread]) {
+        [_windowController appendControlLogLine:line];
+        return;
+    }
+    dispatch_async(dispatch_get_main_queue(), ^{
+        [_windowController appendControlLogLine:line];
+    });
 }
 
 - (void)logAuditMethod:(NSString*)method 
@@ -5786,51 +5812,52 @@ static BOOL IsTextBinary(NSString* text) {
               duration:(long long)duration 
                 result:(NSString*)result 
                  paths:(NSString*)paths {
-    
-    NSString* homeDir = NSHomeDirectory();
-    NSString* dietcodeDir = [homeDir stringByAppendingPathComponent:@".dietcode"];
-    NSString* logPath = [dietcodeDir stringByAppendingPathComponent:@"control_audit.log"];
-    
-    NSFileManager* fm = [NSFileManager defaultManager];
-    NSError* attrErr = nil;
-    NSDictionary* attrs = [fm attributesOfItemAtPath:logPath error:&attrErr];
-    if (attrs) {
-        unsigned long long size = [attrs fileSize];
-        if (size >= 5 * 1024 * 1024) {
-            NSString* logPath3 = [dietcodeDir stringByAppendingPathComponent:@"control_audit.log.3"];
-            NSString* logPath2 = [dietcodeDir stringByAppendingPathComponent:@"control_audit.log.2"];
-            NSString* logPath1 = [dietcodeDir stringByAppendingPathComponent:@"control_audit.log.1"];
-            
-            if ([fm fileExistsAtPath:logPath3]) {
-                [fm removeItemAtPath:logPath3 error:nil];
-            }
-            if ([fm fileExistsAtPath:logPath2]) {
-                [fm moveItemAtPath:logPath2 toPath:logPath3 error:nil];
-            }
-            if ([fm fileExistsAtPath:logPath1]) {
-                [fm moveItemAtPath:logPath1 toPath:logPath2 error:nil];
-            }
-            if ([fm fileExistsAtPath:logPath]) {
-                [fm moveItemAtPath:logPath toPath:logPath1 error:nil];
+    @synchronized (self) {
+        NSString* homeDir = NSHomeDirectory();
+        NSString* dietcodeDir = [homeDir stringByAppendingPathComponent:@".dietcode"];
+        NSString* logPath = [dietcodeDir stringByAppendingPathComponent:@"control_audit.log"];
+        
+        NSFileManager* fm = [NSFileManager defaultManager];
+        NSError* attrErr = nil;
+        NSDictionary* attrs = [fm attributesOfItemAtPath:logPath error:&attrErr];
+        if (attrs) {
+            unsigned long long size = [attrs fileSize];
+            if (size >= 5 * 1024 * 1024) {
+                NSString* logPath3 = [dietcodeDir stringByAppendingPathComponent:@"control_audit.log.3"];
+                NSString* logPath2 = [dietcodeDir stringByAppendingPathComponent:@"control_audit.log.2"];
+                NSString* logPath1 = [dietcodeDir stringByAppendingPathComponent:@"control_audit.log.1"];
+                
+                if ([fm fileExistsAtPath:logPath3]) {
+                    [fm removeItemAtPath:logPath3 error:nil];
+                }
+                if ([fm fileExistsAtPath:logPath2]) {
+                    [fm moveItemAtPath:logPath2 toPath:logPath3 error:nil];
+                }
+                if ([fm fileExistsAtPath:logPath1]) {
+                    [fm moveItemAtPath:logPath1 toPath:logPath2 error:nil];
+                }
+                if ([fm fileExistsAtPath:logPath]) {
+                    [fm moveItemAtPath:logPath toPath:logPath1 error:nil];
+                }
             }
         }
-    }
-    
-    NSDateFormatter* formatter = [[NSDateFormatter alloc] init];
-    [formatter setDateFormat:@"yyyy-MM-dd HH:mm:ss"];
-    NSString* timestamp = [formatter stringFromDate:[NSDate date]];
-    
-    NSString* logLine = [NSString stringWithFormat:@"[%@] caller: %@ | method: %@ | permission: %@ | duration: %lldms | result: %@ | paths: %@\n", 
-                         timestamp, caller, method, permission, duration, result, paths ?: @""];
-    
-    if (logLine.length > 8192) {
-        logLine = [[logLine substringToIndex:8191] stringByAppendingString:@"\n"];
-    }
-    
-    std::ofstream out([logPath UTF8String], std::ios::app);
-    if (out.is_open()) {
-        out << [logLine UTF8String];
-        out.close();
+        
+        NSDateFormatter* formatter = [[NSDateFormatter alloc] init];
+        [formatter setDateFormat:@"yyyy-MM-dd HH:mm:ss"];
+        NSString* timestamp = [formatter stringFromDate:[NSDate date]];
+        
+        NSString* logLine = [NSString stringWithFormat:@"[%@] caller: %@ | method: %@ | permission: %@ | duration: %lldms | result: %@ | paths: %@\n",
+                             timestamp, caller, method, permission, duration, result, paths ?: @""];
+        
+        if (logLine.length > 8192) {
+            logLine = [[logLine substringToIndex:8191] stringByAppendingString:@"\n"];
+        }
+        
+        std::ofstream out([logPath UTF8String], std::ios::app);
+        if (out.is_open()) {
+            out << [logLine UTF8String];
+            out.close();
+        }
     }
 }
 
