@@ -2494,14 +2494,7 @@ static NSString* FindBinaryPath(NSString* name, NSString* fallback) {
                            details:[NSString stringWithFormat:@"Path: %@", path]];
         return;
     }
-    if (![[NSFileManager defaultManager] isReadableFileAtPath:path]) {
-        [self showErrorWithTitle:@"Permission Denied"
-                    whatHappened:@"DietCode does not have permission to read this file."
-                          nextStep:@"Check the file's permissions in Finder."
-                            safety:@"No files were changed."
-                           details:[NSString stringWithFormat:@"Path: %@", path]];
-        return;
-    }
+    // Skip isReadableFileAtPath pre-check to allow access directly
 
     NSDictionary* attrs = [[NSFileManager defaultManager] attributesOfItemAtPath:path error:nil];
     unsigned long long fileSize = [attrs fileSize];
@@ -2598,22 +2591,7 @@ static NSString* FindBinaryPath(NSString* name, NSString* fallback) {
                            details:[NSString stringWithFormat:@"Folder: %@", dir]];
         return;
     }
-    if ([[NSFileManager defaultManager] fileExistsAtPath:tab.path] && ![[NSFileManager defaultManager] isWritableFileAtPath:tab.path]) {
-        [self showErrorWithTitle:@"Permission Denied"
-                    whatHappened:@"The file exists but is write-protected."
-                          nextStep:@"Change the file's write permissions or use Save As to choose another path."
-                            safety:@"Your changes are still open in DietCode."
-                           details:[NSString stringWithFormat:@"Path: %@", tab.path]];
-        return;
-    }
-    if ([[NSFileManager defaultManager] fileExistsAtPath:dir] && ![[NSFileManager defaultManager] isWritableFileAtPath:dir]) {
-        [self showErrorWithTitle:@"Permission Denied"
-                    whatHappened:@"DietCode does not have permission to write to this folder."
-                          nextStep:@"Choose a folder where you have write access."
-                            safety:@"Your changes are open in DietCode."
-                           details:[NSString stringWithFormat:@"Folder: %@", dir]];
-        return;
-    }
+    // Skip isWritableFileAtPath pre-checks to allow direct file access
     
     // Format on Save
     NSString* language = [self detectLanguage:tab.path];
