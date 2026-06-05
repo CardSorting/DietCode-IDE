@@ -32,6 +32,7 @@ static const NSInteger kMaxBatchPatchCount = 10;
 static const NSUInteger kMaxChunkPreviewLength = 180;
 static const NSInteger kMaxPlanSteps = 30;
 static const NSInteger kMaxActiveCombos = 4;
+static NSString* const kDietCodeAppVersion = @"1.6.5";
 
 NSString* NSStringFromStdString(const std::string& value) {
     return [NSString stringWithUTF8String:value.c_str()] ?: @"";
@@ -468,6 +469,9 @@ NSArray<NSString*>* ContextLines(const std::vector<std::string>& lines, NSIntege
 - (NSString*)canonicalJsonStringForObject:(id)obj error:(NSString**)errorOut;
 - (BOOL)validateManifestStructure:(NSDictionary*)manifest error:(NSString**)errorOut;
 - (NSDictionary*)validatePatchAtPath:(NSString*)path patch:(NSString*)patch currentText:(NSString*)currentTextOverride;
+- (NSArray<NSDictionary*>*)listBackupsQuick:(NSString**)errorOut;
+- (BOOL)deleteBackupWithId:(NSString*)comboId confirm:(BOOL)confirm error:(NSString**)errorOut errorCode:(NSString**)errorCodeOut;
+- (NSDictionary*)pruneBackupsWithKeepLastN:(NSNumber*)keepLastN olderThanDays:(NSNumber*)olderThanDays dryRun:(BOOL)dryRun confirmInvalid:(BOOL)confirmInvalid error:(NSString**)errorOut;
 - (NSDictionary*)currentChangesInfo;
 - (NSDictionary*)runVerificationCommand:(NSString*)command cwd:(NSString*)cwd;
 - (NSDictionary*)verificationStatus;
@@ -899,6 +903,9 @@ NSArray<NSString*>* ContextLines(const std::vector<std::string>& lines, NSIntege
             @{ @"name": @"combo.rollback", @"permission": @"Edit", @"params": @{ @"comboId": @"string optional" }, @"returns": @{ @"reverted": @"boolean" } },
             @{ @"name": @"recovery.scan", @"permission": @"Read", @"params": @{}, @"returns": @{ @"backups": @"array" } },
             @{ @"name": @"recovery.schemaInfo", @"permission": @"Read", @"params": @{}, @"returns": @{ @"transactionSchemaVersion": @"string", @"supportedRollbackSchemas": @"array", @"supportedInspectOnlySchemas": @"array" } },
+            @{ @"name": @"recovery.list", @"permission": @"Read", @"params": @{}, @"returns": @{ @"backups": @"array" } },
+            @{ @"name": @"recovery.deleteBackup", @"permission": @"Edit", @"params": @{ @"comboId": @"string", @"confirm": @"boolean optional" }, @"returns": @{ @"deleted": @"boolean", @"comboId": @"string" } },
+            @{ @"name": @"recovery.prune", @"permission": @"Edit", @"params": @{ @"keepLastN": @"number optional", @"olderThanDays": @"number optional", @"dryRun": @"boolean", @"confirmInvalid": @"boolean optional" }, @"returns": @{ @"dryRun": @"boolean", @"pruned": @"array", @"skipped": @"array" } },
             @{ @"name": @"workspace.getRoot", @"permission": @"Read", @"params": @{}, @"returns": @{ @"path": @"string" } },
             @{ @"name": @"workspace.openFolder", @"permission": @"Destructive", @"params": @{ @"path": @"directory path" }, @"returns": @{ @"opened": @"boolean" } },
             @{ @"name": @"workspace.listFiles", @"permission": @"Read", @"params": @{}, @"returns": @{ @"files": @"array" } },
@@ -2446,6 +2453,242 @@ static BOOL IsTextBinary(NSString* text) {
     return @{ @"backups": backupsReport };
 }
 
+- (NSArray<NSDictionary*>*)listBackupsQuick:(NSString**)errorOut {
+    NSString* backupsDir = [NSHomeDirectory() stringByAppendingPathComponent:@".dietcode/backups"];
+    BOOL isDir = NO;
+    if (![[NSFileManager defaultManager] fileExistsAtPath:backupsDir isDirectory:&isDir] || !isDir) {
+        return @[];
+    }
+    
+    NSError* dirErr = nil;
+    NSArray* contents = [[NSFileManager defaultManager] contentsOfDirectoryAtPath:backupsDir error:&dirErr];
+    if (dirErr) {
+        if (errorOut) *errorOut = [NSString stringWithFormat:@"Failed to list backups directory: %@", dirErr.localizedDescription];
+        return nil;
+    }
+    
+    NSMutableArray* list = [NSMutableArray array];
+    
+    for (NSString* comboId in contents) {
+        NSString* backupDir = [backupsDir stringByAppendingPathComponent:comboId];
+        BOOL isSubDir = NO;
+        if (![[NSFileManager defaultManager] fileExistsAtPath:backupDir isDirectory:&isSubDir] || !isSubDir) {
+            continue;
+        }
+        
+        NSString* status = @"valid";
+        NSString* createdAt = @"";
+        NSString* schemaVersion = @"";
+        
+        if (_combos[comboId]) {
+            status = @"active";
+            NSDictionary* cInfo = _combos[comboId];
+            if (cInfo && cInfo[@"createdAt"]) {
+                createdAt = cInfo[@"createdAt"];
+            }
+            if (cInfo && cInfo[@"schemaVersion"]) {
+                schemaVersion = cInfo[@"schemaVersion"];
+            }
+        }
+        
+        NSString* manifestPath = [backupDir stringByAppendingPathComponent:@"manifest.json"];
+        if (![[NSFileManager defaultManager] fileExistsAtPath:manifestPath]) {
+            if (![status isEqualToString:@"active"]) {
+                status = @"corrupt";
+            }
+        } else {
+            NSData* mData = [NSData dataWithContentsOfFile:manifestPath];
+            if (mData) {
+                NSDictionary* rawManifest = [NSJSONSerialization JSONObjectWithData:mData options:0 error:nil];
+                if ([rawManifest isKindOfClass:[NSDictionary class]]) {
+                    if (createdAt.length == 0) {
+                        createdAt = rawManifest[@"createdAt"] ?: @"";
+                    }
+                    schemaVersion = rawManifest[@"schemaVersion"] ?: @"1.6.1";
+                }
+            }
+            
+            NSString* mErr = nil;
+            NSDictionary* manifest = [self loadManifestFromPath:manifestPath error:&mErr];
+            if (!manifest) {
+                if (![status isEqualToString:@"active"]) {
+                    status = @"corrupt";
+                }
+            } else {
+                if (![status isEqualToString:@"active"]) {
+                    if (![schemaVersion isEqualToString:@"1.6.2"]) {
+                        status = @"legacy";
+                    }
+                }
+            }
+        }
+        
+        [list addObject:@{
+            @"comboId": comboId,
+            @"createdAt": createdAt,
+            @"schemaVersion": schemaVersion,
+            @"status": status
+        }];
+    }
+    
+    return list;
+}
+
+- (BOOL)deleteBackupWithId:(NSString*)comboId confirm:(BOOL)confirm error:(NSString**)errorOut errorCode:(NSString**)errorCodeOut {
+    NSString* backupsDir = [NSHomeDirectory() stringByAppendingPathComponent:@".dietcode/backups"];
+    NSString* backupDir = [backupsDir stringByAppendingPathComponent:comboId];
+    
+    BOOL isDir = NO;
+    if (![[NSFileManager defaultManager] fileExistsAtPath:backupDir isDirectory:&isDir] || !isDir) {
+        if (errorCodeOut) *errorCodeOut = @"backup_not_found";
+        if (errorOut) *errorOut = @"Backup not found.";
+        return NO;
+    }
+    
+    NSString* status = @"valid";
+    if (_combos[comboId]) {
+        status = @"active";
+    } else {
+        NSString* manifestPath = [backupDir stringByAppendingPathComponent:@"manifest.json"];
+        if (![[NSFileManager defaultManager] fileExistsAtPath:manifestPath]) {
+            status = @"corrupt";
+        } else {
+            NSString* mErr = nil;
+            NSDictionary* manifest = [self loadManifestFromPath:manifestPath error:&mErr];
+            if (!manifest) {
+                status = @"corrupt";
+            } else {
+                NSString* schemaVersion = manifest[@"schemaVersion"] ?: @"1.6.1";
+                if (![schemaVersion isEqualToString:@"1.6.2"]) {
+                    status = @"legacy";
+                }
+            }
+        }
+    }
+    
+    if ([status isEqualToString:@"active"]) {
+        if (errorCodeOut) *errorCodeOut = @"invalid_state";
+        if (errorOut) *errorOut = @"Cannot delete active backup.";
+        return NO;
+    }
+    
+    if ([status isEqualToString:@"corrupt"]) {
+        if (!confirm) {
+            if (errorCodeOut) *errorCodeOut = @"confirmation_required";
+            if (errorOut) *errorOut = @"Explicit confirmation required to delete corrupt/invalid backup.";
+            return NO;
+        }
+    }
+    
+    NSError* deleteErr = nil;
+    if (![[NSFileManager defaultManager] removeItemAtPath:backupDir error:&deleteErr]) {
+        if (errorCodeOut) *errorCodeOut = @"delete_failed";
+        if (errorOut) *errorOut = [NSString stringWithFormat:@"Failed to delete backup: %@", deleteErr.localizedDescription];
+        return NO;
+    }
+    
+    return YES;
+}
+
+- (NSDictionary*)pruneBackupsWithKeepLastN:(NSNumber*)keepLastN olderThanDays:(NSNumber*)olderThanDays dryRun:(BOOL)dryRun confirmInvalid:(BOOL)confirmInvalid error:(NSString**)errorOut {
+    NSArray* list = [self listBackupsQuick:errorOut];
+    if (!list) return nil;
+    
+    NSDateFormatter* parser = [[NSDateFormatter alloc] init];
+    parser.locale = [NSLocale localeWithLocaleIdentifier:@"en_US_POSIX"];
+    parser.timeZone = [NSTimeZone timeZoneForSecondsFromGMT:0];
+    parser.dateFormat = @"yyyy-MM-dd'T'HH:mm:ss'Z'";
+    
+    NSArray* sortedList = [list sortedArrayUsingComparator:^NSComparisonResult(NSDictionary* obj1, NSDictionary* obj2) {
+        NSString* d1Str = obj1[@"createdAt"];
+        NSString* d2Str = obj2[@"createdAt"];
+        NSDate* date1 = d1Str.length > 0 ? [parser dateFromString:d1Str] : nil;
+        NSDate* date2 = d2Str.length > 0 ? [parser dateFromString:d2Str] : nil;
+        if (!date1 && !date2) return NSOrderedSame;
+        if (!date1) return NSOrderedDescending;
+        if (!date2) return NSOrderedAscending;
+        return [date2 compare:date1];
+    }];
+    
+    NSMutableArray* toPrune = [NSMutableArray array];
+    NSMutableArray* skipped = [NSMutableArray array];
+    
+    NSDate* now = [NSDate date];
+    
+    for (NSUInteger i = 0; i < sortedList.count; i++) {
+        NSDictionary* item = sortedList[i];
+        NSString* comboId = item[@"comboId"];
+        NSString* status = item[@"status"];
+        NSString* createdAt = item[@"createdAt"];
+        
+        BOOL shouldPrune = NO;
+        
+        if (keepLastN && i >= [keepLastN unsignedIntegerValue]) {
+            shouldPrune = YES;
+        }
+        
+        if (olderThanDays && !shouldPrune) {
+            NSDate* createdDate = createdAt.length > 0 ? [parser dateFromString:createdAt] : nil;
+            if (createdDate) {
+                NSTimeInterval ageSeconds = [now timeIntervalSinceDate:createdDate];
+                double ageDays = ageSeconds / (24.0 * 3600.0);
+                if (ageDays > [olderThanDays doubleValue]) {
+                    shouldPrune = YES;
+                }
+            }
+        }
+        
+        if (shouldPrune) {
+            if ([status isEqualToString:@"active"]) {
+                [skipped addObject:@{
+                    @"comboId": comboId,
+                    @"reason": @"Cannot prune active backup."
+                }];
+            } else if ([status isEqualToString:@"corrupt"]) {
+                if (confirmInvalid) {
+                    [toPrune addObject:item];
+                } else {
+                    [skipped addObject:@{
+                        @"comboId": comboId,
+                        @"reason": @"Explicit confirmation required to delete corrupt/invalid backup."
+                    }];
+                }
+            } else {
+                [toPrune addObject:item];
+            }
+        }
+    }
+    
+    NSMutableArray* prunedIds = [NSMutableArray array];
+    if (!dryRun) {
+        for (NSDictionary* item in toPrune) {
+            NSString* comboId = item[@"comboId"];
+            NSString* err = nil;
+            NSString* errCode = nil;
+            if ([self deleteBackupWithId:comboId confirm:YES error:&err errorCode:&errCode]) {
+                [prunedIds addObject:comboId];
+                NSString* backupDir = [[NSHomeDirectory() stringByAppendingPathComponent:@".dietcode/backups"] stringByAppendingPathComponent:comboId];
+                [self logAuditMethod:@"recovery.prune" caller:@"unix_socket" permission:@"Edit" duration:0 result:@"success" paths:[NSString stringWithFormat:@"deleted comboId: %@ | path: %@", comboId, backupDir]];
+            } else {
+                [skipped addObject:@{
+                    @"comboId": comboId,
+                    @"reason": err ?: @"Delete failed."
+                }];
+            }
+        }
+    } else {
+        for (NSDictionary* item in toPrune) {
+            [prunedIds addObject:item[@"comboId"]];
+        }
+    }
+    
+    return @{
+        @"dryRun": @(dryRun),
+        @"pruned": prunedIds,
+        @"skipped": skipped
+    };
+}
+
 
 - (NSDictionary*)validatePatchAtPath:(NSString*)path patch:(NSString*)patch currentText:(NSString*)currentTextOverride {
     NSString* ws = [_windowController workspacePath];
@@ -2969,7 +3212,9 @@ static BOOL IsTextBinary(NSString* text) {
         [method isEqualToString:@"editor.closeFile"] ||
         [method isEqualToString:@"problems.open"] ||
         [method isEqualToString:@"problems.clearSource"] ||
-        [method isEqualToString:@"editor.setSelection"]) {
+        [method isEqualToString:@"editor.setSelection"] ||
+        [method isEqualToString:@"recovery.deleteBackup"] ||
+        [method isEqualToString:@"recovery.prune"]) {
         return @"Edit";
     }
     
@@ -3001,13 +3246,13 @@ static BOOL IsTextBinary(NSString* text) {
     }
 
     if ([method isEqualToString:@"rpc.ping"]) {
-        *outResult = @{ @"pong": @YES, @"server": @"DietCodeControlServer", @"version": @"1.6.3" };
+        *outResult = @{ @"pong": @YES, @"server": @"DietCodeControlServer", @"version": kDietCodeAppVersion };
         return;
     }
 
     if ([method isEqualToString:@"rpc.version"]) {
         *outResult = @{
-            @"appVersion": @"1.6.3",
+            @"appVersion": kDietCodeAppVersion,
             @"controlProtocolVersion": @"1.6",
             @"transactionSchemaVersion": @"1.6.2",
             @"supportedRollbackSchemas": @[@"1.6.2"],
@@ -3197,6 +3442,63 @@ static BOOL IsTextBinary(NSString* text) {
             @"supportedRollbackSchemas": @[@"1.6.2"],
             @"supportedInspectOnlySchemas": @[@"1.6.1"]
         };
+        return;
+    }
+
+    if ([method isEqualToString:@"recovery.list"]) {
+        NSString* errStr = nil;
+        NSArray* backups = [self listBackupsQuick:&errStr];
+        if (errStr) {
+            *outErrCode = @"internal_error";
+            *outErrMsg = errStr;
+            return;
+        }
+        *outResult = @{ @"backups": backups };
+        return;
+    }
+
+    if ([method isEqualToString:@"recovery.deleteBackup"]) {
+        NSString* comboId = params[@"comboId"];
+        if (!comboId) {
+            *outErrCode = @"invalid_params";
+            *outErrMsg = @"comboId parameter required.";
+            return;
+        }
+        BOOL confirm = [params[@"confirm"] boolValue];
+        NSString* errStr = nil;
+        NSString* errCode = nil;
+        if (![self deleteBackupWithId:comboId confirm:confirm error:&errStr errorCode:&errCode]) {
+            *outErrCode = errCode ?: @"delete_failed";
+            *outErrMsg = errStr ?: @"Failed to delete backup.";
+            return;
+        }
+        *outResult = @{ @"deleted": @YES, @"comboId": comboId };
+        
+        // Audit log the deletion
+        NSString* backupDir = [[NSHomeDirectory() stringByAppendingPathComponent:@".dietcode/backups"] stringByAppendingPathComponent:comboId];
+        [self logAuditMethod:@"recovery.deleteBackup" caller:@"unix_socket" permission:@"Edit" duration:0 result:@"success" paths:[NSString stringWithFormat:@"deleted comboId: %@ | path: %@", comboId, backupDir]];
+        return;
+    }
+
+    if ([method isEqualToString:@"recovery.prune"]) {
+        NSNumber* keepLastN = params[@"keepLastN"];
+        NSNumber* olderThanDays = params[@"olderThanDays"];
+        if (!params[@"dryRun"]) {
+            *outErrCode = @"invalid_params";
+            *outErrMsg = @"dryRun parameter required.";
+            return;
+        }
+        BOOL dryRun = [params[@"dryRun"] boolValue];
+        BOOL confirmInvalid = [params[@"confirmInvalid"] boolValue];
+        
+        NSString* errStr = nil;
+        NSDictionary* pruneReport = [self pruneBackupsWithKeepLastN:keepLastN olderThanDays:olderThanDays dryRun:dryRun confirmInvalid:confirmInvalid error:&errStr];
+        if (errStr) {
+            *outErrCode = @"internal_error";
+            *outErrMsg = errStr;
+            return;
+        }
+        *outResult = pruneReport;
         return;
     }
     
