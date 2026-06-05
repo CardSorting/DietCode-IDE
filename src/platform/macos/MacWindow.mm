@@ -1896,20 +1896,24 @@ static NSString* FindBinaryPath(NSString* name, NSString* fallback) {
 
 - (void)closeTab:(DietCodeTabState*)tab {
     if (tab.dirty) {
-        // Prompt save
-        NSAlert* alert = [[NSAlert alloc] init];
-        [alert setMessageText:[NSString stringWithFormat:@"Save changes to %@?", tab.title]];
-        [alert setInformativeText:@"Your file has unsaved changes. You can save them or close without saving."];
-        [alert addButtonWithTitle:@"Save"];
-        [alert addButtonWithTitle:@"Close Without Saving"];
-        [alert addButtonWithTitle:@"Cancel"];
-        NSModalResponse res = [alert runModal];
-        if (res == NSAlertFirstButtonReturn) {
-            [self saveTab:tab];
-        } else if (res == NSAlertSecondButtonReturn) {
+        if (self.isHeadless) {
             [self deleteBackupForTab:tab];
-        } else if (res == NSAlertThirdButtonReturn) {
-            return; // Cancel
+        } else {
+            // Prompt save
+            NSAlert* alert = [[NSAlert alloc] init];
+            [alert setMessageText:[NSString stringWithFormat:@"Save changes to %@?", tab.title]];
+            [alert setInformativeText:@"Your file has unsaved changes. You can save them or close without saving."];
+            [alert addButtonWithTitle:@"Save"];
+            [alert addButtonWithTitle:@"Close Without Saving"];
+            [alert addButtonWithTitle:@"Cancel"];
+            NSModalResponse res = [alert runModal];
+            if (res == NSAlertFirstButtonReturn) {
+                [self saveTab:tab];
+            } else if (res == NSAlertSecondButtonReturn) {
+                [self deleteBackupForTab:tab];
+            } else if (res == NSAlertThirdButtonReturn) {
+                return; // Cancel
+            }
         }
     }
 
@@ -2573,6 +2577,7 @@ static NSString* FindBinaryPath(NSString* name, NSString* fallback) {
 }
 
 - (void)openFolder:(id)sender {
+    if (self.isHeadless) return;
     NSOpenPanel* panel = [NSOpenPanel openPanel];
     [panel setCanChooseFiles:NO];
     [panel setCanChooseDirectories:YES];
@@ -2678,6 +2683,10 @@ static NSString* FindBinaryPath(NSString* name, NSString* fallback) {
     // Check if this path is already open in another tab
     for (DietCodeTabState* tab in self.openTabs) {
         if (tab != self.activeTab && [tab.path isEqualToString:newPath]) {
+            if (self.isHeadless) {
+                NSLog(@"[Save As] File already open in another tab: %@", newPath);
+                return;
+            }
             NSAlert* alert = [[NSAlert alloc] init];
             [alert setMessageText:@"File Already Open"];
             [alert setInformativeText:[NSString stringWithFormat:@"'%@' is already open in another tab. Please close that tab first, or save to a different file.", [newPath lastPathComponent]]];
@@ -2829,6 +2838,10 @@ static NSString* FindBinaryPath(NSString* name, NSString* fallback) {
                   nextStep:(NSString*)nextStep
                     safety:(NSString*)safety
                    details:(NSString*)details {
+    if (self.isHeadless) {
+        NSLog(@"[Error Alert] %@\nWhat Happened: %@\nNext Step: %@\nSafety: %@\nDetails: %@", title, whatHappened, nextStep, safety, details ?: @"");
+        return;
+    }
     NSAlert* alert = [[NSAlert alloc] init];
     [alert setMessageText:title];
     NSString* informative = [NSString stringWithFormat:@"%@\n\n%@\n\n%@\n\nDetails: %@", whatHappened, nextStep, safety, details ?: @"No extra details."];
@@ -3059,6 +3072,7 @@ static NSString* FindBinaryPath(NSString* name, NSString* fallback) {
 }
 
 - (void)newFileClicked:(id)sender {
+    if (self.isHeadless) return;
     NSString* targetDir = [self getSelectedOutlinePath];
     BOOL isDir = NO;
     [[NSFileManager defaultManager] fileExistsAtPath:targetDir isDirectory:&isDir];
@@ -3087,6 +3101,7 @@ static NSString* FindBinaryPath(NSString* name, NSString* fallback) {
 }
 
 - (void)newFolderClicked:(id)sender {
+    if (self.isHeadless) return;
     NSString* targetDir = [self getSelectedOutlinePath];
     BOOL isDir = NO;
     [[NSFileManager defaultManager] fileExistsAtPath:targetDir isDirectory:&isDir];
@@ -3114,6 +3129,7 @@ static NSString* FindBinaryPath(NSString* name, NSString* fallback) {
 }
 
 - (void)renameFileClicked:(id)sender {
+    if (self.isHeadless) return;
     NSString* path = [self getSelectedOutlinePath];
     if (path == nil || [path isEqualToString:self.openedFolderPath]) return;
 
@@ -3150,6 +3166,7 @@ static NSString* FindBinaryPath(NSString* name, NSString* fallback) {
 }
 
 - (void)deleteFileClicked:(id)sender {
+    if (self.isHeadless) return;
     NSString* path = [self getSelectedOutlinePath];
     if (path == nil || [path isEqualToString:self.openedFolderPath]) return;
 
@@ -3944,6 +3961,7 @@ static NSString* FindBinaryPath(NSString* name, NSString* fallback) {
 // --- Go to Line Alert dialog ---
 
 - (void)goToLine:(id)sender {
+    if (self.isHeadless) return;
     NSAlert* alert = [[NSAlert alloc] init];
     [alert setMessageText:@"Go to Line"];
     [alert setInformativeText:@"Enter target line number:"];
@@ -4952,6 +4970,10 @@ static NSString* FindBinaryPath(NSString* name, NSString* fallback) {
 }
 
 - (void)showErrorAlert:(NSString*)title message:(NSString*)message {
+    if (self.isHeadless) {
+        NSLog(@"[Error Alert] %@: %@", title, message);
+        return;
+    }
     NSAlert* alert = [[NSAlert alloc] init];
     [alert setMessageText:title];
     [alert setInformativeText:message];
@@ -5067,6 +5089,7 @@ static NSString* FindBinaryPath(NSString* name, NSString* fallback) {
 }
 
 - (void)gitDiscardSelected:(id)sender {
+    if (self.isHeadless) return;
     NSInteger row = [self.gitChangesTableView selectedRow];
     if (row >= 0 && row < (NSInteger)self.gitChanges.count) {
         NSDictionary* item = self.gitChanges[row];
@@ -5595,7 +5618,12 @@ static NSString* FindBinaryPath(NSString* name, NSString* fallback) {
     _isHeadless = isHeadless;
     if (isHeadless) {
         self.externalControlEnabled = YES;
-        [(DietCodeControlServer*)self.controlServer start];
+        DietCodeControlServer* server = (DietCodeControlServer*)self.controlServer;
+        [server start];
+        if (!server.isRunning) {
+            NSLog(@"[Error] Failed to start DietCode control server in headless mode. Exiting.");
+            [NSApp terminate:nil];
+        }
     }
 }
 
@@ -6095,6 +6123,9 @@ static NSString* FindBinaryPath(NSString* name, NSString* fallback) {
 
 // UI Logging
 - (void)appendControlLogLine:(NSString*)line {
+    if (self.isHeadless) {
+        NSLog(@"%@", line);
+    }
     dispatch_async(dispatch_get_main_queue(), ^{
         NSTextStorage* storage = self.controlLogTextView.textStorage;
         [storage beginEditing];

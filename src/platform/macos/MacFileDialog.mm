@@ -5,6 +5,9 @@
 namespace dietcode::platform::macos {
 
 std::optional<std::filesystem::path> MacFileDialog::openFile() {
+    if ([NSApp activationPolicy] == NSApplicationActivationPolicyProhibited) {
+        return std::nullopt;
+    }
     NSOpenPanel* panel = [NSOpenPanel openPanel];
     [panel setCanChooseFiles:YES];
     [panel setCanChooseDirectories:NO];
@@ -24,6 +27,9 @@ std::optional<std::filesystem::path> MacFileDialog::openFile() {
 }
 
 std::optional<std::filesystem::path> MacFileDialog::saveFile() {
+    if ([NSApp activationPolicy] == NSApplicationActivationPolicyProhibited) {
+        return std::nullopt;
+    }
     NSSavePanel* panel = [NSSavePanel savePanel];
     [panel setCanCreateDirectories:YES];
     [panel setMessage:@"Choose where to save this file."];

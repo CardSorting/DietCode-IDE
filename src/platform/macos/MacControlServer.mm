@@ -19,7 +19,7 @@
 #include <string>
 #include <set>
 #include <map>
-#include <iomanip>
+#include <signal.h>
 
 namespace {
 static const NSUInteger kMaxRequestBytes = 1024 * 1024;
@@ -512,11 +512,22 @@ NSArray<NSString*>* ContextLines(const std::vector<std::string>& lines, NSIntege
 }
 }
 
+@interface DietCodeClientConnection : NSObject
+@property (nonatomic, assign) int fd;
+@property (nonatomic, assign) BOOL readEOF;
+@property (nonatomic, assign) NSInteger pendingRequestsCount;
+@end
+
+@implementation DietCodeClientConnection
+@end
+
 @interface DietCodeControlServer ()
 
 - (void)acceptLoop;
-- (void)handleClient:(int)clientFd;
-- (void)processRequest:(const std::string&)requestStr clientFd:(int)clientFd;
+- (void)handleClient:(DietCodeClientConnection*)conn;
+- (void)processRequest:(const std::string&)requestStr connection:(DietCodeClientConnection*)conn;
+- (void)markConnectionEOF:(DietCodeClientConnection*)conn;
+- (void)decrementPendingRequestsForConnection:(DietCodeClientConnection*)conn;
 - (NSString*)permissionLevelForMethod:(NSString*)method params:(NSDictionary*)params;
 - (void)executeMethod:(NSString*)method params:(NSDictionary*)params outResult:(NSDictionary**)outResult outErrCode:(NSString**)outErrCode outErrMsg:(NSString**)outErrMsg outPaths:(NSString**)outPaths;
 - (void)sendError:(NSString*)reqId code:(id)code message:(NSString*)message clientFd:(int)clientFd;
@@ -582,6 +593,7 @@ NSArray<NSString*>* ContextLines(const std::vector<std::string>& lines, NSIntege
     NSMutableDictionary<NSString*, NSMutableDictionary*>* _combos;
     NSInteger _comboCounter;
     NSMutableDictionary<NSString*, NSString*>* _pathLocks;
+    NSMutableDictionary<NSNumber*, DietCodeClientConnection*>* _activeConnections;
     NSString* _sessionToken;
     dispatch_queue_t _executionQueue;
     dispatch_queue_t _readQueue;
@@ -606,6 +618,7 @@ NSArray<NSString*>* ContextLines(const std::vector<std::string>& lines, NSIntege
         _combos = [NSMutableDictionary dictionary];
         _comboCounter = 0;
         _pathLocks = [NSMutableDictionary dictionary];
+        _activeConnections = [NSMutableDictionary dictionary];
         _sessionToken = nil;
         _executionQueue = dispatch_queue_create("com.dietcode.runtime.execution", DISPATCH_QUEUE_SERIAL);
         _readQueue = dispatch_queue_create("com.dietcode.runtime.read", DISPATCH_QUEUE_CONCURRENT);
@@ -800,6 +813,8 @@ NSArray<NSString*>* ContextLines(const std::vector<std::string>& lines, NSIntege
 - (void)start {
     if (_isRunning) return;
     
+    signal(SIGPIPE, SIG_IGN);
+    
     NSString* homeDir = NSHomeDirectory();
     NSString* dcDir = [homeDir stringByAppendingPathComponent:@".dietcode"];
     
@@ -818,8 +833,6 @@ NSArray<NSString*>* ContextLines(const std::vector<std::string>& lines, NSIntege
     NSString* sockPathStr = [dcDir stringByAppendingPathComponent:@"control.sock"];
     const char* sockPath = [sockPathStr UTF8String];
     
-    unlink(sockPath); // Delete stale socket if any
-    
     _serverFd = socket(AF_UNIX, SOCK_STREAM, 0);
     if (_serverFd < 0) {
         [self appendLogLine:@"[Error] Failed to create Unix socket."];
@@ -829,7 +842,15 @@ NSArray<NSString*>* ContextLines(const std::vector<std::string>& lines, NSIntege
     struct sockaddr_un addr;
     memset(&addr, 0, sizeof(addr));
     addr.sun_family = AF_UNIX;
+    if (strlen(sockPath) >= sizeof(addr.sun_path)) {
+        [self appendLogLine:[NSString stringWithFormat:@"[Error] Unix socket path is too long: %lu bytes (max %lu bytes). Can't bind.", strlen(sockPath), sizeof(addr.sun_path) - 1]];
+        close(_serverFd);
+        _serverFd = -1;
+        return;
+    }
     strncpy(addr.sun_path, sockPath, sizeof(addr.sun_path) - 1);
+    
+    unlink(sockPath); // Delete stale socket if any
     
     if (bind(_serverFd, (struct sockaddr*)&addr, sizeof(addr)) < 0) {
         [self appendLogLine:@"[Error] Failed to bind Unix socket."];
@@ -865,8 +886,16 @@ NSArray<NSString*>* ContextLines(const std::vector<std::string>& lines, NSIntege
         close(fd);
     }
     
-    NSString* sockPathStr = [[NSHomeDirectory() stringByAppendingPathComponent:@".dietcode"] stringByAppendingPathComponent:@"control.sock"];
-    unlink([sockPathStr UTF8String]);
+    @synchronized(self) {
+        for (NSNumber* fdNum in _activeConnections) {
+            DietCodeClientConnection* conn = _activeConnections[fdNum];
+            shutdown(conn.fd, SHUT_RDWR);
+        }
+    }
+    
+    NSString* dcDir = [NSHomeDirectory() stringByAppendingPathComponent:@".dietcode"];
+    unlink([[dcDir stringByAppendingPathComponent:@"control.sock"] UTF8String]);
+    unlink([[dcDir stringByAppendingPathComponent:@"session.token"] UTF8String]);
     
     [self appendLogLine:@"[System] External Control Server stopped."];
     [_windowController setControlActiveCommand:nil caller:nil];
@@ -883,8 +912,24 @@ NSArray<NSString*>* ContextLines(const std::vector<std::string>& lines, NSIntege
             continue;
         }
         
+        int optval = 1;
+        setsockopt(clientFd, SOL_SOCKET, SO_NOSIGPIPE, &optval, sizeof(optval));
+        
+        DietCodeClientConnection* conn = [[DietCodeClientConnection alloc] init];
+        conn.fd = clientFd;
+        conn.readEOF = NO;
+        conn.pendingRequestsCount = 0;
+        
+        @synchronized(self) {
+            if (!_isRunning) {
+                close(clientFd);
+                continue;
+            }
+            _activeConnections[@(clientFd)] = conn;
+        }
+        
         dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
-            [self handleClient:clientFd];
+            [self handleClient:conn];
         });
     }
 }
@@ -959,7 +1004,8 @@ NSArray<NSString*>* ContextLines(const std::vector<std::string>& lines, NSIntege
     return [self isReadQueueMethod:method] ? _readQueue : _executionQueue;
 }
 
-- (void)handleClient:(int)clientFd {
+- (void)handleClient:(DietCodeClientConnection*)conn {
+    int clientFd = conn.fd;
     std::string buffer;
     char readBuf[4096];
     
@@ -984,168 +1030,209 @@ NSArray<NSString*>* ContextLines(const std::vector<std::string>& lines, NSIntege
                 [self sendError:@"unknown" code:@"request_too_large" message:@"Request exceeds maximum allowed size." clientFd:clientFd];
                 continue;
             }
+            
+            @synchronized(self) {
+                conn.pendingRequestsCount++;
+            }
+            
             dispatch_async([self queueForRequestLine:line], ^{
-                [self processRequest:line clientFd:clientFd];
+                @autoreleasepool {
+                    [self processRequest:line connection:conn];
+                }
             });
         }
     }
-    close(clientFd);
+    
+    [self markConnectionEOF:conn];
 }
 
-- (void)processRequest:(const std::string&)requestStr clientFd:(int)clientFd {
-    auto startTime = std::chrono::high_resolution_clock::now();
-    if (requestStr.size() > kMaxRequestBytes) {
-        [self sendError:@"unknown" code:@"request_too_large" message:@"Request exceeds maximum allowed size." clientFd:clientFd];
-        [self logAuditMethod:@"invalid" caller:@"unknown" permission:@"none" duration:0 result:@"request_too_large" paths:@""];
-        return;
-    }
-    
-    NSData* reqData = [NSData dataWithBytes:requestStr.data() length:requestStr.size()];
-    NSError* jsonErr = nil;
-    id reqObj = [NSJSONSerialization JSONObjectWithData:reqData options:0 error:&jsonErr];
-    if (jsonErr || ![reqObj isKindOfClass:[NSDictionary class]]) {
-        [self sendError:@"unknown" code:@"invalid_request" message:@"Malformed JSON request object." clientFd:clientFd];
-        [self logAuditMethod:@"invalid" caller:@"unknown" permission:@"none" duration:0 result:@"failed" paths:@""];
-        return;
-    }
-    
-    NSDictionary* req = (NSDictionary*)reqObj;
-    NSString* reqId = RequestIdString(req[@"id"]);
-    id methodObj = req[@"method"];
-    if (![methodObj isKindOfClass:[NSString class]] || [methodObj length] == 0) {
-        [self sendError:reqId code:@"invalid_request" message:@"Malformed JSON or missing method." clientFd:clientFd];
-        [self logAuditMethod:@"invalid" caller:@"unknown" permission:@"none" duration:0 result:@"failed" paths:@""];
-        return;
-    }
-    NSString* method = (NSString*)methodObj;
-    id paramsObj = req[@"params"];
-    if (paramsObj && ![paramsObj isKindOfClass:[NSDictionary class]]) {
-        [self sendError:reqId code:@"invalid_params" message:@"params must be a JSON object." clientFd:clientFd];
-        [self logAuditMethod:method caller:@"unknown" permission:@"none" duration:0 result:@"invalid_params" paths:@""];
-        return;
-    }
-    NSDictionary* params = paramsObj ?: @{};
-    id schemaObj = req[@"schemaVersion"];
-    if (schemaObj && (![schemaObj isKindOfClass:[NSString class]] ||
-                      (![(NSString*)schemaObj isEqualToString:@"1.6"] && ![(NSString*)schemaObj isEqualToString:@"1.6.2"]))) {
-        [self sendError:reqId code:@"invalid_request" message:@"Unsupported RPC schemaVersion." clientFd:clientFd];
-        [self logAuditMethod:method caller:@"unknown" permission:@"none" duration:0 result:@"invalid_schema" paths:@""];
-        return;
-    }
-    
-    // Validate session token
-    id tokenObj = req[@"token"];
-    NSString* token = [tokenObj isKindOfClass:[NSString class]] ? (NSString*)tokenObj : nil;
-    if (!_sessionToken || !token || ![token isEqualToString:_sessionToken]) {
-        [self sendError:reqId code:@"permission_denied" message:@"Invalid or missing session token." clientFd:clientFd];
-        [self logAuditMethod:method caller:@"unknown" permission:@"none" duration:0 result:@"auth_failed" paths:@""];
-        return;
-    }
-    
-    NSString* caller = @"unix_socket";
-    NSString* permission = [self permissionLevelForMethod:method params:params];
-    dispatch_async(dispatch_get_main_queue(), ^{
-        [_windowController setControlActiveCommand:method caller:caller];
-    });
-    
-    __block BOOL allowed = YES;
-    if ([permission isEqualToString:@"Destructive"]) {
-        NSInteger autonomy = [self safeAgentAutonomyLevel];
-        if (autonomy == 1 || _windowController.isHeadless) {
-            allowed = YES;
-        } else if (autonomy == 2) {
-            allowed = [self isDestructiveRequestSafe:method params:params];
-        } else {
-            __block NSString* alertMsg = [NSString stringWithFormat:@"An external agent is requesting to execute a destructive command:\n\nMethod: %@\nParams: %@", method, params];
-            dispatch_semaphore_t sem = dispatch_semaphore_create(0);
-            dispatch_async(dispatch_get_main_queue(), ^{
-                NSAlert* alert = [[NSAlert alloc] init];
-                [alert setMessageText:@"External Control Confirmation"];
-                [alert setInformativeText:alertMsg];
-                [alert addButtonWithTitle:@"Allow"];
-                [alert addButtonWithTitle:@"Deny"];
-                NSModalResponse res = [alert runModal];
-                allowed = (res == NSAlertFirstButtonReturn);
-                dispatch_semaphore_signal(sem);
-            });
-            dispatch_semaphore_wait(sem, DISPATCH_TIME_FOREVER);
+- (void)markConnectionEOF:(DietCodeClientConnection*)conn {
+    BOOL shouldClose = NO;
+    @synchronized(self) {
+        conn.readEOF = YES;
+        if (conn.pendingRequestsCount == 0) {
+            shouldClose = YES;
+            [_activeConnections removeObjectForKey:@(conn.fd)];
         }
-    } else if ([permission isEqualToString:@"Execute"]) {
-        dispatch_async(dispatch_get_main_queue(), ^{
-            if ([method hasPrefix:@"terminal"]) {
-                [[self windowController] showBottomPanelTab:@"terminal"];
-            } else if ([method hasPrefix:@"language.lint"]) {
-                [[self windowController] showBottomPanelTab:@"errors"];
-            }
-        });
     }
-    
-    if (!allowed) {
-        [self sendError:reqId code:@"permission_denied" message:@"User rejected the command execution." clientFd:clientFd];
+    if (shouldClose) {
+        close(conn.fd);
+    }
+}
+
+- (void)decrementPendingRequestsForConnection:(DietCodeClientConnection*)conn {
+    BOOL shouldClose = NO;
+    @synchronized(self) {
+        conn.pendingRequestsCount--;
+        if (conn.readEOF && conn.pendingRequestsCount == 0) {
+            shouldClose = YES;
+            [_activeConnections removeObjectForKey:@(conn.fd)];
+        }
+    }
+    if (shouldClose) {
+        close(conn.fd);
+    }
+}
+
+- (void)processRequest:(const std::string&)requestStr connection:(DietCodeClientConnection*)conn {
+    @try {
+        int clientFd = conn.fd;
+        auto startTime = std::chrono::high_resolution_clock::now();
+        if (requestStr.size() > kMaxRequestBytes) {
+            [self sendError:@"unknown" code:@"request_too_large" message:@"Request exceeds maximum allowed size." clientFd:clientFd];
+            [self logAuditMethod:@"invalid" caller:@"unknown" permission:@"none" duration:0 result:@"request_too_large" paths:@""];
+            return;
+        }
+        
+        NSData* reqData = [NSData dataWithBytes:requestStr.data() length:requestStr.size()];
+        NSError* jsonErr = nil;
+        id reqObj = [NSJSONSerialization JSONObjectWithData:reqData options:0 error:&jsonErr];
+        if (jsonErr || ![reqObj isKindOfClass:[NSDictionary class]]) {
+            [self sendError:@"unknown" code:@"invalid_request" message:@"Malformed JSON request object." clientFd:clientFd];
+            [self logAuditMethod:@"invalid" caller:@"unknown" permission:@"none" duration:0 result:@"failed" paths:@""];
+            return;
+        }
+        
+        NSDictionary* req = (NSDictionary*)reqObj;
+        NSString* reqId = RequestIdString(req[@"id"]);
+        id methodObj = req[@"method"];
+        if (![methodObj isKindOfClass:[NSString class]] || [methodObj length] == 0) {
+            [self sendError:reqId code:@"invalid_request" message:@"Malformed JSON or missing method." clientFd:clientFd];
+            [self logAuditMethod:@"invalid" caller:@"unknown" permission:@"none" duration:0 result:@"failed" paths:@""];
+            return;
+        }
+        NSString* method = (NSString*)methodObj;
+        id paramsObj = req[@"params"];
+        if (paramsObj && ![paramsObj isKindOfClass:[NSDictionary class]]) {
+            [self sendError:reqId code:@"invalid_params" message:@"params must be a JSON object." clientFd:clientFd];
+            [self logAuditMethod:method caller:@"unknown" permission:@"none" duration:0 result:@"invalid_params" paths:@""];
+            return;
+        }
+        NSDictionary* params = paramsObj ?: @{};
+        id schemaObj = req[@"schemaVersion"];
+        if (schemaObj && (![schemaObj isKindOfClass:[NSString class]] ||
+                          (![(NSString*)schemaObj isEqualToString:@"1.6"] && ![(NSString*)schemaObj isEqualToString:@"1.6.2"]))) {
+            [self sendError:reqId code:@"invalid_request" message:@"Unsupported RPC schemaVersion." clientFd:clientFd];
+            [self logAuditMethod:method caller:@"unknown" permission:@"none" duration:0 result:@"invalid_schema" paths:@""];
+            return;
+        }
+        
+        // Validate session token
+        id tokenObj = req[@"token"];
+        NSString* token = [tokenObj isKindOfClass:[NSString class]] ? (NSString*)tokenObj : nil;
+        if (!_sessionToken || !token || ![token isEqualToString:_sessionToken]) {
+            [self sendError:reqId code:@"permission_denied" message:@"Invalid or missing session token." clientFd:clientFd];
+            [self logAuditMethod:method caller:@"unknown" permission:@"none" duration:0 result:@"auth_failed" paths:@""];
+            return;
+        }
+        
+        NSString* caller = @"unix_socket";
+        NSString* permission = [self permissionLevelForMethod:method params:params];
+        dispatch_async(dispatch_get_main_queue(), ^{
+            [_windowController setControlActiveCommand:method caller:caller];
+        });
+        
+        __block BOOL allowed = YES;
+        if ([permission isEqualToString:@"Destructive"]) {
+            NSInteger autonomy = [self safeAgentAutonomyLevel];
+            if (autonomy == 1 || _windowController.isHeadless) {
+                allowed = YES;
+            } else if (autonomy == 2) {
+                allowed = [self isDestructiveRequestSafe:method params:params];
+            } else {
+                __block NSString* alertMsg = [NSString stringWithFormat:@"An external agent is requesting to execute a destructive command:\n\nMethod: %@\nParams: %@", method, params];
+                dispatch_semaphore_t sem = dispatch_semaphore_create(0);
+                dispatch_async(dispatch_get_main_queue(), ^{
+                    NSAlert* alert = [[NSAlert alloc] init];
+                    [alert setMessageText:@"External Control Confirmation"];
+                    [alert setInformativeText:alertMsg];
+                    [alert addButtonWithTitle:@"Allow"];
+                    [alert addButtonWithTitle:@"Deny"];
+                    NSModalResponse res = [alert runModal];
+                    allowed = (res == NSAlertFirstButtonReturn);
+                    dispatch_semaphore_signal(sem);
+                });
+                dispatch_semaphore_wait(sem, DISPATCH_TIME_FOREVER);
+            }
+        } else if ([permission isEqualToString:@"Execute"]) {
+            dispatch_async(dispatch_get_main_queue(), ^{
+                if ([method hasPrefix:@"terminal"]) {
+                    [[self windowController] showBottomPanelTab:@"terminal"];
+                } else if ([method hasPrefix:@"language.lint"]) {
+                    [[self windowController] showBottomPanelTab:@"errors"];
+                }
+            });
+        }
+        
+        if (!allowed) {
+            [self sendError:reqId code:@"permission_denied" message:@"User rejected the command execution." clientFd:clientFd];
+            dispatch_async(dispatch_get_main_queue(), ^{
+                [_windowController setControlActiveCommand:nil caller:caller];
+            });
+            
+            auto endTime = std::chrono::high_resolution_clock::now();
+            auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(endTime - startTime).count();
+            [self logAuditMethod:method caller:caller permission:permission duration:duration result:@"rejected" paths:@""];
+            [self appendLogLine:[NSString stringWithFormat:@"[%@] %@ -> Rejected (user denied)", caller, method]];
+            return;
+        }
+        
+        __block NSDictionary* result = nil;
+        __block NSString* errCode = nil;
+        __block NSString* errMsg = nil;
+        __block NSString* affectedPaths = @"";
+        
+        // Check if the method runs on a worker queue or needs main-thread mutation APIs.
+        BOOL isBackgroundMethod = [method isEqualToString:@"verify.run"] ||
+                                  [self isReadQueueMethod:method] ||
+                                  [method isEqualToString:@"combo.run"] ||
+                                  [method isEqualToString:@"combo.status"] ||
+                                  [method isEqualToString:@"combo.result"] ||
+                                  [method isEqualToString:@"combo.cancel"] ||
+                                  [method isEqualToString:@"combo.rollback"] ||
+                                  [method isEqualToString:@"verify.last"] ||
+                                  [method isEqualToString:@"verify.status"] ||
+                                  [method isEqualToString:@"verify.failures"] ||
+                                  [method isEqualToString:@"context.snapshot"] ||
+                                  [method isEqualToString:@"context.delta"] ||
+                                  [method isEqualToString:@"task.start"] ||
+                                  [method isEqualToString:@"task.status"] ||
+                                  [method isEqualToString:@"task.result"] ||
+                                  [method isEqualToString:@"task.cancel"] ||
+                                  [method isEqualToString:@"task.step"] ||
+                                  [method isEqualToString:@"task.runLoop"] ||
+                                  [method isEqualToString:@"edit.plan"] ||
+                                  [method isEqualToString:@"edit.executePlan"];
+        
+        if (isBackgroundMethod) {
+            [self executeMethod:method params:params outResult:&result outErrCode:&errCode outErrMsg:&errMsg outPaths:&affectedPaths];
+        } else {
+            dispatch_semaphore_t execSem = dispatch_semaphore_create(0);
+            dispatch_async(dispatch_get_main_queue(), ^{
+                [self executeMethod:method params:params outResult:&result outErrCode:&errCode outErrMsg:&errMsg outPaths:&affectedPaths];
+                dispatch_semaphore_signal(execSem);
+            });
+            dispatch_semaphore_wait(execSem, DISPATCH_TIME_FOREVER);
+        }
+        
         dispatch_async(dispatch_get_main_queue(), ^{
             [_windowController setControlActiveCommand:nil caller:caller];
         });
         
         auto endTime = std::chrono::high_resolution_clock::now();
         auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(endTime - startTime).count();
-        [self logAuditMethod:method caller:caller permission:permission duration:duration result:@"rejected" paths:@""];
-        [self appendLogLine:[NSString stringWithFormat:@"[%@] %@ -> Rejected (user denied)", caller, method]];
-        return;
-    }
-    
-    __block NSDictionary* result = nil;
-    __block NSString* errCode = nil;
-    __block NSString* errMsg = nil;
-    __block NSString* affectedPaths = @"";
-    
-    // Check if the method runs on a worker queue or needs main-thread mutation APIs.
-    BOOL isBackgroundMethod = [method isEqualToString:@"verify.run"] ||
-                              [self isReadQueueMethod:method] ||
-                              [method isEqualToString:@"combo.run"] ||
-                              [method isEqualToString:@"combo.status"] ||
-                              [method isEqualToString:@"combo.result"] ||
-                              [method isEqualToString:@"combo.cancel"] ||
-                              [method isEqualToString:@"combo.rollback"] ||
-                              [method isEqualToString:@"verify.last"] ||
-                              [method isEqualToString:@"verify.status"] ||
-                              [method isEqualToString:@"verify.failures"] ||
-                              [method isEqualToString:@"context.snapshot"] ||
-                              [method isEqualToString:@"context.delta"] ||
-                              [method isEqualToString:@"task.start"] ||
-                              [method isEqualToString:@"task.status"] ||
-                              [method isEqualToString:@"task.result"] ||
-                              [method isEqualToString:@"task.cancel"] ||
-                              [method isEqualToString:@"task.step"] ||
-                              [method isEqualToString:@"task.runLoop"] ||
-                              [method isEqualToString:@"edit.plan"] ||
-                              [method isEqualToString:@"edit.executePlan"];
-    
-    if (isBackgroundMethod) {
-        [self executeMethod:method params:params outResult:&result outErrCode:&errCode outErrMsg:&errMsg outPaths:&affectedPaths];
-    } else {
-        dispatch_semaphore_t execSem = dispatch_semaphore_create(0);
-        dispatch_async(dispatch_get_main_queue(), ^{
-            [self executeMethod:method params:params outResult:&result outErrCode:&errCode outErrMsg:&errMsg outPaths:&affectedPaths];
-            dispatch_semaphore_signal(execSem);
-        });
-        dispatch_semaphore_wait(execSem, DISPATCH_TIME_FOREVER);
-    }
-    
-    dispatch_async(dispatch_get_main_queue(), ^{
-        [_windowController setControlActiveCommand:nil caller:caller];
-    });
-    
-    auto endTime = std::chrono::high_resolution_clock::now();
-    auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(endTime - startTime).count();
-    
-    if (errCode) {
-        [self sendError:reqId code:errCode message:errMsg clientFd:clientFd];
-        [self logAuditMethod:method caller:caller permission:permission duration:duration result:[NSString stringWithFormat:@"error: %@", errCode] paths:affectedPaths];
-        [self appendLogLine:[NSString stringWithFormat:@"[%@] %@ -> Error (%@) in %lldms", caller, method, errMsg, duration]];
-    } else {
-        [self sendSuccess:reqId result:result clientFd:clientFd];
-        [self logAuditMethod:method caller:caller permission:permission duration:duration result:@"success" paths:affectedPaths];
-        [self appendLogLine:[NSString stringWithFormat:@"[%@] %@ -> Success in %lldms", caller, method, duration]];
+        
+        if (errCode) {
+            [self sendError:reqId code:errCode message:errMsg clientFd:clientFd];
+            [self logAuditMethod:method caller:caller permission:permission duration:duration result:[NSString stringWithFormat:@"error: %@", errCode] paths:affectedPaths];
+            [self appendLogLine:[NSString stringWithFormat:@"[%@] %@ -> Error (%@) in %lldms", caller, method, errMsg, duration]];
+        } else {
+            [self sendSuccess:reqId result:result clientFd:clientFd];
+            [self logAuditMethod:method caller:caller permission:permission duration:duration result:@"success" paths:affectedPaths];
+            [self appendLogLine:[NSString stringWithFormat:@"[%@] %@ -> Success in %lldms", caller, method, duration]];
+        }
+    } @finally {
+        [self decrementPendingRequestsForConnection:conn];
     }
 }
 
