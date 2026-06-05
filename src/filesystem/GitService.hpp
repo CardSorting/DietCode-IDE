@@ -19,9 +19,9 @@ struct GitStatusResult {
 class GitService {
 public:
     static GitStatusResult getStatus(const std::string& workspacePath);
-    static bool stageFile(const std::string& workspacePath, const std::string& relativePath);
-    static bool unstageFile(const std::string& workspacePath, const std::string& relativePath);
-    static bool discardChanges(const std::string& workspacePath, const std::string& relativePath);
+    static bool stageFile(const std::string& workspacePath, const std::string& relativePath, std::string& errorOut);
+    static bool unstageFile(const std::string& workspacePath, const std::string& relativePath, std::string& errorOut);
+    static bool discardChanges(const std::string& workspacePath, const std::string& relativePath, std::string& errorOut);
     static std::string getDiff(const std::string& workspacePath, const std::string& relativePath, bool staged);
     static bool commit(const std::string& workspacePath, const std::string& message, std::string& errorOut);
 };

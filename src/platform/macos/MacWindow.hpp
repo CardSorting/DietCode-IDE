@@ -49,7 +49,7 @@
 
 // Terminal
 - (pid_t)terminalPid;
-- (void)runTerminalCommand:(NSString*)command cwd:(NSString*)cwd show:(BOOL)show;
+- (BOOL)runTerminalCommand:(NSString*)command cwd:(NSString*)cwd show:(BOOL)show errorOut:(NSString**)errorOut;
 - (void)stopTerminalCommand;
 - (NSString*)terminalOutput;
 - (void)clearTerminalOutput;
@@ -57,10 +57,13 @@
 // Git
 - (NSDictionary*)gitStatusInfo;
 - (NSString*)gitDiffForFile:(NSString*)path;
-- (BOOL)gitStageFile:(NSString*)path;
-- (BOOL)gitUnstageFile:(NSString*)path;
-- (BOOL)gitDiscardFile:(NSString*)path;
+- (BOOL)gitStageFile:(NSString*)path errorOut:(NSString**)errorOut;
+- (BOOL)gitUnstageFile:(NSString*)path errorOut:(NSString**)errorOut;
+- (BOOL)gitDiscardFile:(NSString*)path errorOut:(NSString**)errorOut;
 - (BOOL)gitCommitWithMessage:(NSString*)message errorOut:(NSString**)errorOut;
+
+// File I/O (agent-facing)
+- (BOOL)writeFileAtPath:(NSString*)path content:(NSString*)content errorOut:(NSString**)errorOut;
 
 // Problems
 - (NSArray<NSDictionary*>*)problemsList;

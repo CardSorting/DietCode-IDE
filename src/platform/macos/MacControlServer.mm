@@ -257,11 +257,17 @@ NSString* RunGitOutput(NSString* cwd, NSArray<NSString*>* args) {
 
 NSString* ISODateString(NSDate* date) {
     if (!date) return @"";
-    NSDateFormatter* formatter = [[NSDateFormatter alloc] init];
-    formatter.locale = [NSLocale localeWithLocaleIdentifier:@"en_US_POSIX"];
-    formatter.timeZone = [NSTimeZone timeZoneForSecondsFromGMT:0];
-    formatter.dateFormat = @"yyyy-MM-dd'T'HH:mm:ss'Z'";
-    return [formatter stringFromDate:date];
+    static NSDateFormatter* formatter = nil;
+    static dispatch_once_t onceToken;
+    dispatch_once(&onceToken, ^{
+        formatter = [[NSDateFormatter alloc] init];
+        formatter.locale = [NSLocale localeWithLocaleIdentifier:@"en_US_POSIX"];
+        formatter.timeZone = [NSTimeZone timeZoneForSecondsFromGMT:0];
+        formatter.dateFormat = @"yyyy-MM-dd'T'HH:mm:ss'Z'";
+    });
+    @synchronized(formatter) {
+        return [formatter stringFromDate:date];
+    }
 }
 
 NSString* StableHashForData(NSData* data) {
@@ -278,6 +284,33 @@ NSString* StableHashForData(NSData* data) {
 NSString* StableHashForString(NSString* text) {
     NSData* data = [(text ?: @"") dataUsingEncoding:NSUTF8StringEncoding] ?: [NSData data];
     return StableHashForData(data);
+}
+
+NSArray<NSString*>* DefaultVerifyCommands(void) {
+    return @[@"make test", @"make app", @"git diff --check"];
+}
+
+NSArray<NSString*>* VerifyCommandsAllowlist(void) {
+    NSArray* configured = [[NSUserDefaults standardUserDefaults] stringArrayForKey:@"AgentVerifyCommands"];
+    if (configured.count == 0) {
+        return DefaultVerifyCommands();
+    }
+    NSMutableArray* commands = [NSMutableArray array];
+    for (NSString* command in configured) {
+        if ([command isKindOfClass:[NSString class]] && command.length > 0) {
+            [commands addObject:command];
+        }
+    }
+    return commands.count > 0 ? commands : DefaultVerifyCommands();
+}
+
+BOOL VerifyCommandIsAllowed(NSString* command, NSArray<NSString*>* allowedCommands) {
+    for (NSString* allowed in allowedCommands) {
+        if ([command isEqualToString:allowed] || [command hasPrefix:[allowed stringByAppendingString:@" "]]) {
+            return YES;
+        }
+    }
+    return NO;
 }
 
 NSString* SHA256ForData(NSData* data) {
@@ -509,6 +542,7 @@ NSArray<NSString*>* ContextLines(const std::vector<std::string>& lines, NSIntege
     NSMutableDictionary<NSString*, NSString*>* _pathLocks;
     NSString* _sessionToken;
     dispatch_queue_t _executionQueue;
+    dispatch_queue_t _readQueue;
     BOOL _globalMutationLock;
     NSDictionary* _lastVerifyStatus;
     NSString* _lastComboId;
@@ -532,6 +566,7 @@ NSArray<NSString*>* ContextLines(const std::vector<std::string>& lines, NSIntege
         _pathLocks = [NSMutableDictionary dictionary];
         _sessionToken = nil;
         _executionQueue = dispatch_queue_create("com.dietcode.runtime.execution", DISPATCH_QUEUE_SERIAL);
+        _readQueue = dispatch_queue_create("com.dietcode.runtime.read", DISPATCH_QUEUE_CONCURRENT);
         _globalMutationLock = NO;
         _lastVerifyStatus = @{
             @"command": @"",
@@ -612,11 +647,11 @@ NSArray<NSString*>* ContextLines(const std::vector<std::string>& lines, NSIntege
 
 - (NSArray*)safeOpenTabs {
     if ([NSThread isMainThread]) {
-        return _windowController.openTabs;
+        return [_windowController.openTabs copy];
     }
     __block NSArray* res = nil;
     dispatch_sync(dispatch_get_main_queue(), ^{
-        res = _windowController.openTabs;
+        res = [_windowController.openTabs copy];
     });
     return res;
 }
@@ -735,6 +770,48 @@ NSArray<NSString*>* ContextLines(const std::vector<std::string>& lines, NSIntege
     }
 }
 
+- (BOOL)isReadQueueMethod:(NSString*)method {
+    static NSSet<NSString*>* readMethods = nil;
+    static dispatch_once_t onceToken;
+    dispatch_once(&onceToken, ^{
+        readMethods = [NSSet setWithArray:@[
+            @"workspace.grep",
+            @"search.text",
+            @"search.files",
+            @"workspace.listFiles",
+            @"recovery.scan",
+            @"file.read",
+            @"file.readRange",
+            @"file.readAround",
+            @"file.getChunks",
+            @"file.stat",
+            @"git.status",
+            @"git.diff",
+            @"analysis.workspaceSummary",
+            @"analysis.searchRanked",
+            @"analysis.fileSummary",
+            @"analysis.relatedFiles",
+            @"symbols.document",
+            @"symbols.outline",
+            @"symbols.activeDocument",
+            @"symbols.references",
+            @"editor.getActiveFile",
+            @"editor.getOpenFiles",
+            @"editor.getText",
+            @"session.info",
+            @"session.workflowState"
+        ]];
+    });
+    return [readMethods containsObject:method];
+}
+
+- (dispatch_queue_t)queueForRequestLine:(const std::string&)line {
+    NSData* data = [NSData dataWithBytes:line.data() length:line.size()];
+    NSDictionary* req = [NSJSONSerialization JSONObjectWithData:data options:0 error:nil];
+    NSString* method = [req isKindOfClass:[NSDictionary class]] ? req[@"method"] : nil;
+    return [self isReadQueueMethod:method] ? _readQueue : _executionQueue;
+}
+
 - (void)handleClient:(int)clientFd {
     std::string buffer;
     char readBuf[4096];
@@ -760,7 +837,7 @@ NSArray<NSString*>* ContextLines(const std::vector<std::string>& lines, NSIntege
                 [self sendError:@"unknown" code:@"request_too_large" message:@"Request exceeds maximum allowed size." clientFd:clientFd];
                 continue;
             }
-            dispatch_async(_executionQueue, ^{
+            dispatch_async([self queueForRequestLine:line], ^{
                 [self processRequest:line clientFd:clientFd];
             });
         }
@@ -949,6 +1026,8 @@ NSArray<NSString*>* ContextLines(const std::vector<std::string>& lines, NSIntege
             @{ @"name": @"file.readAround", @"permission": @"Read", @"params": @{ @"path": @"string", @"line": @"number", @"before": @"number optional", @"after": @"number optional" }, @"returns": @{ @"text": @"string" } },
             @{ @"name": @"file.getChunks", @"permission": @"Read", @"params": @{ @"path": @"string", @"chunkSize": @"number optional" }, @"returns": @{ @"chunks": @"array" } },
             @{ @"name": @"file.stat", @"permission": @"Read", @"params": @{ @"path": @"string" }, @"returns": @{ @"path": @"string", @"sizeBytes": @"number", @"lineCount": @"number" } },
+            @{ @"name": @"file.write", @"permission": @"Edit", @"params": @{ @"path": @"string", @"content": @"string" }, @"returns": @{ @"written": @"boolean" } },
+            @{ @"name": @"file.create", @"permission": @"Edit", @"params": @{ @"path": @"string", @"content": @"string" }, @"returns": @{ @"created": @"boolean" } },
             @{ @"name": @"editor.getActiveFile", @"permission": @"Read", @"params": @{}, @"returns": @{ @"path": @"string" } },
             @{ @"name": @"editor.getOpenFiles", @"permission": @"Read", @"params": @{}, @"returns": @{ @"files": @"array" } },
             @{ @"name": @"editor.getText", @"permission": @"Read", @"params": @{ @"path": @"string optional" }, @"returns": @{ @"text": @"string" } },
@@ -992,7 +1071,7 @@ NSArray<NSString*>* ContextLines(const std::vector<std::string>& lines, NSIntege
             @{ @"name": @"changes.current", @"permission": @"Read", @"params": @{}, @"returns": @{ @"modifiedFiles": @"array", @"unsavedBuffers": @"array", @"stagedFiles": @"array", @"unstagedFiles": @"array" } },
             @{ @"name": @"changes.summary", @"permission": @"Read", @"params": @{}, @"returns": @{ @"summary": @"object" } },
             @{ @"name": @"changes.revertFile", @"permission": @"Destructive", @"params": @{ @"path": @"string" }, @"returns": @{ @"reverted": @"boolean" } },
-            @{ @"name": @"verify.run", @"permission": @"Execute", @"params": @{ @"command": @"make test | make app | git diff --check" }, @"returns": @{ @"started": @"boolean" } },
+            @{ @"name": @"verify.run", @"permission": @"Execute", @"params": @{ @"command": @"string configured by AgentVerifyCommands" }, @"returns": @{ @"started": @"boolean" } },
             @{ @"name": @"verify.last", @"permission": @"Read", @"params": @{}, @"returns": @{ @"command": @"string", @"status": @"object" } },
             @{ @"name": @"verify.status", @"permission": @"Read", @"params": @{}, @"returns": @{ @"status": @"object" } },
             @{ @"name": @"verify.failures", @"permission": @"Read", @"params": @{}, @"returns": @{ @"failures": @"array", @"problems": @"array" } },
@@ -1068,6 +1147,8 @@ NSArray<NSString*>* ContextLines(const std::vector<std::string>& lines, NSIntege
             @{ @"name": @"patch.preview", @"version": @1, @"category": @"read", @"permission": @"read", @"deterministic": @YES, @"idempotency": @"conditionally_idempotent", @"sideEffects": @{ @"readsWorkspace": @YES, @"writesWorkspace": @NO, @"runsProcess": @NO, @"usesTerminal": @NO }, @"rollback": @{ @"supported": @NO }, @"requiredParams": @[@"path", @"patch"] },
             @{ @"name": @"patch.apply", @"version": @1, @"category": @"mutation", @"permission": @"edit", @"deterministic": @YES, @"idempotency": @"non_idempotent", @"sideEffects": @{ @"readsWorkspace": @YES, @"writesWorkspace": @YES, @"runsProcess": @NO, @"usesTerminal": @NO, @"mayModifyBuffers": @YES }, @"rollback": @{ @"supported": @YES, @"kind": @"content_preimage", @"conflictPolicy": @"fail_closed" }, @"requiredParams": @[@"path", @"patch"] },
             @{ @"name": @"patch.applyBatch", @"version": @1, @"category": @"mutation", @"permission": @"edit", @"deterministic": @YES, @"idempotency": @"non_idempotent", @"sideEffects": @{ @"readsWorkspace": @YES, @"writesWorkspace": @YES, @"runsProcess": @NO, @"usesTerminal": @NO, @"mayModifyBuffers": @YES }, @"rollback": @{ @"supported": @YES, @"kind": @"content_preimage", @"conflictPolicy": @"fail_closed" }, @"requiredParams": @[@"patches"] },
+            @{ @"name": @"file.write", @"version": @1, @"category": @"mutation", @"permission": @"edit", @"deterministic": @YES, @"idempotency": @"conditionally_idempotent", @"sideEffects": @{ @"readsWorkspace": @YES, @"writesWorkspace": @YES, @"runsProcess": @NO, @"usesTerminal": @NO, @"mayModifyBuffers": @YES }, @"rollback": @{ @"supported": @YES, @"kind": @"content_preimage", @"conflictPolicy": @"fail_closed" }, @"requiredParams": @[@"path", @"content"] },
+            @{ @"name": @"file.create", @"version": @1, @"category": @"mutation", @"permission": @"edit", @"deterministic": @YES, @"idempotency": @"conditionally_idempotent", @"sideEffects": @{ @"readsWorkspace": @YES, @"writesWorkspace": @YES, @"runsProcess": @NO, @"usesTerminal": @NO, @"mayModifyBuffers": @YES }, @"rollback": @{ @"supported": @YES, @"kind": @"content_preimage", @"conflictPolicy": @"fail_closed" }, @"requiredParams": @[@"path", @"content"] },
             @{ @"name": @"diff.summary", @"version": @1, @"category": @"read", @"permission": @"read", @"deterministic": @YES, @"idempotency": @"conditionally_idempotent", @"sideEffects": @{ @"readsWorkspace": @YES, @"writesWorkspace": @NO, @"runsProcess": @NO, @"usesTerminal": @NO }, @"rollback": @{ @"supported": @NO }, @"requiredParams": @[] },
             @{ @"name": @"diff.current", @"version": @1, @"category": @"read", @"permission": @"read", @"deterministic": @YES, @"idempotency": @"conditionally_idempotent", @"sideEffects": @{ @"readsWorkspace": @YES, @"writesWorkspace": @NO, @"runsProcess": @NO, @"usesTerminal": @NO }, @"rollback": @{ @"supported": @NO }, @"requiredParams": @[] },
             @{ @"name": @"verify.run", @"version": @1, @"category": @"execute", @"permission": @"execute", @"deterministic": @NO, @"idempotency": @"non_idempotent", @"sideEffects": @{ @"readsWorkspace": @YES, @"writesWorkspace": @YES, @"runsProcess": @YES, @"usesTerminal": @YES }, @"rollback": @{ @"supported": @NO }, @"requiredParams": @[@"command"] },
@@ -2837,24 +2918,24 @@ static BOOL IsTextBinary(NSString* text) {
 }
 
 - (NSDictionary*)currentChangesInfo {
-    NSString* ws = [_windowController workspacePath] ?: @"";
-    NSDictionary* git = [_windowController gitStatusInfo] ?: @{};
+    NSString* ws = [self safeWorkspacePath] ?: @"";
+    NSDictionary* git = [self safeGitStatusInfo] ?: @{};
     NSDictionary* diffInfo = ws.length > 0 ? [DietCodeDiffAnalysisService workspaceDiffInfo:ws] : @{};
     NSMutableArray* files = [NSMutableArray array];
 
     for (NSDictionary* file in diffInfo[@"files"] ?: @[]) {
         NSString* relPath = file[@"path"] ?: @"";
         NSString* absPath = AbsolutePathForRPCPath(relPath, ws);
-        NSString* text = [_windowController textForFileAtPath:absPath] ?: @"";
+        NSString* text = [self safeTextForFileAtPath:absPath] ?: @"";
         NSArray* symbols = text.length > 0 ? [DietCodeSymbolIndexService symbolsForFileContent:text extension:[[absPath pathExtension] lowercaseString]] : @[];
-        NSString* diff = [_windowController gitDiffForFile:absPath] ?: @"";
+        NSString* diff = [self safeGitDiffForFile:absPath] ?: @"";
         NSMutableDictionary* enriched = [file mutableCopy];
         enriched[@"absolutePath"] = absPath ?: @"";
         enriched[@"affectedSymbols"] = AffectedSymbolsForPatch(diff, symbols);
         [files addObject:enriched];
     }
 
-    NSArray* dirtyFiles = DirtyFilePathsFromTabs(_windowController.openTabs ?: @[]);
+    NSArray* dirtyFiles = DirtyFilePathsFromTabs([self safeOpenTabs] ?: @[]);
     NSMutableArray* unsaved = [NSMutableArray array];
     for (NSString* dirtyPath in dirtyFiles) {
         [unsaved addObject:@{ @"path": dirtyPath }];
@@ -2965,7 +3046,7 @@ static BOOL IsTextBinary(NSString* text) {
     return @{
         @"activeFile": [_windowController activeFilePath] ?: @"",
         @"openFiles": [_windowController openFilePaths] ?: @[],
-        @"dirtyFiles": DirtyFilePathsFromTabs(_windowController.openTabs ?: @[]),
+        @"dirtyFiles": DirtyFilePathsFromTabs([self safeOpenTabs] ?: @[]),
         @"currentBranch": git[@"branch"] ?: @"",
         @"recentSearches": _windowController.sessionLastSearches ?: @[],
         @"recentCommands": _windowController.sessionRecentCommands ?: @[],
@@ -3010,6 +3091,7 @@ static BOOL IsTextBinary(NSString* text) {
         NSString* beforeText = record[@"beforeText"];
         NSString* expectedPostHash = record[@"postHash"];
         NSString* beforeHash = record[@"beforeHash"];
+        BOOL existedBefore = record[@"existed"] ? [record[@"existed"] boolValue] : YES;
         
         if (!path || beforeText == nil) {
             if (errorOut) *errorOut = @"Cannot restore patch because a target buffer record is invalid.";
@@ -3023,17 +3105,17 @@ static BOOL IsTextBinary(NSString* text) {
         }
         
         NSString* currentText = [_windowController textForFileAtPath:absPath];
-        if (currentText == nil) {
+        if (currentText == nil && existedBefore) {
             if (errorOut) *errorOut = [NSString stringWithFormat:@"Cannot restore patch because target buffer is unavailable: %@", path];
             return NO;
         }
         
-        if (IsTextBinary(currentText)) {
+        if (currentText != nil && IsTextBinary(currentText)) {
             if (errorOut) *errorOut = [NSString stringWithFormat:@"File is binary: %@", path];
             return NO;
         }
         
-        if (expectedPostHash.length > 0 && ![StableHashForString(currentText) isEqualToString:expectedPostHash]) {
+        if (currentText != nil && expectedPostHash.length > 0 && ![StableHashForString(currentText) isEqualToString:expectedPostHash]) {
             if (errorOut) *errorOut = [NSString stringWithFormat:@"Rollback conflict for %@: current buffer no longer matches the expected postimage.", path];
             return NO;
         }
@@ -3049,9 +3131,21 @@ static BOOL IsTextBinary(NSString* text) {
         NSString* path = record[@"path"];
         NSString* beforeText = record[@"beforeText"];
         NSString* absPath = AbsolutePathForRPCPath(path, ws);
+        BOOL existedBefore = record[@"existed"] ? [record[@"existed"] boolValue] : YES;
+        if (!existedBefore) {
+            NSError* deleteErr = nil;
+            if ([[NSFileManager defaultManager] fileExistsAtPath:absPath] &&
+                ![[NSFileManager defaultManager] removeItemAtPath:absPath error:&deleteErr]) {
+                if (errorOut) *errorOut = [NSString stringWithFormat:@"Failed to remove created file %@: %@", path, deleteErr.localizedDescription];
+                return NO;
+            }
+            continue;
+        }
         NSString* currentText = [_windowController textForFileAtPath:absPath];
-        BOOL ok = [self safeReplaceTextInRange:NSMakeRange(0, currentText.length) withText:beforeText forFileAtPath:absPath];
-        if (!ok) {
+        BOOL ok = currentText != nil && [self safeReplaceTextInRange:NSMakeRange(0, currentText.length) withText:beforeText forFileAtPath:absPath];
+        NSError* writeErr = nil;
+        BOOL writeOk = [beforeText writeToFile:absPath atomically:YES encoding:NSUTF8StringEncoding error:&writeErr];
+        if (!ok && !writeOk) {
             if (errorOut) *errorOut = [NSString stringWithFormat:@"Failed to restore %@", path];
             return NO;
         }
@@ -3078,7 +3172,7 @@ static BOOL IsTextBinary(NSString* text) {
 - (BOOL)dirtyBufferExistsAtPath:(NSString*)path {
     NSString* ws = [_windowController workspacePath];
     NSString* absPath = AbsolutePathForRPCPath(path, ws);
-    for (id tab in _windowController.openTabs ?: @[]) {
+    for (id tab in [self safeOpenTabs] ?: @[]) {
         NSString* tabPath = [tab valueForKey:@"path"];
         BOOL dirty = [[tab valueForKey:@"dirty"] boolValue];
         if (dirty && [tabPath isEqualToString:absPath]) return YES;
@@ -3162,6 +3256,8 @@ static BOOL IsTextBinary(NSString* text) {
     if ([type isEqualToString:@"searchText"]) return @{ @"method": @"search.text", @"params": step };
     if ([type isEqualToString:@"patch"]) return @{ @"method": @"patch.apply", @"params": step };
     if ([type isEqualToString:@"patchBatch"]) return @{ @"method": @"patch.applyBatch", @"params": step };
+    if ([type isEqualToString:@"write"]) return @{ @"method": @"file.write", @"params": step };
+    if ([type isEqualToString:@"create"]) return @{ @"method": @"file.create", @"params": step };
     if ([type isEqualToString:@"verify"]) return @{ @"method": @"verify.run", @"params": step };
     if ([type isEqualToString:@"diffSummary"]) return @{ @"method": @"diff.summary", @"params": @{} };
     if ([type isEqualToString:@"failures"]) return @{ @"method": @"verify.failures", @"params": @{} };
@@ -3289,6 +3385,8 @@ static BOOL IsTextBinary(NSString* text) {
         [method isEqualToString:@"editor.applyPatch"] || 
         [method isEqualToString:@"patch.apply"] ||
         [method isEqualToString:@"patch.applyBatch"] ||
+        [method isEqualToString:@"file.write"] ||
+        [method isEqualToString:@"file.create"] ||
         [method isEqualToString:@"patch.revertLast"] ||
         [method isEqualToString:@"combo.rollback"] ||
         [method isEqualToString:@"task.step"] ||
@@ -3624,7 +3722,10 @@ static BOOL IsTextBinary(NSString* text) {
         std::error_code ec;
         
         int fileCount = 0;
-        for (const auto& entry : std::filesystem::recursive_directory_iterator(folder, ec)) {
+        std::filesystem::recursive_directory_iterator it(folder, ec);
+        std::filesystem::recursive_directory_iterator end;
+        for (; it != end && !ec; it.increment(ec)) {
+            const auto& entry = *it;
             if (fileCount >= 1000) break;
             
             std::filesystem::path p = entry.path();
@@ -3632,6 +3733,9 @@ static BOOL IsTextBinary(NSString* text) {
             
             if (filename == ".git" || filename == "build" || filename == "dist" || 
                 filename == "node_modules" || filename == "DerivedData") {
+                if (entry.is_directory(ec)) {
+                    it.disable_recursion_pending();
+                }
                 continue;
             }
             
@@ -3685,12 +3789,18 @@ static BOOL IsTextBinary(NSString* text) {
         NSMutableArray* matches = [NSMutableArray array];
         
         std::error_code ec;
-        for (const auto& entry : std::filesystem::recursive_directory_iterator(folder, ec)) {
+        std::filesystem::recursive_directory_iterator it(folder, ec);
+        std::filesystem::recursive_directory_iterator end;
+        for (; it != end && !ec; it.increment(ec)) {
+            const auto& entry = *it;
             if (matches.count >= (NSUInteger)maxResults) break;
-            
+            std::filesystem::path p = entry.path();
+            std::string filename = p.filename().string();
+            if (entry.is_directory(ec) && (filename == ".git" || filename == "node_modules" || filename == "build" || filename == "dist" || filename == "DerivedData")) {
+                it.disable_recursion_pending();
+                continue;
+            }
             if (entry.is_regular_file()) {
-                std::filesystem::path p = entry.path();
-                std::string filename = p.filename().string();
                 std::string relPath = std::filesystem::relative(p, folder).string();
                 
                 BOOL skip = false;
@@ -3716,7 +3826,7 @@ static BOOL IsTextBinary(NSString* text) {
                     if (!matchesInclude) continue;
                 }
                 
-                NSString* readRes = [_windowController textForFileAtPath:NSStringFromStdString(p.string())];
+                NSString* readRes = [self safeTextForFileAtPath:NSStringFromStdString(p.string())];
                 if (readRes) {
                     std::string content = StdStringFromNSString(readRes);
                     std::istringstream stream(content);
@@ -3764,6 +3874,11 @@ static BOOL IsTextBinary(NSString* text) {
         if (!absPath) {
             *outErrCode = @"invalid_params";
             *outErrMsg = @"path parameter required.";
+            return;
+        }
+        if (![[NSFileManager defaultManager] fileExistsAtPath:absPath]) {
+            *outErrCode = @"not_found";
+            *outErrMsg = [NSString stringWithFormat:@"File does not exist: %@", absPath];
             return;
         }
         [_windowController openFileAtPath:absPath line:1 column:1];
@@ -4025,6 +4140,58 @@ static BOOL IsTextBinary(NSString* text) {
             *outResult = @{ @"path": targetPath, @"chunks": chunks };
             return;
         }
+    }
+
+    if ([method isEqualToString:@"file.write"] || [method isEqualToString:@"file.create"]) {
+        NSString* ws = [_windowController workspacePath];
+        NSString* targetPath = AbsolutePathForRPCPath(params[@"path"], ws);
+        NSString* content = params[@"content"];
+        if (targetPath.length == 0 || ![content isKindOfClass:[NSString class]]) {
+            *outErrCode = @"invalid_params";
+            *outErrMsg = @"path and content parameters required.";
+            return;
+        }
+        if (!PathIsInsideWorkspace(targetPath, ws)) {
+            *outErrCode = @"outside_workspace";
+            *outErrMsg = @"Target path must be inside workspace.";
+            return;
+        }
+        NSUInteger contentBytes = [content lengthOfBytesUsingEncoding:NSUTF8StringEncoding];
+        if (contentBytes > kMaxFileTextBytes) {
+            *outErrCode = @"file_too_large";
+            *outErrMsg = @"Content exceeds write cap.";
+            return;
+        }
+        BOOL existed = [[NSFileManager defaultManager] fileExistsAtPath:targetPath];
+        if ([method isEqualToString:@"file.create"] && existed) {
+            *outErrCode = @"already_exists";
+            *outErrMsg = [NSString stringWithFormat:@"File already exists: %@", targetPath];
+            return;
+        }
+        NSString* beforeText = existed ? [_windowController textForFileAtPath:targetPath] : @"";
+        if (existed && beforeText == nil) {
+            *outErrCode = @"invalid_request";
+            *outErrMsg = @"Existing file is not readable as UTF-8 text.";
+            return;
+        }
+        NSString* errStr = nil;
+        BOOL ok = [_windowController writeFileAtPath:targetPath content:content errorOut:&errStr];
+        if (!ok) {
+            *outErrCode = @"write_failed";
+            *outErrMsg = errStr ?: @"Failed to write file.";
+            return;
+        }
+        NSString* afterText = [_windowController textForFileAtPath:targetPath] ?: content;
+        [self recordLastRPCPatchPaths:@[@{
+            @"path": targetPath,
+            @"beforeText": beforeText ?: @"",
+            @"beforeHash": StableHashForString(beforeText ?: @""),
+            @"postHash": StableHashForString(afterText ?: @""),
+            @"existed": @(existed)
+        }]];
+        NSString* key = [method isEqualToString:@"file.create"] ? @"created" : @"written";
+        *outResult = @{ key: @YES, @"path": targetPath, @"sizeBytes": @(contentBytes) };
+        return;
     }
     
     // Editor commands
@@ -4425,7 +4592,7 @@ static BOOL IsTextBinary(NSString* text) {
             @"changes": [self currentChangesInfo],
             @"unstagedDiff": RunGitOutput(ws, @[@"diff"]),
             @"stagedDiff": RunGitOutput(ws, @[@"diff", @"--cached"]),
-            @"unsavedBuffers": [DietCodeBufferStateService snapshotForTabs:_windowController.openTabs ?: @[]]
+            @"unsavedBuffers": [DietCodeBufferStateService snapshotForTabs:[self safeOpenTabs] ?: @[]]
         };
         return;
     }
@@ -4654,12 +4821,12 @@ static BOOL IsTextBinary(NSString* text) {
 
     // Buffer commands
     if ([method isEqualToString:@"buffers.snapshot"]) {
-        *outResult = @{ @"buffers": [DietCodeBufferStateService snapshotForTabs:_windowController.openTabs ?: @[]] };
+        *outResult = @{ @"buffers": [DietCodeBufferStateService snapshotForTabs:[self safeOpenTabs] ?: @[]] };
         return;
     }
 
     if ([method isEqualToString:@"buffers.dirty"]) {
-        *outResult = @{ @"files": DirtyFilePathsFromTabs(_windowController.openTabs ?: @[]) };
+        *outResult = @{ @"files": DirtyFilePathsFromTabs([self safeOpenTabs] ?: @[]) };
         return;
     }
 
@@ -4674,7 +4841,7 @@ static BOOL IsTextBinary(NSString* text) {
         NSString* ws = [_windowController workspacePath];
         NSString* targetPath = AbsolutePathForRPCPath(params[@"path"] ?: [_windowController activeFilePath], ws);
         NSString* diff = @"";
-        for (id tab in _windowController.openTabs ?: @[]) {
+        for (id tab in [self safeOpenTabs] ?: @[]) {
             if ([[tab valueForKey:@"path"] isEqualToString:targetPath]) {
                 diff = [DietCodeBufferStateService unsavedDiffForTab:tab];
                 break;
@@ -4753,10 +4920,11 @@ static BOOL IsTextBinary(NSString* text) {
             *outErrMsg = @"path parameter required.";
             return;
         }
-        BOOL ok = [_windowController gitDiscardFile:targetPath];
+        NSString* errStr = nil;
+        BOOL ok = [_windowController gitDiscardFile:targetPath errorOut:&errStr];
         if (!ok) {
             *outErrCode = @"git_failed";
-            *outErrMsg = @"Failed to revert file.";
+            *outErrMsg = errStr ?: @"Failed to revert file.";
             return;
         }
         *outResult = @{ @"reverted": @YES, @"path": targetPath };
@@ -4816,8 +4984,10 @@ static BOOL IsTextBinary(NSString* text) {
     }
 
     if ([method isEqualToString:@"session.clearHistory"]) {
-        [_windowController.sessionRecentCommands removeAllObjects];
-        [_windowController.sessionLastSearches removeAllObjects];
+        dispatch_async(dispatch_get_main_queue(), ^{
+            [_windowController.sessionRecentCommands removeAllObjects];
+            [_windowController.sessionLastSearches removeAllObjects];
+        });
         *outResult = @{ @"cleared": @YES };
         return;
     }
@@ -4825,10 +4995,10 @@ static BOOL IsTextBinary(NSString* text) {
     // Verification commands
     if ([method isEqualToString:@"verify.run"]) {
         NSString* command = params[@"command"] ?: @"";
-        NSSet* allowed = [NSSet setWithArray:@[@"make test", @"make app", @"git diff --check"]];
-        if (![allowed containsObject:command]) {
+        NSArray<NSString*>* allowed = VerifyCommandsAllowlist();
+        if (!VerifyCommandIsAllowed(command, allowed)) {
             *outErrCode = @"invalid_params";
-            *outErrMsg = @"verify.run command must be one of: make test, make app, git diff --check.";
+            *outErrMsg = [NSString stringWithFormat:@"verify.run command must match one of the AgentVerifyCommands prefixes: %@.", [allowed componentsJoinedByString:@", "]];
             return;
         }
         NSString* ws = [self safeWorkspacePath];
@@ -5104,7 +5274,13 @@ static BOOL IsTextBinary(NSString* text) {
         NSString* cwd = params[@"cwd"];
         BOOL show = params[@"show"] ? [params[@"show"] boolValue] : YES;
         
-        [_windowController runTerminalCommand:command cwd:cwd show:show];
+        NSString* errStr = nil;
+        BOOL ok = [_windowController runTerminalCommand:command cwd:cwd show:show errorOut:&errStr];
+        if (!ok) {
+            *outErrCode = @"terminal_failed";
+            *outErrMsg = errStr ?: @"Failed to start terminal command.";
+            return;
+        }
         *outResult = @{ @"run": @YES, @"pid": @([_windowController terminalPid]) };
         return;
     }
@@ -5148,10 +5324,11 @@ static BOOL IsTextBinary(NSString* text) {
             *outErrMsg = @"path parameter required.";
             return;
         }
-        BOOL ok = [_windowController gitStageFile:targetPath];
+        NSString* errStr = nil;
+        BOOL ok = [_windowController gitStageFile:targetPath errorOut:&errStr];
         if (!ok) {
             *outErrCode = @"git_failed";
-            *outErrMsg = @"Failed to stage file.";
+            *outErrMsg = errStr ?: @"Failed to stage file.";
             return;
         }
         *outResult = @{ @"staged": @YES };
@@ -5165,10 +5342,11 @@ static BOOL IsTextBinary(NSString* text) {
             *outErrMsg = @"path parameter required.";
             return;
         }
-        BOOL ok = [_windowController gitUnstageFile:targetPath];
+        NSString* errStr = nil;
+        BOOL ok = [_windowController gitUnstageFile:targetPath errorOut:&errStr];
         if (!ok) {
             *outErrCode = @"git_failed";
-            *outErrMsg = @"Failed to unstage file.";
+            *outErrMsg = errStr ?: @"Failed to unstage file.";
             return;
         }
         *outResult = @{ @"unstaged": @YES };
@@ -5182,10 +5360,11 @@ static BOOL IsTextBinary(NSString* text) {
             *outErrMsg = @"path parameter required.";
             return;
         }
-        BOOL ok = [_windowController gitDiscardFile:targetPath];
+        NSString* errStr = nil;
+        BOOL ok = [_windowController gitDiscardFile:targetPath errorOut:&errStr];
         if (!ok) {
             *outErrCode = @"git_failed";
-            *outErrMsg = @"Failed to discard file changes.";
+            *outErrMsg = errStr ?: @"Failed to discard file changes.";
             return;
         }
         *outResult = @{ @"discarded": @YES };
@@ -5353,7 +5532,9 @@ static BOOL IsTextBinary(NSString* text) {
     NSMutableData* lineData = [data mutableCopy];
     [lineData appendBytes:"\n" length:1];
     
-    write(clientFd, lineData.bytes, lineData.length);
+    @synchronized(self) {
+        write(clientFd, lineData.bytes, lineData.length);
+    }
 }
 
 - (void)appendLogLine:(NSString*)line {

@@ -122,21 +122,23 @@ GitStatusResult GitService::getStatus(const std::string& workspacePath) {
     return result;
 }
 
-bool GitService::stageFile(const std::string& workspacePath, const std::string& relativePath) {
+bool GitService::stageFile(const std::string& workspacePath, const std::string& relativePath, std::string& errorOut) {
     int exitCode = 0;
-    runCommand(workspacePath, @"/usr/bin/git", @[@"add", [NSString stringWithUTF8String:relativePath.c_str()]], &exitCode);
+    std::string out = runCommand(workspacePath, @"/usr/bin/git", @[@"add", [NSString stringWithUTF8String:relativePath.c_str()]], &exitCode);
+    if (exitCode != 0) { errorOut = out.empty() ? "git add failed (exit " + std::to_string(exitCode) + ")" : out; }
     return exitCode == 0;
 }
 
-bool GitService::unstageFile(const std::string& workspacePath, const std::string& relativePath) {
+bool GitService::unstageFile(const std::string& workspacePath, const std::string& relativePath, std::string& errorOut) {
     int exitCode = 0;
-    runCommand(workspacePath, @"/usr/bin/git", @[@"reset", @"HEAD", [NSString stringWithUTF8String:relativePath.c_str()]], &exitCode);
+    std::string out = runCommand(workspacePath, @"/usr/bin/git", @[@"reset", @"HEAD", [NSString stringWithUTF8String:relativePath.c_str()]], &exitCode);
+    if (exitCode != 0) { errorOut = out.empty() ? "git reset HEAD failed (exit " + std::to_string(exitCode) + ")" : out; }
     return exitCode == 0;
 }
 
-bool GitService::discardChanges(const std::string& workspacePath, const std::string& relativePath) {
+bool GitService::discardChanges(const std::string& workspacePath, const std::string& relativePath, std::string& errorOut) {
     std::filesystem::path fullPath = std::filesystem::path(workspacePath) / relativePath;
-    
+
     // Check if the file is untracked
     GitStatusResult status = getStatus(workspacePath);
     bool untracked = false;
@@ -146,15 +148,16 @@ bool GitService::discardChanges(const std::string& workspacePath, const std::str
             break;
         }
     }
-    
+
     if (untracked) {
         std::error_code ec;
         std::filesystem::remove(fullPath, ec);
+        if (ec) { errorOut = "Failed to remove untracked file: " + ec.message(); }
         return !ec;
     } else {
         int exitCode = 0;
-        // Try checkout first
-        runCommand(workspacePath, @"/usr/bin/git", @[@"checkout", @"--", [NSString stringWithUTF8String:relativePath.c_str()]], &exitCode);
+        std::string out = runCommand(workspacePath, @"/usr/bin/git", @[@"checkout", @"--", [NSString stringWithUTF8String:relativePath.c_str()]], &exitCode);
+        if (exitCode != 0) { errorOut = out.empty() ? "git checkout failed (exit " + std::to_string(exitCode) + ")" : out; }
         return exitCode == 0;
     }
 }

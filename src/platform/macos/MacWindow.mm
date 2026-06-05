@@ -12,6 +12,8 @@
 #include <util.h>
 #include <unistd.h>
 #include <fcntl.h>
+#include <errno.h>
+#include <string.h>
 #include <termios.h>
 #include <sys/ioctl.h>
 #include <thread>
@@ -5017,10 +5019,12 @@ static NSString* FindBinaryPath(NSString* name, NSString* fallback) {
         NSString* relPath = item[@"path"];
         std::string workspace = StdStringFromNSString(self.openedFolderPath);
         std::string file = StdStringFromNSString(relPath);
-        if (dietcode::filesystem::GitService::stageFile(workspace, file)) {
+        std::string errorOut;
+        if (dietcode::filesystem::GitService::stageFile(workspace, file, errorOut)) {
             [self refreshGitStatus];
         } else {
-            [self showErrorAlert:@"Git Error" message:[NSString stringWithFormat:@"Failed to stage file '%@'.", relPath]];
+            NSString* detail = NSStringFromStdString(errorOut);
+            [self showErrorAlert:@"Git Error" message:detail.length > 0 ? detail : [NSString stringWithFormat:@"Failed to stage file '%@'.", relPath]];
         }
     }
 }
@@ -5033,10 +5037,12 @@ static NSString* FindBinaryPath(NSString* name, NSString* fallback) {
         NSString* relPath = item[@"path"];
         std::string workspace = StdStringFromNSString(self.openedFolderPath);
         std::string file = StdStringFromNSString(relPath);
-        if (dietcode::filesystem::GitService::unstageFile(workspace, file)) {
+        std::string errorOut;
+        if (dietcode::filesystem::GitService::unstageFile(workspace, file, errorOut)) {
             [self refreshGitStatus];
         } else {
-            [self showErrorAlert:@"Git Error" message:[NSString stringWithFormat:@"Failed to unstage file '%@'.", relPath]];
+            NSString* detail = NSStringFromStdString(errorOut);
+            [self showErrorAlert:@"Git Error" message:detail.length > 0 ? detail : [NSString stringWithFormat:@"Failed to unstage file '%@'.", relPath]];
         }
     }
 }
@@ -5058,7 +5064,8 @@ static NSString* FindBinaryPath(NSString* name, NSString* fallback) {
         if ([alert runModal] == NSAlertFirstButtonReturn) {
             std::string workspace = StdStringFromNSString(self.openedFolderPath);
             std::string file = StdStringFromNSString(relPath);
-            if (dietcode::filesystem::GitService::discardChanges(workspace, file)) {
+            std::string errorOut;
+            if (dietcode::filesystem::GitService::discardChanges(workspace, file, errorOut)) {
                 [self refreshGitStatus];
                 
                 for (DietCodeTabState* tab in self.openTabs) {
@@ -5076,7 +5083,8 @@ static NSString* FindBinaryPath(NSString* name, NSString* fallback) {
                     }
                 }
             } else {
-                [self showErrorAlert:@"Git Error" message:[NSString stringWithFormat:@"Failed to discard changes for '%@'.", relPath]];
+                NSString* detail = NSStringFromStdString(errorOut);
+                [self showErrorAlert:@"Git Error" message:detail.length > 0 ? detail : [NSString stringWithFormat:@"Failed to discard changes for '%@'.", relPath]];
             }
         }
     }
@@ -5692,6 +5700,50 @@ static NSString* FindBinaryPath(NSString* name, NSString* fallback) {
     return YES;
 }
 
+- (BOOL)writeFileAtPath:(NSString*)path content:(NSString*)content errorOut:(NSString**)errorOut {
+    if (path.length == 0 || !content) {
+        if (errorOut) *errorOut = @"Path and content are required.";
+        return NO;
+    }
+    DietCodeTabState* openTab = nil;
+    for (DietCodeTabState* tab in self.openTabs) {
+        if ([tab.path isEqualToString:path]) {
+            if (tab.isReadOnly) {
+                if (errorOut) *errorOut = @"File is open read-only.";
+                return NO;
+            }
+            openTab = tab;
+            break;
+        }
+    }
+    NSString* parent = [path stringByDeletingLastPathComponent];
+    NSError* err = nil;
+    if (parent.length > 0 &&
+        ![[NSFileManager defaultManager] createDirectoryAtPath:parent withIntermediateDirectories:YES attributes:nil error:&err]) {
+        if (errorOut) *errorOut = [NSString stringWithFormat:@"Failed to create parent directory: %@", err.localizedDescription];
+        return NO;
+    }
+    if (![content writeToFile:path atomically:YES encoding:NSUTF8StringEncoding error:&err]) {
+        if (errorOut) *errorOut = [NSString stringWithFormat:@"Failed to write file: %@", err.localizedDescription];
+        return NO;
+    }
+    if (openTab) {
+        NSRange sel = openTab.textView.selectedRange;
+        [openTab.textView setString:content];
+        if (sel.location <= content.length) {
+            openTab.textView.selectedRange = sel;
+        }
+        openTab.dirty = NO;
+        NSDictionary* attrs = [[NSFileManager defaultManager] attributesOfItemAtPath:path error:nil];
+        openTab.lastModifiedDate = attrs.fileModificationDate;
+    }
+    [self refreshFilesTree:nil];
+    [self refreshGitStatus];
+    [self updateTabHeaderLayout];
+    [self updateWindowTitleAndStatus];
+    return YES;
+}
+
 - (void)saveFileAtPath:(NSString*)path {
     for (DietCodeTabState* tab in self.openTabs) {
         if ([tab.path isEqualToString:path]) {
@@ -5715,7 +5767,17 @@ static NSString* FindBinaryPath(NSString* name, NSString* fallback) {
     return terminalPid_;
 }
 
-- (void)runTerminalCommand:(NSString*)command cwd:(NSString*)cwd show:(BOOL)show {
+- (BOOL)runTerminalCommand:(NSString*)command cwd:(NSString*)cwd show:(BOOL)show errorOut:(NSString**)errorOut {
+    if (command.length == 0) {
+        if (errorOut) *errorOut = @"Command string required.";
+        return NO;
+    }
+    NSString* runCwd = cwd ?: self.openedFolderPath ?: NSHomeDirectory();
+    BOOL isDir = NO;
+    if (![[NSFileManager defaultManager] fileExistsAtPath:runCwd isDirectory:&isDir] || !isDir) {
+        if (errorOut) *errorOut = [NSString stringWithFormat:@"Terminal cwd is not a directory: %@", runCwd];
+        return NO;
+    }
     if (![self.sessionRecentCommands containsObject:command]) {
         [self.sessionRecentCommands insertObject:command atIndex:0];
         if (self.sessionRecentCommands.count > 50) {
@@ -5723,15 +5785,23 @@ static NSString* FindBinaryPath(NSString* name, NSString* fallback) {
         }
     }
     [self ensureTerminalProcess];
+    if (terminalMasterFd_ < 0 || terminalPid_ <= 0) {
+        if (errorOut) *errorOut = @"Terminal process is not available.";
+        return NO;
+    }
     if (show) {
         [self.bottomPanel setHidden:NO];
         [self.bottomTabView selectTabViewItemWithIdentifier:@"terminal"];
     }
-    if (terminalMasterFd_ >= 0) {
-        NSString* cmdStr = [NSString stringWithFormat:@"cd %@ && %@\n", cwd ?: self.openedFolderPath ?: @"~", command];
-        const char* utf8 = [cmdStr UTF8String];
-        write(terminalMasterFd_, utf8, strlen(utf8));
+    NSString* quotedCwd = [NSString stringWithFormat:@"'%@'", [runCwd stringByReplacingOccurrencesOfString:@"'" withString:@"'\\''"]];
+    NSString* cmdStr = [NSString stringWithFormat:@"cd %@ && %@\n", quotedCwd, command];
+    const char* utf8 = [cmdStr UTF8String];
+    ssize_t written = write(terminalMasterFd_, utf8, strlen(utf8));
+    if (written < 0) {
+        if (errorOut) *errorOut = [NSString stringWithFormat:@"Failed to write command to terminal: %s", strerror(errno)];
+        return NO;
     }
+    return YES;
 }
 
 - (void)stopTerminalCommand {
@@ -5795,8 +5865,11 @@ static NSString* FindBinaryPath(NSString* name, NSString* fallback) {
     return [NSString stringWithFormat:@"%s\n%s", stagedDiff.c_str(), unstagedDiff.c_str()];
 }
 
-- (BOOL)gitStageFile:(NSString*)path {
-    if (self.openedFolderPath == nil) return NO;
+- (BOOL)gitStageFile:(NSString*)path errorOut:(NSString**)errorOut {
+    if (self.openedFolderPath == nil) {
+        if (errorOut) *errorOut = @"No open folder workspace.";
+        return NO;
+    }
     NSString* relPath = path;
     if ([path isAbsolutePath] && [path hasPrefix:self.openedFolderPath]) {
         relPath = [path substringFromIndex:self.openedFolderPath.length];
@@ -5806,13 +5879,18 @@ static NSString* FindBinaryPath(NSString* name, NSString* fallback) {
     }
     std::string ws = StdStringFromNSString(self.openedFolderPath);
     std::string rel = StdStringFromNSString(relPath);
-    BOOL ok = dietcode::filesystem::GitService::stageFile(ws, rel);
+    std::string err;
+    BOOL ok = dietcode::filesystem::GitService::stageFile(ws, rel, err);
     if (ok) [self refreshGitStatus];
+    else if (errorOut) *errorOut = NSStringFromStdString(err);
     return ok;
 }
 
-- (BOOL)gitUnstageFile:(NSString*)path {
-    if (self.openedFolderPath == nil) return NO;
+- (BOOL)gitUnstageFile:(NSString*)path errorOut:(NSString**)errorOut {
+    if (self.openedFolderPath == nil) {
+        if (errorOut) *errorOut = @"No open folder workspace.";
+        return NO;
+    }
     NSString* relPath = path;
     if ([path isAbsolutePath] && [path hasPrefix:self.openedFolderPath]) {
         relPath = [path substringFromIndex:self.openedFolderPath.length];
@@ -5822,13 +5900,18 @@ static NSString* FindBinaryPath(NSString* name, NSString* fallback) {
     }
     std::string ws = StdStringFromNSString(self.openedFolderPath);
     std::string rel = StdStringFromNSString(relPath);
-    BOOL ok = dietcode::filesystem::GitService::unstageFile(ws, rel);
+    std::string err;
+    BOOL ok = dietcode::filesystem::GitService::unstageFile(ws, rel, err);
     if (ok) [self refreshGitStatus];
+    else if (errorOut) *errorOut = NSStringFromStdString(err);
     return ok;
 }
 
-- (BOOL)gitDiscardFile:(NSString*)path {
-    if (self.openedFolderPath == nil) return NO;
+- (BOOL)gitDiscardFile:(NSString*)path errorOut:(NSString**)errorOut {
+    if (self.openedFolderPath == nil) {
+        if (errorOut) *errorOut = @"No open folder workspace.";
+        return NO;
+    }
     NSString* absPath = path;
     NSString* relPath = path;
     if ([path isAbsolutePath]) {
@@ -5843,7 +5926,8 @@ static NSString* FindBinaryPath(NSString* name, NSString* fallback) {
     }
     std::string ws = StdStringFromNSString(self.openedFolderPath);
     std::string rel = StdStringFromNSString(relPath);
-    BOOL ok = dietcode::filesystem::GitService::discardChanges(ws, rel);
+    std::string err;
+    BOOL ok = dietcode::filesystem::GitService::discardChanges(ws, rel, err);
     if (ok) {
         [self refreshGitStatus];
         for (DietCodeTabState* tab in self.openTabs) {
@@ -5862,6 +5946,7 @@ static NSString* FindBinaryPath(NSString* name, NSString* fallback) {
             }
         }
     }
+    else if (errorOut) *errorOut = NSStringFromStdString(err);
     return ok;
 }
 
