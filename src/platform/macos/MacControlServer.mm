@@ -30,6 +30,7 @@ static const NSUInteger kMaxPatchBytes = 1024 * 1024;
 static const NSInteger kMaxBatchPatchCount = 10;
 static const NSUInteger kMaxChunkPreviewLength = 180;
 static const NSInteger kMaxPlanSteps = 30;
+static const NSInteger kMaxActiveCombos = 4;
 
 NSString* NSStringFromStdString(const std::string& value) {
     return [NSString stringWithUTF8String:value.c_str()] ?: @"";
@@ -51,11 +52,39 @@ NSString* AbsolutePathForRPCPath(NSString* path, NSString* workspace) {
 BOOL PathIsInsideWorkspace(NSString* path, NSString* workspace) {
     if (path.length == 0 || workspace.length == 0) return NO;
     std::error_code ec;
-    std::filesystem::path pathAbs = std::filesystem::weakly_canonical(std::filesystem::path(StdStringFromNSString(path)), ec);
+    std::filesystem::path p(StdStringFromNSString(path));
+    std::filesystem::path ws = std::filesystem::canonical(std::filesystem::path(StdStringFromNSString(workspace)), ec);
     if (ec) return NO;
-    std::filesystem::path wsAbs = std::filesystem::weakly_canonical(std::filesystem::path(StdStringFromNSString(workspace)), ec);
-    if (ec) return NO;
-    auto rel = std::filesystem::relative(pathAbs, wsAbs, ec);
+    
+    std::filesystem::path resolvedPath;
+    if (std::filesystem::exists(p)) {
+        resolvedPath = std::filesystem::canonical(p, ec);
+        if (ec) return NO;
+    } else {
+        std::filesystem::path parent = p.parent_path();
+        if (parent.empty()) {
+            parent = ".";
+        }
+        std::filesystem::path parentCanonical = std::filesystem::weakly_canonical(parent, ec);
+        if (ec) return NO;
+        resolvedPath = parentCanonical / p.filename();
+    }
+    
+    // Explicitly reject if resolved path is a symlink pointing outside
+    if (std::filesystem::is_symlink(resolvedPath, ec)) {
+        std::filesystem::path target = std::filesystem::read_symlink(resolvedPath, ec);
+        if (!ec) {
+            std::filesystem::path targetCanonical = std::filesystem::canonical(target, ec);
+            if (!ec) {
+                auto rel = std::filesystem::relative(targetCanonical, ws, ec);
+                if (ec || rel.string().rfind("..", 0) == 0 || rel.is_absolute()) {
+                    return NO;
+                }
+            }
+        }
+    }
+    
+    auto rel = std::filesystem::relative(resolvedPath, ws, ec);
     if (ec) return NO;
     std::string relStr = rel.string();
     return relStr == "." || (relStr.rfind("..", 0) != 0 && !rel.is_absolute());
@@ -233,6 +262,44 @@ NSString* ISODateString(NSDate* date) {
     return [formatter stringFromDate:date];
 }
 
+NSString* StableHashForString(NSString* text) {
+    NSData* data = [(text ?: @"") dataUsingEncoding:NSUTF8StringEncoding] ?: [NSData data];
+    const uint8_t* bytes = (const uint8_t*)data.bytes;
+    uint64_t hash = 1469598103934665603ULL;
+    for (NSUInteger i = 0; i < data.length; i++) {
+        hash ^= bytes[i];
+        hash *= 1099511628211ULL;
+    }
+    return [NSString stringWithFormat:@"%016llx", hash];
+}
+
+NSDictionary* RuntimeError(NSString* code, NSString* message, NSString* stepId, NSString* chip, NSString* phase, BOOL recoverable) {
+    NSMutableDictionary* err = [@{
+        @"code": code ?: @"internal_error",
+        @"message": message ?: @"",
+        @"recoverable": @(recoverable)
+    } mutableCopy];
+    if (stepId.length > 0) err[@"stepId"] = stepId;
+    if (chip.length > 0) err[@"chip"] = chip;
+    if (phase.length > 0) err[@"phase"] = phase;
+    return err;
+}
+
+NSInteger PermissionRank(NSString* permission) {
+    if ([permission isEqualToString:@"read"] || [permission isEqualToString:@"Read"]) return 0;
+    if ([permission isEqualToString:@"edit"] || [permission isEqualToString:@"Edit"]) return 1;
+    if ([permission isEqualToString:@"execute"] || [permission isEqualToString:@"Execute"]) return 2;
+    if ([permission isEqualToString:@"destructive"] || [permission isEqualToString:@"Destructive"]) return 3;
+    if ([permission isEqualToString:@"external"] || [permission isEqualToString:@"External"]) return 4;
+    return 0;
+}
+
+NSString* CanonicalChipName(NSString* chip) {
+    if (chip.length == 0) return @"";
+    NSRange at = [chip rangeOfString:@"@"];
+    return at.location == NSNotFound ? chip : [chip substringToIndex:at.location];
+}
+
 NSDictionary* PatchPreviewSummary(NSString* patch) {
     NSArray<NSDictionary*>* hunks = HunkSummariesFromPatch(patch ?: @"");
     NSMutableArray* previews = [NSMutableArray array];
@@ -366,6 +433,13 @@ NSArray<NSString*>* ContextLines(const std::vector<std::string>& lines, NSIntege
     NSInteger _taskCounter;
     NSMutableDictionary<NSString*, NSDictionary*>* _editPlans;
     NSInteger _editPlanCounter;
+    NSMutableDictionary<NSString*, NSMutableDictionary*>* _combos;
+    NSInteger _comboCounter;
+    NSMutableDictionary<NSString*, NSString*>* _pathLocks;
+    NSString* _sessionToken;
+    dispatch_queue_t _executionQueue;
+    BOOL _globalMutationLock;
+    NSDictionary* _lastVerifyStatus;
 }
 
 - (instancetype)initWithWindowController:(DietCodeWindowController*)controller {
@@ -381,8 +455,108 @@ NSArray<NSString*>* ContextLines(const std::vector<std::string>& lines, NSIntege
         _taskCounter = 0;
         _editPlans = [NSMutableDictionary dictionary];
         _editPlanCounter = 0;
+        _combos = [NSMutableDictionary dictionary];
+        _comboCounter = 0;
+        _pathLocks = [NSMutableDictionary dictionary];
+        _sessionToken = nil;
+        _executionQueue = dispatch_queue_create("com.dietcode.runtime.execution", DISPATCH_QUEUE_SERIAL);
+        _globalMutationLock = NO;
+        _lastVerifyStatus = @{
+            @"command": @"",
+            @"state": @"idle",
+            @"exitCode": [NSNull null],
+            @"passed": @NO
+        };
     }
     return self;
+}
+
+- (NSString*)safeWorkspacePath {
+    if ([NSThread isMainThread]) {
+        return [_windowController workspacePath];
+    }
+    __block NSString* res = nil;
+    dispatch_sync(dispatch_get_main_queue(), ^{
+        res = [_windowController workspacePath];
+    });
+    return res;
+}
+
+- (NSString*)safeTextForFileAtPath:(NSString*)path {
+    if ([NSThread isMainThread]) {
+        return [_windowController textForFileAtPath:path];
+    }
+    __block NSString* res = nil;
+    dispatch_sync(dispatch_get_main_queue(), ^{
+        res = [_windowController textForFileAtPath:path];
+    });
+    return res;
+}
+
+- (NSArray<NSString*>*)safeOpenFilePaths {
+    if ([NSThread isMainThread]) {
+        return [_windowController openFilePaths];
+    }
+    __block NSArray* res = nil;
+    dispatch_sync(dispatch_get_main_queue(), ^{
+        res = [_windowController openFilePaths];
+    });
+    return res;
+}
+
+- (NSArray<NSDictionary*>*)safeProblemsList {
+    if ([NSThread isMainThread]) {
+        return [_windowController problemsList];
+    }
+    __block NSArray* res = nil;
+    dispatch_sync(dispatch_get_main_queue(), ^{
+        res = [_windowController problemsList];
+    });
+    return res;
+}
+
+- (NSString*)safeActiveFilePath {
+    if ([NSThread isMainThread]) {
+        return [_windowController activeFilePath];
+    }
+    __block NSString* res = nil;
+    dispatch_sync(dispatch_get_main_queue(), ^{
+        res = [_windowController activeFilePath];
+    });
+    return res;
+}
+
+- (NSArray*)safeOpenTabs {
+    if ([NSThread isMainThread]) {
+        return _windowController.openTabs;
+    }
+    __block NSArray* res = nil;
+    dispatch_sync(dispatch_get_main_queue(), ^{
+        res = _windowController.openTabs;
+    });
+    return res;
+}
+
+- (NSDictionary*)safeGitStatusInfo {
+    if ([NSThread isMainThread]) {
+        return [_windowController gitStatusInfo];
+    }
+    __block NSDictionary* res = nil;
+    dispatch_sync(dispatch_get_main_queue(), ^{
+        res = [_windowController gitStatusInfo];
+    });
+    return res;
+}
+
+- (NSString*)safeGitDiffForFile:(NSString*)path {
+    if ([NSThread isMainThread]) {
+        return [_windowController gitDiffForFile:path];
+    }
+    __block NSString* res = nil;
+    dispatch_sync(dispatch_get_main_queue(), ^{
+        res = [_windowController gitDiffForFile:path];
+    });
+    return res;
 }
 
 - (void)start {
@@ -390,7 +564,18 @@ NSArray<NSString*>* ContextLines(const std::vector<std::string>& lines, NSIntege
     
     NSString* homeDir = NSHomeDirectory();
     NSString* dcDir = [homeDir stringByAppendingPathComponent:@".dietcode"];
-    [[NSFileManager defaultManager] createDirectoryAtPath:dcDir withIntermediateDirectories:YES attributes:nil error:nil];
+    
+    // Create ~/.dietcode directory with 0700 permissions
+    [[NSFileManager defaultManager] createDirectoryAtPath:dcDir withIntermediateDirectories:YES attributes:@{NSFilePosixPermissions: @(0700)} error:nil];
+    [[NSFileManager defaultManager] setAttributes:@{NSFilePosixPermissions: @(0700)} ofItemAtPath:dcDir error:nil];
+    
+    // Generate session token
+    NSString* token = [NSString stringWithFormat:@"%08x%08x%08x%08x", 
+                       arc4random(), arc4random(), arc4random(), arc4random()];
+    NSString* tokenPath = [dcDir stringByAppendingPathComponent:@"session.token"];
+    [token writeToFile:tokenPath atomically:YES encoding:NSUTF8StringEncoding error:nil];
+    [[NSFileManager defaultManager] setAttributes:@{NSFilePosixPermissions: @(0600)} ofItemAtPath:tokenPath error:nil];
+    _sessionToken = [token copy];
     
     NSString* sockPathStr = [dcDir stringByAppendingPathComponent:@"control.sock"];
     const char* sockPath = [sockPathStr UTF8String];
@@ -491,7 +676,9 @@ NSArray<NSString*>* ContextLines(const std::vector<std::string>& lines, NSIntege
                 [self sendError:@"unknown" code:@"request_too_large" message:@"Request exceeds maximum allowed size." clientFd:clientFd];
                 continue;
             }
-            [self processRequest:line clientFd:clientFd];
+            dispatch_async(_executionQueue, ^{
+                [self processRequest:line clientFd:clientFd];
+            });
         }
     }
     close(clientFd);
@@ -519,9 +706,19 @@ NSArray<NSString*>* ContextLines(const std::vector<std::string>& lines, NSIntege
         return;
     }
     
+    // Validate session token
+    NSString* token = req[@"token"];
+    if (!_sessionToken || ![token isEqualToString:_sessionToken]) {
+        [self sendError:reqId code:@"permission_denied" message:@"Invalid or missing session token." clientFd:clientFd];
+        [self logAuditMethod:method caller:@"unknown" permission:@"none" duration:0 result:@"auth_failed" paths:@""];
+        return;
+    }
+    
     NSString* caller = @"unix_socket";
     NSString* permission = [self permissionLevelForMethod:method params:params];
-    [_windowController setControlActiveCommand:method caller:caller];
+    dispatch_async(dispatch_get_main_queue(), ^{
+        [_windowController setControlActiveCommand:method caller:caller];
+    });
     
     __block BOOL allowed = YES;
     if ([permission isEqualToString:@"Destructive"]) {
@@ -550,7 +747,9 @@ NSArray<NSString*>* ContextLines(const std::vector<std::string>& lines, NSIntege
     
     if (!allowed) {
         [self sendError:reqId code:@"permission_denied" message:@"User rejected the command execution." clientFd:clientFd];
-        [_windowController setControlActiveCommand:nil caller:caller];
+        dispatch_async(dispatch_get_main_queue(), ^{
+            [_windowController setControlActiveCommand:nil caller:caller];
+        });
         
         auto endTime = std::chrono::high_resolution_clock::now();
         auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(endTime - startTime).count();
@@ -564,14 +763,28 @@ NSArray<NSString*>* ContextLines(const std::vector<std::string>& lines, NSIntege
     __block NSString* errMsg = nil;
     __block NSString* affectedPaths = @"";
     
-    dispatch_semaphore_t execSem = dispatch_semaphore_create(0);
-    dispatch_async(dispatch_get_main_queue(), ^{
-        [self executeMethod:method params:params outResult:&result outErrCode:&errCode outErrMsg:&errMsg outPaths:&affectedPaths];
-        dispatch_semaphore_signal(execSem);
-    });
-    dispatch_semaphore_wait(execSem, DISPATCH_TIME_FOREVER);
+    // Check if the method runs on background serial queue or needs main thread
+    BOOL isBackgroundMethod = [method isEqualToString:@"verify.run"] ||
+                              [method isEqualToString:@"workspace.grep"] ||
+                              [method isEqualToString:@"search.text"] ||
+                              [method isEqualToString:@"search.files"] ||
+                              [method isEqualToString:@"workspace.listFiles"] ||
+                              [method isEqualToString:@"combo.run"];
     
-    [_windowController setControlActiveCommand:nil caller:caller];
+    if (isBackgroundMethod) {
+        [self executeMethod:method params:params outResult:&result outErrCode:&errCode outErrMsg:&errMsg outPaths:&affectedPaths];
+    } else {
+        dispatch_semaphore_t execSem = dispatch_semaphore_create(0);
+        dispatch_async(dispatch_get_main_queue(), ^{
+            [self executeMethod:method params:params outResult:&result outErrCode:&errCode outErrMsg:&errMsg outPaths:&affectedPaths];
+            dispatch_semaphore_signal(execSem);
+        });
+        dispatch_semaphore_wait(execSem, DISPATCH_TIME_FOREVER);
+    }
+    
+    dispatch_async(dispatch_get_main_queue(), ^{
+        [_windowController setControlActiveCommand:nil caller:caller];
+    });
     
     auto endTime = std::chrono::high_resolution_clock::now();
     auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(endTime - startTime).count();
@@ -595,6 +808,14 @@ NSArray<NSString*>* ContextLines(const std::vector<std::string>& lines, NSIntege
             @{ @"name": @"rpc.ping", @"permission": @"Read", @"params": @{}, @"returns": @{ @"pong": @"boolean", @"server": @"string" } },
             @{ @"name": @"rpc.methods", @"permission": @"Read", @"params": @{}, @"returns": @{ @"methods": @"array" } },
             @{ @"name": @"rpc.describe", @"permission": @"Read", @"params": @{ @"method": @"string optional" }, @"returns": @{ @"methods": @"array" } },
+            @{ @"name": @"chip.list", @"permission": @"Read", @"params": @{}, @"returns": @{ @"chips": @"array" } },
+            @{ @"name": @"chip.describe", @"permission": @"Read", @"params": @{ @"chip": @"string" }, @"returns": @{ @"chip": @"object" } },
+            @{ @"name": @"combo.validate", @"permission": @"Read", @"params": @{ @"combo": @"object" }, @"returns": @{ @"valid": @"boolean", @"errors": @"array", @"plan": @"object optional" } },
+            @{ @"name": @"combo.run", @"permission": @"Edit/Execute", @"params": @{ @"combo": @"object" }, @"returns": @{ @"combo": @"object" } },
+            @{ @"name": @"combo.status", @"permission": @"Read", @"params": @{ @"comboId": @"string" }, @"returns": @{ @"combo": @"object" } },
+            @{ @"name": @"combo.result", @"permission": @"Read", @"params": @{ @"comboId": @"string" }, @"returns": @{ @"combo": @"object" } },
+            @{ @"name": @"combo.cancel", @"permission": @"Read", @"params": @{ @"comboId": @"string" }, @"returns": @{ @"cancelled": @"boolean" } },
+            @{ @"name": @"combo.rollback", @"permission": @"Edit", @"params": @{ @"comboId": @"string optional" }, @"returns": @{ @"reverted": @"boolean" } },
             @{ @"name": @"workspace.getRoot", @"permission": @"Read", @"params": @{}, @"returns": @{ @"path": @"string" } },
             @{ @"name": @"workspace.openFolder", @"permission": @"Destructive", @"params": @{ @"path": @"directory path" }, @"returns": @{ @"opened": @"boolean" } },
             @{ @"name": @"workspace.listFiles", @"permission": @"Read", @"params": @{}, @"returns": @{ @"files": @"array" } },
@@ -713,6 +934,482 @@ NSArray<NSString*>* ContextLines(const std::vector<std::string>& lines, NSIntege
     return @{};
 }
 
+- (NSArray<NSDictionary*>*)chipRegistry {
+    static NSArray<NSDictionary*>* chips = nil;
+    static dispatch_once_t onceToken;
+    dispatch_once(&onceToken, ^{
+        chips = @[
+            @{ @"name": @"file.readRange", @"version": @1, @"category": @"read", @"permission": @"read", @"deterministic": @YES, @"idempotency": @"conditionally_idempotent", @"sideEffects": @{ @"readsWorkspace": @YES, @"writesWorkspace": @NO, @"runsProcess": @NO, @"usesTerminal": @NO }, @"rollback": @{ @"supported": @NO }, @"requiredParams": @[@"path", @"startLine", @"endLine"] },
+            @{ @"name": @"file.readAround", @"version": @1, @"category": @"read", @"permission": @"read", @"deterministic": @YES, @"idempotency": @"conditionally_idempotent", @"sideEffects": @{ @"readsWorkspace": @YES, @"writesWorkspace": @NO, @"runsProcess": @NO, @"usesTerminal": @NO }, @"rollback": @{ @"supported": @NO }, @"requiredParams": @[@"path", @"line"] },
+            @{ @"name": @"file.getChunks", @"version": @1, @"category": @"read", @"permission": @"read", @"deterministic": @YES, @"idempotency": @"conditionally_idempotent", @"sideEffects": @{ @"readsWorkspace": @YES, @"writesWorkspace": @NO, @"runsProcess": @NO, @"usesTerminal": @NO }, @"rollback": @{ @"supported": @NO }, @"requiredParams": @[@"path"] },
+            @{ @"name": @"search.files", @"version": @1, @"category": @"read", @"permission": @"read", @"deterministic": @YES, @"idempotency": @"conditionally_idempotent", @"sideEffects": @{ @"readsWorkspace": @YES, @"writesWorkspace": @NO, @"runsProcess": @NO, @"usesTerminal": @NO }, @"rollback": @{ @"supported": @NO }, @"requiredParams": @[@"query"] },
+            @{ @"name": @"search.text", @"version": @1, @"category": @"read", @"permission": @"read", @"deterministic": @YES, @"idempotency": @"conditionally_idempotent", @"sideEffects": @{ @"readsWorkspace": @YES, @"writesWorkspace": @NO, @"runsProcess": @NO, @"usesTerminal": @NO }, @"rollback": @{ @"supported": @NO }, @"requiredParams": @[@"query"] },
+            @{ @"name": @"search.todo", @"version": @1, @"category": @"read", @"permission": @"read", @"deterministic": @YES, @"idempotency": @"conditionally_idempotent", @"sideEffects": @{ @"readsWorkspace": @YES, @"writesWorkspace": @NO, @"runsProcess": @NO, @"usesTerminal": @NO }, @"rollback": @{ @"supported": @NO }, @"requiredParams": @[] },
+            @{ @"name": @"search.diagnostics", @"version": @1, @"category": @"read", @"permission": @"read", @"deterministic": @YES, @"idempotency": @"conditionally_idempotent", @"sideEffects": @{ @"readsWorkspace": @NO, @"writesWorkspace": @NO, @"runsProcess": @NO, @"usesTerminal": @NO }, @"rollback": @{ @"supported": @NO }, @"requiredParams": @[] },
+            @{ @"name": @"patch.validate", @"version": @1, @"category": @"read", @"permission": @"read", @"deterministic": @YES, @"idempotency": @"conditionally_idempotent", @"sideEffects": @{ @"readsWorkspace": @YES, @"writesWorkspace": @NO, @"runsProcess": @NO, @"usesTerminal": @NO }, @"rollback": @{ @"supported": @NO }, @"requiredParams": @[@"path", @"patch"] },
+            @{ @"name": @"patch.preview", @"version": @1, @"category": @"read", @"permission": @"read", @"deterministic": @YES, @"idempotency": @"conditionally_idempotent", @"sideEffects": @{ @"readsWorkspace": @YES, @"writesWorkspace": @NO, @"runsProcess": @NO, @"usesTerminal": @NO }, @"rollback": @{ @"supported": @NO }, @"requiredParams": @[@"path", @"patch"] },
+            @{ @"name": @"patch.apply", @"version": @1, @"category": @"mutation", @"permission": @"edit", @"deterministic": @YES, @"idempotency": @"non_idempotent", @"sideEffects": @{ @"readsWorkspace": @YES, @"writesWorkspace": @YES, @"runsProcess": @NO, @"usesTerminal": @NO, @"mayModifyBuffers": @YES }, @"rollback": @{ @"supported": @YES, @"kind": @"content_preimage", @"conflictPolicy": @"fail_closed" }, @"requiredParams": @[@"path", @"patch"] },
+            @{ @"name": @"patch.applyBatch", @"version": @1, @"category": @"mutation", @"permission": @"edit", @"deterministic": @YES, @"idempotency": @"non_idempotent", @"sideEffects": @{ @"readsWorkspace": @YES, @"writesWorkspace": @YES, @"runsProcess": @NO, @"usesTerminal": @NO, @"mayModifyBuffers": @YES }, @"rollback": @{ @"supported": @YES, @"kind": @"content_preimage", @"conflictPolicy": @"fail_closed" }, @"requiredParams": @[@"patches"] },
+            @{ @"name": @"diff.summary", @"version": @1, @"category": @"read", @"permission": @"read", @"deterministic": @YES, @"idempotency": @"conditionally_idempotent", @"sideEffects": @{ @"readsWorkspace": @YES, @"writesWorkspace": @NO, @"runsProcess": @NO, @"usesTerminal": @NO }, @"rollback": @{ @"supported": @NO }, @"requiredParams": @[] },
+            @{ @"name": @"diff.current", @"version": @1, @"category": @"read", @"permission": @"read", @"deterministic": @YES, @"idempotency": @"conditionally_idempotent", @"sideEffects": @{ @"readsWorkspace": @YES, @"writesWorkspace": @NO, @"runsProcess": @NO, @"usesTerminal": @NO }, @"rollback": @{ @"supported": @NO }, @"requiredParams": @[] },
+            @{ @"name": @"verify.run", @"version": @1, @"category": @"execute", @"permission": @"execute", @"deterministic": @NO, @"idempotency": @"non_idempotent", @"sideEffects": @{ @"readsWorkspace": @YES, @"writesWorkspace": @YES, @"runsProcess": @YES, @"usesTerminal": @YES }, @"rollback": @{ @"supported": @NO }, @"requiredParams": @[@"command"] },
+            @{ @"name": @"verify.failures", @"version": @1, @"category": @"read", @"permission": @"read", @"deterministic": @YES, @"idempotency": @"conditionally_idempotent", @"sideEffects": @{ @"readsWorkspace": @NO, @"writesWorkspace": @NO, @"runsProcess": @NO, @"usesTerminal": @NO }, @"rollback": @{ @"supported": @NO }, @"requiredParams": @[] },
+            @{ @"name": @"context.snapshot", @"version": @1, @"category": @"read", @"permission": @"read", @"deterministic": @YES, @"idempotency": @"conditionally_idempotent", @"sideEffects": @{ @"readsWorkspace": @YES, @"writesWorkspace": @NO, @"runsProcess": @NO, @"usesTerminal": @NO }, @"rollback": @{ @"supported": @NO }, @"requiredParams": @[] },
+            @{ @"name": @"repair.fromCompilerErrors", @"version": @1, @"category": @"repair_context", @"permission": @"read", @"deterministic": @YES, @"idempotency": @"conditionally_idempotent", @"sideEffects": @{ @"readsWorkspace": @YES, @"writesWorkspace": @NO, @"runsProcess": @NO, @"usesTerminal": @NO }, @"rollback": @{ @"supported": @NO }, @"requiredParams": @[] },
+            @{ @"name": @"repair.fromTestFailures", @"version": @1, @"category": @"repair_context", @"permission": @"read", @"deterministic": @YES, @"idempotency": @"conditionally_idempotent", @"sideEffects": @{ @"readsWorkspace": @YES, @"writesWorkspace": @NO, @"runsProcess": @NO, @"usesTerminal": @NO }, @"rollback": @{ @"supported": @NO }, @"requiredParams": @[] },
+            @{ @"name": @"repair.fromPatchFailure", @"version": @1, @"category": @"repair_context", @"permission": @"read", @"deterministic": @YES, @"idempotency": @"conditionally_idempotent", @"sideEffects": @{ @"readsWorkspace": @YES, @"writesWorkspace": @NO, @"runsProcess": @NO, @"usesTerminal": @NO }, @"rollback": @{ @"supported": @NO }, @"requiredParams": @[] }
+        ];
+    });
+    return chips;
+}
+
+- (NSDictionary*)metadataForChip:(NSString*)chip {
+    NSString* canonical = CanonicalChipName(chip);
+    for (NSDictionary* meta in [self chipRegistry]) {
+        if ([meta[@"name"] isEqualToString:canonical]) return meta;
+    }
+    return nil;
+}
+
+- (NSDictionary*)primitiveForChip:(NSString*)chip params:(NSDictionary*)params {
+    NSString* canonical = CanonicalChipName(chip);
+    if (canonical.length == 0) return @{};
+    return @{ @"method": canonical, @"params": params ?: @{} };
+}
+
+- (NSString*)chipNameForStep:(NSDictionary*)step {
+    NSString* chip = step[@"chip"];
+    if (chip.length > 0) return CanonicalChipName(chip);
+    NSDictionary* primitive = [self primitiveForWorkbenchStep:step];
+    return primitive[@"method"] ?: @"";
+}
+
+- (NSDictionary*)paramsForComboStep:(NSDictionary*)step {
+    NSDictionary* params = step[@"params"];
+    if ([params isKindOfClass:[NSDictionary class]]) return params;
+    NSMutableDictionary* copy = [step mutableCopy];
+    [copy removeObjectForKey:@"id"];
+    [copy removeObjectForKey:@"chip"];
+    [copy removeObjectForKey:@"type"];
+    [copy removeObjectForKey:@"needs"];
+    [copy removeObjectForKey:@"expects"];
+    return copy;
+}
+
+- (NSArray<NSString*>*)pathsDeclaredByParams:(NSDictionary*)params chip:(NSString*)chip {
+    NSMutableArray<NSString*>* paths = [NSMutableArray array];
+    NSString* path = params[@"path"];
+    if (path.length > 0) [paths addObject:path];
+    NSString* cwd = params[@"cwd"];
+    if (cwd.length > 0) [paths addObject:cwd];
+    for (NSDictionary* item in params[@"patches"] ?: @[]) {
+        NSString* patchPath = item[@"path"];
+        if (patchPath.length > 0) [paths addObject:patchPath];
+    }
+    for (NSDictionary* file in params[@"files"] ?: @[]) {
+        NSString* filePath = file[@"path"];
+        if (filePath.length > 0) [paths addObject:filePath];
+    }
+    return paths;
+}
+
+- (BOOL)comboPolicy:(NSDictionary*)policy allowsPermission:(NSString*)permission {
+    NSArray* permissions = policy[@"permissions"];
+    if (![permissions isKindOfClass:[NSArray class]] || permissions.count == 0) {
+        permissions = @[@"read"];
+    }
+    NSInteger needed = PermissionRank(permission);
+    for (NSString* allowed in permissions) {
+        if (PermissionRank(allowed) >= needed) return YES;
+    }
+    return NO;
+}
+
+- (BOOL)validateCombo:(NSDictionary*)combo normalizedPlan:(NSDictionary**)planOut errors:(NSArray<NSDictionary*>**)errorsOut {
+    NSMutableArray<NSDictionary*>* errors = [NSMutableArray array];
+    NSArray* steps = combo[@"steps"];
+    NSDictionary* budget = combo[@"budget"] ?: @{};
+    NSDictionary* policy = combo[@"policy"] ?: @{};
+    NSDictionary* scope = combo[@"scope"] ?: @{};
+    NSInteger maxSteps = budget[@"maxSteps"] ? [budget[@"maxSteps"] integerValue] : kMaxPlanSteps;
+    maxSteps = MIN(maxSteps, kMaxPlanSteps);
+
+    if (![steps isKindOfClass:[NSArray class]] || steps.count == 0 || steps.count > (NSUInteger)maxSteps) {
+        [errors addObject:RuntimeError(@"invalid_combo", @"steps must be a non-empty bounded array.", nil, nil, @"validate", YES)];
+    }
+
+    NSMutableSet<NSString*>* stepIds = [NSMutableSet set];
+    NSMutableArray* normalizedSteps = [NSMutableArray array];
+    NSMutableSet<NSString*>* completedIds = [NSMutableSet set];
+    NSUInteger index = 0;
+    for (NSDictionary* step in steps ?: @[]) {
+        if (![step isKindOfClass:[NSDictionary class]]) {
+            [errors addObject:RuntimeError(@"invalid_combo", @"Every step must be an object.", nil, nil, @"validate", YES)];
+            index++;
+            continue;
+        }
+        NSString* stepId = step[@"id"] ?: [NSString stringWithFormat:@"step-%lu", (unsigned long)index + 1];
+        if ([stepIds containsObject:stepId]) {
+            [errors addObject:RuntimeError(@"invalid_combo", @"Duplicate step id.", stepId, nil, @"validate", YES)];
+        }
+        [stepIds addObject:stepId];
+
+        NSString* chip = [self chipNameForStep:step];
+        NSDictionary* meta = [self metadataForChip:chip];
+        if (!meta) {
+            [errors addObject:RuntimeError(@"unknown_chip", @"Step references an unknown chip.", stepId, chip, @"validate", YES)];
+            index++;
+            continue;
+        }
+        NSDictionary* params = [self paramsForComboStep:step];
+        for (NSString* required in meta[@"requiredParams"] ?: @[]) {
+            id value = params[required];
+            if (!value || value == [NSNull null] || ([value respondsToSelector:@selector(length)] && [value length] == 0)) {
+                [errors addObject:RuntimeError(@"invalid_params", [NSString stringWithFormat:@"Missing required parameter: %@", required], stepId, chip, @"validate", YES)];
+            }
+        }
+        if (![self comboPolicy:policy allowsPermission:meta[@"permission"]]) {
+            [errors addObject:RuntimeError(@"permission_denied", @"Combo policy does not allow this chip permission.", stepId, chip, @"validate", YES)];
+        }
+        if ([params[@"confirm"] boolValue]) {
+            [errors addObject:RuntimeError(@"confirmation_required", @"Confirmation cannot be embedded inside combo steps.", stepId, chip, @"validate", YES)];
+        }
+        for (NSString* declaredPath in [self pathsDeclaredByParams:params chip:chip]) {
+            if (![self path:declaredPath isAllowedByScope:scope]) {
+                [errors addObject:RuntimeError(@"outside_scope", @"Step declares a path outside combo scope.", stepId, chip, @"validate", YES)];
+            }
+        }
+        for (NSString* dep in step[@"needs"] ?: @[]) {
+            if (![completedIds containsObject:dep]) {
+                [errors addObject:RuntimeError(@"dependency_failed", @"Dependencies must reference earlier completed step ids in sequential combos.", stepId, chip, @"validate", YES)];
+            }
+        }
+        if ([chip isEqualToString:@"patch.apply"] || [chip isEqualToString:@"patch.applyBatch"]) {
+            NSArray* patchItems = [chip isEqualToString:@"patch.apply"] ? @[@{ @"path": params[@"path"] ?: @"", @"patch": params[@"patch"] ?: @"" }] : (params[@"patches"] ?: @[]);
+            for (NSDictionary* item in patchItems) {
+                if ([self dirtyBufferExistsAtPath:item[@"path"]] && ![params[@"allowDirtyBuffer"] boolValue]) {
+                    [errors addObject:RuntimeError(@"dirty_buffer_conflict", @"Mutation targets a dirty editor buffer; set allowDirtyBuffer explicitly for buffer-domain patching.", stepId, chip, @"validate", YES)];
+                }
+                NSDictionary* validation = [self validatePatchAtPath:item[@"path"] patch:item[@"patch"] currentText:nil];
+                if (![validation[@"ok"] boolValue]) {
+                    [errors addObject:RuntimeError(@"patch_failed", validation[@"rejectedReason"] ?: @"Patch validation failed.", stepId, chip, @"validate", YES)];
+                }
+                if ([validation[@"requiresConfirmation"] boolValue]) {
+                    [errors addObject:RuntimeError(@"confirmation_required", @"Patch exceeds combo confirmation threshold.", stepId, chip, @"validate", YES)];
+                }
+            }
+        }
+        [normalizedSteps addObject:@{ @"id": stepId, @"chip": chip, @"params": params, @"metadata": meta, @"needs": step[@"needs"] ?: @[] }];
+        [completedIds addObject:stepId];
+        index++;
+    }
+
+    if (errors.count > 0) {
+        if (errorsOut) *errorsOut = errors;
+        return NO;
+    }
+    if (planOut) {
+        *planOut = @{
+            @"schemaVersion": combo[@"schemaVersion"] ?: @"1.6",
+            @"goal": combo[@"goal"] ?: @"",
+            @"scope": scope,
+            @"policy": policy,
+            @"budget": budget,
+            @"steps": normalizedSteps
+        };
+    }
+    if (errorsOut) *errorsOut = @[];
+    return YES;
+}
+
+- (NSDictionary*)serializableCombo:(NSMutableDictionary*)combo {
+    NSMutableDictionary* copy = [combo mutableCopy];
+    [copy removeObjectForKey:@"startedAtDate"];
+    [copy removeObjectForKey:@"lockedPathsSet"];
+    return copy;
+}
+
+- (NSUInteger)activeComboCount {
+    NSUInteger count = 0;
+    for (NSDictionary* combo in [_combos allValues]) {
+        NSString* status = combo[@"status"] ?: @"";
+        if ([status isEqualToString:@"running"] ||
+            [status isEqualToString:@"validated"] ||
+            [status isEqualToString:@"waiting_confirmation"]) {
+            count++;
+        }
+    }
+    return count;
+}
+
+- (NSArray<NSString*>*)mutationPathsForChip:(NSString*)chip params:(NSDictionary*)params {
+    if ([chip isEqualToString:@"patch.apply"]) {
+        NSString* path = params[@"path"];
+        return path.length > 0 ? @[AbsolutePathForRPCPath(path, [_windowController workspacePath]) ?: path] : @[];
+    }
+    if ([chip isEqualToString:@"patch.applyBatch"]) {
+        NSMutableArray* paths = [NSMutableArray array];
+        for (NSDictionary* item in params[@"patches"] ?: @[]) {
+            NSString* path = item[@"path"];
+            if (path.length > 0) [paths addObject:AbsolutePathForRPCPath(path, [_windowController workspacePath]) ?: path];
+        }
+        return paths;
+    }
+    return @[];
+}
+
+- (BOOL)acquireMutationLocks:(NSArray<NSString*>*)paths comboId:(NSString*)comboId error:(NSString**)errorOut {
+    for (NSString* path in paths ?: @[]) {
+        NSString* holder = _pathLocks[path];
+        if (holder.length > 0 && ![holder isEqualToString:comboId]) {
+            if (errorOut) *errorOut = [NSString stringWithFormat:@"Path is locked by another combo: %@", path];
+            return NO;
+        }
+    }
+    for (NSString* path in paths ?: @[]) {
+        _pathLocks[path] = comboId;
+    }
+    return YES;
+}
+
+- (void)releaseMutationLocks:(NSArray<NSString*>*)paths comboId:(NSString*)comboId {
+    for (NSString* path in paths ?: @[]) {
+        if ([_pathLocks[path] isEqualToString:comboId]) {
+            [_pathLocks removeObjectForKey:path];
+        }
+    }
+}
+
+- (NSDictionary*)executeComboStep:(NSDictionary*)step combo:(NSMutableDictionary*)combo sequence:(NSInteger)sequence {
+    NSString* comboId = combo[@"comboId"] ?: @"";
+    NSString* stepId = step[@"id"] ?: @"";
+    NSString* chip = step[@"chip"] ?: @"";
+    NSDictionary* params = step[@"params"] ?: @{};
+    NSDictionary* metadata = step[@"metadata"] ?: @{};
+    NSDate* started = [NSDate date];
+    NSMutableDictionary* trace = [@{
+        @"sequence": @(sequence),
+        @"stepId": stepId,
+        @"chip": [NSString stringWithFormat:@"%@@%@", chip, metadata[@"version"] ?: @1],
+        @"state": @"prechecking",
+        @"phase": @"prechecking",
+        @"startedAt": ISODateString(started),
+        @"inputHash": StableHashForString([params description]),
+        @"touchedPaths": [self mutationPathsForChip:chip params:params]
+    } mutableCopy];
+
+    if ([combo[@"status"] isEqualToString:@"cancelled"]) {
+        trace[@"state"] = @"cancelled";
+        trace[@"error"] = RuntimeError(@"cancelled", @"Combo was cancelled before step execution.", stepId, chip, @"prechecking", YES);
+        return trace;
+    }
+
+    NSArray* mutationPaths = [self mutationPathsForChip:chip params:params];
+    for (NSString* p in mutationPaths) {
+        if (![_pathLocks[p] isEqualToString:comboId]) {
+            trace[@"state"] = @"failed";
+            trace[@"error"] = RuntimeError(@"lock_conflict", @"Required path lock not held by active combo.", stepId, chip, @"prechecking", YES);
+            return trace;
+        }
+    }
+
+    NSDictionary* primitive = [self primitiveForChip:chip params:params];
+    NSString* method = primitive[@"method"];
+    __block NSDictionary* result = nil;
+    __block NSString* errCode = nil;
+    __block NSString* errMsg = nil;
+    __block NSString* affectedPaths = @"";
+
+    trace[@"state"] = @"executing";
+    trace[@"phase"] = @"executing";
+    [self executeMethod:method params:primitive[@"params"] ?: @{} outResult:&result outErrCode:&errCode outErrMsg:&errMsg outPaths:&affectedPaths];
+
+    NSDate* finished = [NSDate date];
+    trace[@"finishedAt"] = ISODateString(finished);
+    trace[@"durationMs"] = @((NSInteger)([finished timeIntervalSinceDate:started] * 1000.0));
+    if (affectedPaths.length > 0) trace[@"affectedPaths"] = affectedPaths;
+
+    if (errCode) {
+        trace[@"state"] = @"failed";
+        trace[@"phase"] = @"failed";
+        trace[@"error"] = RuntimeError(errCode, errMsg ?: @"Step failed.", stepId, chip, @"executing", YES);
+        return trace;
+    }
+
+    trace[@"state"] = @"complete";
+    trace[@"phase"] = @"postchecking";
+    trace[@"outputHash"] = StableHashForString([result description]);
+    trace[@"result"] = result ?: @{};
+    return trace;
+}
+
+- (NSDictionary*)runComboWithPlan:(NSDictionary*)plan comboId:(NSString*)comboId {
+    NSMutableDictionary* combo = [@{
+        @"comboId": comboId,
+        @"schemaVersion": plan[@"schemaVersion"] ?: @"1.6",
+        @"goal": plan[@"goal"] ?: @"",
+        @"status": @"running",
+        @"createdAt": ISODateString([NSDate date]),
+        @"startedAt": ISODateString([NSDate date]),
+        @"plan": plan,
+        @"trace": [NSMutableArray array],
+        @"errors": [NSMutableArray array],
+        @"budgetUsed": [@{ @"steps": @0, @"patchBatches": @0, @"verifyRuns": @0, @"filesTouched": @0, @"durationMs": @0 } mutableCopy]
+    } mutableCopy];
+    combo[@"startedAtDate"] = [NSDate date];
+    combo[@"lockedPathsSet"] = [NSMutableSet set];
+    _combos[comboId] = combo;
+
+    // 1. Gather all mutation paths and determine if there are mutation chips
+    BOOL containsMutation = NO;
+    NSMutableArray* allMutationPaths = [NSMutableArray array];
+    for (NSDictionary* step in plan[@"steps"] ?: @[]) {
+        NSString* chip = step[@"chip"];
+        if ([chip isEqualToString:@"patch.apply"] || [chip isEqualToString:@"patch.applyBatch"]) {
+            containsMutation = YES;
+        }
+        NSArray* stepPaths = [self mutationPathsForChip:chip params:step[@"params"] ?: @{}];
+        for (NSString* p in stepPaths) {
+            if (![allMutationPaths containsObject:p]) {
+                [allMutationPaths addObject:p];
+            }
+        }
+    }
+
+    // 2. Enforce global mutation lock
+    if (containsMutation) {
+        if (_globalMutationLock) {
+            combo[@"status"] = @"failed";
+            [combo[@"errors"] addObject:RuntimeError(@"lock_conflict", @"A mutation combo transaction is already in progress.", nil, nil, @"prechecking", YES)];
+            combo[@"finishedAt"] = ISODateString([NSDate date]);
+            return [self serializableCombo:combo];
+        }
+        _globalMutationLock = YES;
+    }
+
+    // 3. Acquire locks for ALL paths
+    NSString* lockErr = nil;
+    if (![self acquireMutationLocks:allMutationPaths comboId:comboId error:&lockErr]) {
+        combo[@"status"] = @"failed";
+        [combo[@"errors"] addObject:RuntimeError(@"lock_conflict", lockErr ?: @"Path lock conflict.", nil, nil, @"prechecking", YES)];
+        if (containsMutation) _globalMutationLock = NO;
+        combo[@"finishedAt"] = ISODateString([NSDate date]);
+        return [self serializableCombo:combo];
+    }
+
+    // 4. Create Preimage Backup Checkpoint directory and records
+    NSString* backupDir = [[NSHomeDirectory() stringByAppendingPathComponent:@".dietcode/backups"] stringByAppendingPathComponent:comboId];
+    [[NSFileManager defaultManager] createDirectoryAtPath:backupDir withIntermediateDirectories:YES attributes:nil error:nil];
+    
+    NSMutableArray* comboPatchRecords = [NSMutableArray array];
+    for (NSString* path in allMutationPaths) {
+        NSString* beforeText = [self safeTextForFileAtPath:path];
+        if (beforeText) {
+            NSString* filename = [path lastPathComponent];
+            NSString* backupFilePath = [backupDir stringByAppendingPathComponent:[NSString stringWithFormat:@"%u_%@", arc4random(), filename]];
+            [beforeText writeToFile:backupFilePath atomically:YES encoding:NSUTF8StringEncoding error:nil];
+            [[NSFileManager defaultManager] setAttributes:@{NSFilePosixPermissions: @(0600)} ofItemAtPath:backupFilePath error:nil];
+            
+            [comboPatchRecords addObject:@{
+                @"path": path,
+                @"beforeText": beforeText
+            }];
+        }
+    }
+
+    NSInteger seq = 0;
+    NSMutableSet* touched = [NSMutableSet set];
+    NSDate* started = combo[@"startedAtDate"];
+    NSDictionary* budget = plan[@"budget"] ?: @{};
+    NSMutableDictionary* budgetUsed = combo[@"budgetUsed"];
+    NSInteger maxVerifyRuns = budget[@"maxVerifyRuns"] ? [budget[@"maxVerifyRuns"] integerValue] : 3;
+    NSInteger maxPatchBatches = budget[@"maxPatchBatches"] ? [budget[@"maxPatchBatches"] integerValue] : 3;
+    NSInteger maxFilesTouched = budget[@"maxFilesTouched"] ? [budget[@"maxFilesTouched"] integerValue] : 4;
+    NSInteger maxDurationMs = budget[@"maxDurationMs"] ? [budget[@"maxDurationMs"] integerValue] : 300000;
+
+    BOOL executionFailed = NO;
+
+    for (NSDictionary* step in plan[@"steps"] ?: @[]) {
+        NSTimeInterval elapsed = [[NSDate date] timeIntervalSinceDate:started] * 1000.0;
+        if (elapsed > maxDurationMs) {
+            combo[@"status"] = @"expired";
+            [combo[@"errors"] addObject:RuntimeError(@"timeout", @"Combo exceeded maxDurationMs.", step[@"id"], step[@"chip"], @"prechecking", YES)];
+            executionFailed = YES;
+            break;
+        }
+
+        NSString* chip = step[@"chip"] ?: @"";
+        NSArray* mutationPaths = [self mutationPathsForChip:chip params:step[@"params"] ?: @{}];
+        NSMutableSet* projectedTouched = [touched mutableCopy];
+        for (NSString* path in mutationPaths) [projectedTouched addObject:path];
+        if (projectedTouched.count > (NSUInteger)maxFilesTouched) {
+            combo[@"status"] = @"failed";
+            [combo[@"errors"] addObject:RuntimeError(@"budget_exceeded", @"Combo exceeded maxFilesTouched.", step[@"id"], chip, @"prechecking", YES)];
+            executionFailed = YES;
+            break;
+        }
+        if (([chip isEqualToString:@"patch.apply"] || [chip isEqualToString:@"patch.applyBatch"]) &&
+            [budgetUsed[@"patchBatches"] integerValue] >= maxPatchBatches) {
+            combo[@"status"] = @"failed";
+            [combo[@"errors"] addObject:RuntimeError(@"budget_exceeded", @"Combo exceeded maxPatchBatches.", step[@"id"], chip, @"prechecking", YES)];
+            executionFailed = YES;
+            break;
+        }
+        if ([chip isEqualToString:@"verify.run"] && [budgetUsed[@"verifyRuns"] integerValue] >= maxVerifyRuns) {
+            combo[@"status"] = @"failed";
+            [combo[@"errors"] addObject:RuntimeError(@"budget_exceeded", @"Combo exceeded maxVerifyRuns.", step[@"id"], chip, @"prechecking", YES)];
+            executionFailed = YES;
+            break;
+        }
+
+        NSDictionary* trace = [self executeComboStep:step combo:combo sequence:++seq];
+        [combo[@"trace"] addObject:trace];
+        budgetUsed[@"steps"] = @([budgetUsed[@"steps"] integerValue] + 1);
+        for (NSString* path in mutationPaths) [touched addObject:path];
+        budgetUsed[@"filesTouched"] = @([touched count]);
+        if ([chip isEqualToString:@"patch.apply"] || [chip isEqualToString:@"patch.applyBatch"]) {
+            budgetUsed[@"patchBatches"] = @([budgetUsed[@"patchBatches"] integerValue] + 1);
+        }
+        if ([chip isEqualToString:@"verify.run"]) {
+            budgetUsed[@"verifyRuns"] = @([budgetUsed[@"verifyRuns"] integerValue] + 1);
+        }
+        budgetUsed[@"durationMs"] = @((NSInteger)([[NSDate date] timeIntervalSinceDate:started] * 1000.0));
+        if (![trace[@"state"] isEqualToString:@"complete"]) {
+            combo[@"status"] = @"failed";
+            if (trace[@"error"]) [combo[@"errors"] addObject:trace[@"error"]];
+            executionFailed = YES;
+            break;
+        }
+    }
+
+    // 5. If failed/expired/cancelled, trigger automatic rollback
+    if (executionFailed || [combo[@"status"] isEqualToString:@"cancelled"]) {
+        NSString* rollbackErr = nil;
+        BOOL rollbackOk = [self restorePatchRecords:comboPatchRecords error:&rollbackErr];
+        if (!rollbackOk) {
+            [combo[@"errors"] addObject:RuntimeError(@"rollback_failed", [NSString stringWithFormat:@"Automatic rollback failed: %@", rollbackErr], nil, nil, @"rolling_back", NO)];
+        } else {
+            [combo[@"errors"] addObject:RuntimeError(@"rollback_success", @"Automatic rollback completed successfully.", nil, nil, @"rolling_back", YES)];
+        }
+    }
+
+    if ([combo[@"status"] isEqualToString:@"running"]) {
+        combo[@"status"] = @"complete";
+    }
+
+    // 6. Release all locks and global lock
+    [self releaseMutationLocks:allMutationPaths comboId:comboId];
+    if (containsMutation) {
+        _globalMutationLock = NO;
+    }
+
+    combo[@"finishedAt"] = ISODateString([NSDate date]);
+    combo[@"finalDiff"] = [self currentChangesInfo];
+    combo[@"verify"] = [self verificationStatus];
+    return [self serializableCombo:combo];
+}
+
+
 - (NSDictionary*)validatePatchAtPath:(NSString*)path patch:(NSString*)patch currentText:(NSString*)currentTextOverride {
     NSString* ws = [_windowController workspacePath];
     NSString* targetPath = AbsolutePathForRPCPath(path, ws);
@@ -809,42 +1506,91 @@ NSArray<NSString*>* ContextLines(const std::vector<std::string>& lines, NSIntege
     };
 }
 
-- (NSDictionary*)verificationStatus {
-    NSString* output = [_windowController terminalOutput] ?: @"";
-    NSString* command = _lastVerifyCommand ?: @"";
-    NSString* markerPrefix = [NSString stringWithFormat:@"[DietCode verify] command=%@ exit=", command];
-    NSRange range = [output rangeOfString:markerPrefix options:NSBackwardsSearch];
-    if (range.location == NSNotFound) {
-        return @{
+- (NSDictionary*)runVerificationCommand:(NSString*)command cwd:(NSString*)cwd {
+    NSTask* task = [[NSTask alloc] init];
+    [task setLaunchPath:@"/bin/zsh"];
+    [task setArguments:@[@"-c", command]];
+    
+    NSString* ws = [self safeWorkspacePath];
+    NSString* runCwd = cwd.length > 0 ? cwd : ws;
+    if (runCwd.length > 0) {
+        [task setCurrentDirectoryPath:runCwd];
+    } else {
+        [task setCurrentDirectoryPath:@"~"];
+    }
+    
+    NSPipe* outPipe = [NSPipe pipe];
+    NSPipe* errPipe = [NSPipe pipe];
+    [task setStandardOutput:outPipe];
+    [task setStandardError:errPipe];
+    
+    _lastVerifyCommand = [command copy];
+    _lastVerifyStartedAt = [NSDate date];
+    _lastVerifyFinishedAt = nil;
+    _lastVerifyExitCode = nil;
+    
+    _lastVerifyStatus = @{
+        @"command": command,
+        @"state": @"running",
+        @"exitCode": [NSNull null],
+        @"passed": @NO,
+        @"startedAt": ISODateString(_lastVerifyStartedAt)
+    };
+    
+    @try {
+        [_windowController appendControlLogLine:[NSString stringWithFormat:@"[Verify] Starting command: %@", command]];
+        [task launch];
+        [task waitUntilExit];
+        
+        _lastVerifyFinishedAt = [NSDate date];
+        int status = [task terminationStatus];
+        _lastVerifyExitCode = @(status);
+        
+        NSData* outData = [[outPipe fileHandleForReading] readDataToEndOfFile];
+        NSString* outStr = [[NSString alloc] initWithData:outData encoding:NSUTF8StringEncoding] ?: @"";
+        
+        NSData* errData = [[errPipe fileHandleForReading] readDataToEndOfFile];
+        NSString* errStr = [[NSString alloc] initWithData:errData encoding:NSUTF8StringEncoding] ?: @"";
+        
+        if (outStr.length > 0) {
+            [_windowController appendControlLogLine:outStr];
+        }
+        if (errStr.length > 0) {
+            [_windowController appendControlLogLine:[NSString stringWithFormat:@"[Error] %@", errStr]];
+        }
+        
+        NSTimeInterval duration = [_lastVerifyFinishedAt timeIntervalSinceDate:_lastVerifyStartedAt];
+        _lastVerifyStatus = @{
             @"command": command,
-            @"state": command.length > 0 ? @"running_or_unknown" : @"idle",
-            @"exitCode": [NSNull null],
-            @"passed": @NO
+            @"state": @"complete",
+            @"exitCode": @(status),
+            @"passed": @(status == 0),
+            @"startedAt": ISODateString(_lastVerifyStartedAt),
+            @"finishedAt": ISODateString(_lastVerifyFinishedAt),
+            @"durationMs": @((NSInteger)(duration * 1000.0))
+        };
+    } @catch (NSException* exception) {
+        _lastVerifyFinishedAt = [NSDate date];
+        _lastVerifyExitCode = @(-1);
+        _lastVerifyStatus = @{
+            @"command": command,
+            @"state": @"complete",
+            @"exitCode": @(-1),
+            @"passed": @NO,
+            @"startedAt": ISODateString(_lastVerifyStartedAt),
+            @"finishedAt": ISODateString(_lastVerifyFinishedAt),
+            @"error": exception.reason ?: @"Failed to launch verification task"
         };
     }
-    NSUInteger start = NSMaxRange(range);
-    NSUInteger end = start;
-    while (end < output.length) {
-        unichar c = [output characterAtIndex:end];
-        if (c < '0' || c > '9') break;
-        end++;
-    }
-    NSInteger exitCode = [[output substringWithRange:NSMakeRange(start, end - start)] integerValue];
-    if (!_lastVerifyExitCode || [_lastVerifyExitCode integerValue] != exitCode) {
-        _lastVerifyExitCode = @(exitCode);
-        if (!_lastVerifyFinishedAt) {
-            _lastVerifyFinishedAt = [NSDate date];
-        }
-    }
-    NSTimeInterval duration = (_lastVerifyStartedAt && _lastVerifyFinishedAt) ? [_lastVerifyFinishedAt timeIntervalSinceDate:_lastVerifyStartedAt] : 0;
-    return @{
-        @"command": command,
-        @"state": @"complete",
-        @"exitCode": @(exitCode),
-        @"passed": @(exitCode == 0),
-        @"startedAt": ISODateString(_lastVerifyStartedAt),
-        @"finishedAt": ISODateString(_lastVerifyFinishedAt),
-        @"durationMs": @((NSInteger)(duration * 1000.0))
+    return _lastVerifyStatus;
+}
+
+- (NSDictionary*)verificationStatus {
+    return _lastVerifyStatus ?: @{
+        @"command": @"",
+        @"state": @"idle",
+        @"exitCode": [NSNull null],
+        @"passed": @NO
     };
 }
 
@@ -890,11 +1636,21 @@ NSArray<NSString*>* ContextLines(const std::vector<std::string>& lines, NSIntege
     for (NSDictionary* record in records.reverseObjectEnumerator) {
         NSString* path = record[@"path"];
         NSString* beforeText = record[@"beforeText"];
+        NSString* expectedPostHash = record[@"postHash"];
         NSString* currentText = [_windowController textForFileAtPath:path];
         if (!path || !beforeText || !currentText) {
             if (errorOut) *errorOut = @"Cannot restore patch because a target buffer is unavailable.";
             return NO;
         }
+        if (expectedPostHash.length > 0 && ![StableHashForString(currentText) isEqualToString:expectedPostHash]) {
+            if (errorOut) *errorOut = [NSString stringWithFormat:@"Rollback conflict for %@: current buffer no longer matches the RPC patch postimage.", path];
+            return NO;
+        }
+    }
+    for (NSDictionary* record in records.reverseObjectEnumerator) {
+        NSString* path = record[@"path"];
+        NSString* beforeText = record[@"beforeText"];
+        NSString* currentText = [_windowController textForFileAtPath:path];
         BOOL ok = [_windowController replaceTextInRange:NSMakeRange(0, currentText.length) withText:beforeText forFileAtPath:path];
         if (!ok) {
             if (errorOut) *errorOut = [NSString stringWithFormat:@"Failed to restore %@", path];
@@ -918,6 +1674,17 @@ NSArray<NSString*>* ContextLines(const std::vector<std::string>& lines, NSIntege
     if (AnyPatternMatches(excludes, relPath, filename)) return NO;
     if (includes.count > 0 && !AnyPatternMatches(includes, relPath, filename)) return NO;
     return YES;
+}
+
+- (BOOL)dirtyBufferExistsAtPath:(NSString*)path {
+    NSString* ws = [_windowController workspacePath];
+    NSString* absPath = AbsolutePathForRPCPath(path, ws);
+    for (id tab in _windowController.openTabs ?: @[]) {
+        NSString* tabPath = [tab valueForKey:@"path"];
+        BOOL dirty = [[tab valueForKey:@"dirty"] boolValue];
+        if (dirty && [tabPath isEqualToString:absPath]) return YES;
+    }
+    return NO;
 }
 
 - (BOOL)task:(NSMutableDictionary*)task canConsumeStep:(NSDictionary*)step error:(NSString**)errorOut {
@@ -1077,6 +1844,19 @@ NSArray<NSString*>* ContextLines(const std::vector<std::string>& lines, NSIntege
             return @"Destructive";
         }
     }
+    if ([method isEqualToString:@"combo.run"]) {
+        NSDictionary* combo = params[@"combo"] ?: params;
+        NSDictionary* policy = combo[@"policy"] ?: @{};
+        for (NSString* perm in policy[@"permissions"] ?: @[]) {
+            if (PermissionRank(perm) >= PermissionRank(@"destructive")) return @"Destructive";
+        }
+        for (NSDictionary* step in combo[@"steps"] ?: @[]) {
+            NSString* chip = [self chipNameForStep:step];
+            NSDictionary* meta = [self metadataForChip:chip];
+            if (PermissionRank(meta[@"permission"] ?: @"read") >= PermissionRank(@"execute")) return @"Execute";
+        }
+        return @"Edit";
+    }
     
     if ([method isEqualToString:@"terminal.run"]) {
         NSString* cwd = params[@"cwd"];
@@ -1098,6 +1878,7 @@ NSArray<NSString*>* ContextLines(const std::vector<std::string>& lines, NSIntege
         [method isEqualToString:@"verify.run"] ||
         [method isEqualToString:@"task.runLoop"] ||
         [method isEqualToString:@"edit.executePlan"] ||
+        [method isEqualToString:@"combo.run"] ||
         [method isEqualToString:@"language.lint"] ||
         [method isEqualToString:@"language.format"]) {
         return @"Execute";
@@ -1110,6 +1891,7 @@ NSArray<NSString*>* ContextLines(const std::vector<std::string>& lines, NSIntege
         [method isEqualToString:@"patch.apply"] ||
         [method isEqualToString:@"patch.applyBatch"] ||
         [method isEqualToString:@"patch.revertLast"] ||
+        [method isEqualToString:@"combo.rollback"] ||
         [method isEqualToString:@"task.step"] ||
         [method isEqualToString:@"git.stage"] || 
         [method isEqualToString:@"git.unstage"] ||
@@ -1148,7 +1930,7 @@ NSArray<NSString*>* ContextLines(const std::vector<std::string>& lines, NSIntege
     }
 
     if ([method isEqualToString:@"rpc.ping"]) {
-        *outResult = @{ @"pong": @YES, @"server": @"DietCodeControlServer", @"version": @"1.3" };
+        *outResult = @{ @"pong": @YES, @"server": @"DietCodeControlServer", @"version": @"1.6" };
         return;
     }
 
@@ -1174,6 +1956,111 @@ NSArray<NSString*>* ContextLines(const std::vector<std::string>& lines, NSIntege
         } else {
             *outResult = @{ @"methods": [self rpcMethodDescriptions] };
         }
+        return;
+    }
+
+    if ([method isEqualToString:@"chip.list"]) {
+        *outResult = @{ @"schemaVersion": @"1.6", @"chips": [self chipRegistry] };
+        return;
+    }
+
+    if ([method isEqualToString:@"chip.describe"]) {
+        NSString* chip = params[@"chip"];
+        NSDictionary* meta = [self metadataForChip:chip];
+        if (!meta) {
+            *outErrCode = @"unknown_chip";
+            *outErrMsg = @"Unknown chip.";
+            return;
+        }
+        *outResult = @{ @"schemaVersion": @"1.6", @"chip": meta };
+        return;
+    }
+
+    if ([method isEqualToString:@"combo.validate"]) {
+        NSDictionary* combo = params[@"combo"] ?: params;
+        NSDictionary* plan = nil;
+        NSArray<NSDictionary*>* errors = nil;
+        BOOL valid = [self validateCombo:combo normalizedPlan:&plan errors:&errors];
+        NSMutableDictionary* response = [@{ @"schemaVersion": @"1.6", @"valid": @(valid), @"errors": errors ?: @[] } mutableCopy];
+        if (valid && plan) response[@"plan"] = plan;
+        *outResult = response;
+        return;
+    }
+
+    if ([method isEqualToString:@"combo.run"]) {
+        if ([self activeComboCount] >= (NSUInteger)kMaxActiveCombos) {
+            *outErrCode = @"resource_exhausted";
+            *outErrMsg = @"Maximum active combo count reached.";
+            return;
+        }
+        NSDictionary* combo = params[@"combo"] ?: params;
+        NSDictionary* plan = nil;
+        NSArray<NSDictionary*>* errors = nil;
+        BOOL valid = [self validateCombo:combo normalizedPlan:&plan errors:&errors];
+        if (!valid) {
+            *outErrCode = @"invalid_combo";
+            *outErrMsg = @"Combo validation failed.";
+            *outResult = @{ @"schemaVersion": @"1.6", @"valid": @NO, @"errors": errors ?: @[] };
+            return;
+        }
+        NSString* comboId = combo[@"comboId"] ?: [NSString stringWithFormat:@"combo-%ld", (long)++_comboCounter];
+        if (_combos[comboId]) {
+            *outErrCode = @"invalid_combo";
+            *outErrMsg = @"comboId already exists in this session.";
+            return;
+        }
+        NSDictionary* result = [self runComboWithPlan:plan comboId:comboId];
+        *outResult = @{ @"schemaVersion": @"1.6", @"combo": result };
+        return;
+    }
+
+    if ([method isEqualToString:@"combo.status"] || [method isEqualToString:@"combo.result"]) {
+        NSString* comboId = params[@"comboId"];
+        NSMutableDictionary* combo = comboId ? _combos[comboId] : nil;
+        if (!combo) {
+            *outErrCode = @"invalid_params";
+            *outErrMsg = @"Unknown comboId.";
+            return;
+        }
+        *outResult = @{ @"schemaVersion": @"1.6", @"combo": [self serializableCombo:combo] };
+        return;
+    }
+
+    if ([method isEqualToString:@"combo.cancel"]) {
+        NSString* comboId = params[@"comboId"];
+        NSMutableDictionary* combo = comboId ? _combos[comboId] : nil;
+        if (!combo) {
+            *outErrCode = @"invalid_params";
+            *outErrMsg = @"Unknown comboId.";
+            return;
+        }
+        if ([combo[@"status"] isEqualToString:@"running"]) {
+            combo[@"status"] = @"cancelled";
+            combo[@"cancelledAt"] = ISODateString([NSDate date]);
+        }
+        *outResult = @{ @"schemaVersion": @"1.6", @"cancelled": @YES, @"combo": [self serializableCombo:combo] };
+        return;
+    }
+
+    if ([method isEqualToString:@"combo.rollback"]) {
+        if (_lastRPCPatchRecords.count == 0) {
+            *outErrCode = @"invalid_request";
+            *outErrMsg = @"No session patch checkpoint is available to roll back.";
+            return;
+        }
+        NSString* errStr = nil;
+        BOOL ok = [self restorePatchRecords:_lastRPCPatchRecords error:&errStr];
+        if (!ok) {
+            *outErrCode = [errStr hasPrefix:@"Rollback conflict"] ? @"rollback_conflict" : @"rollback_failed";
+            *outErrMsg = errStr ?: @"Rollback failed.";
+            return;
+        }
+        NSMutableArray* paths = [NSMutableArray array];
+        for (NSDictionary* record in _lastRPCPatchRecords) {
+            [paths addObject:record[@"path"] ?: @""];
+        }
+        [_lastRPCPatchRecords removeAllObjects];
+        *outResult = @{ @"schemaVersion": @"1.6", @"reverted": @YES, @"files": paths };
         return;
     }
     
@@ -2139,7 +3026,8 @@ NSArray<NSString*>* ContextLines(const std::vector<std::string>& lines, NSIntege
             *outErrMsg = errStr ?: @"Unknown patch application error.";
             return;
         }
-        [self recordLastRPCPatchPaths:@[@{ @"path": absPath, @"beforeText": beforeText ?: @"" }]];
+        NSString* afterText = [_windowController textForFileAtPath:absPath] ?: @"";
+        [self recordLastRPCPatchPaths:@[@{ @"path": absPath, @"beforeText": beforeText ?: @"", @"beforeHash": StableHashForString(beforeText ?: @""), @"postHash": StableHashForString(afterText) }]];
         *outResult = @{ @"patched": @YES, @"path": absPath, @"validation": validation };
         return;
     }
@@ -2185,7 +3073,7 @@ NSArray<NSString*>* ContextLines(const std::vector<std::string>& lines, NSIntege
                 return;
             }
             NSString* beforeText = [_windowController textForFileAtPath:absPath];
-            [records addObject:@{ @"path": absPath ?: @"", @"beforeText": beforeText ?: @"", @"patch": patchStr ?: @"" }];
+            [records addObject:@{ @"path": absPath ?: @"", @"beforeText": beforeText ?: @"", @"beforeHash": StableHashForString(beforeText ?: @""), @"patch": patchStr ?: @"" }];
         }
         if ((combinedBytes > kMaxPatchBytesBeforeConfirmation || needsConfirm) && ![params[@"confirm"] boolValue]) {
             *outErrCode = @"confirmation_required";
@@ -2207,9 +3095,12 @@ NSArray<NSString*>* ContextLines(const std::vector<std::string>& lines, NSIntege
                 *outErrMsg = errStr ?: restoreErr ?: @"Batch patch failed.";
                 return;
             }
-            [applied addObject:record];
+            NSMutableDictionary* appliedRecord = [record mutableCopy];
+            NSString* afterText = [_windowController textForFileAtPath:record[@"path"]] ?: @"";
+            appliedRecord[@"postHash"] = StableHashForString(afterText);
+            [applied addObject:appliedRecord];
         }
-        [self recordLastRPCPatchPaths:records];
+        [self recordLastRPCPatchPaths:applied];
         *outResult = @{ @"dryRun": @NO, @"applied": @YES, @"results": results };
         return;
     }
@@ -2223,7 +3114,7 @@ NSArray<NSString*>* ContextLines(const std::vector<std::string>& lines, NSIntege
         NSString* errStr = nil;
         BOOL ok = [self restorePatchRecords:_lastRPCPatchRecords error:&errStr];
         if (!ok) {
-            *outErrCode = @"patch_failed";
+            *outErrCode = [errStr hasPrefix:@"Rollback conflict"] ? @"rollback_conflict" : @"rollback_failed";
             *outErrMsg = errStr ?: @"Failed to revert last RPC patch.";
             return;
         }
@@ -2390,19 +3281,15 @@ NSArray<NSString*>* ContextLines(const std::vector<std::string>& lines, NSIntege
             *outErrMsg = @"verify.run command must be one of: make test, make app, git diff --check.";
             return;
         }
-        _lastVerifyCommand = [command copy];
-        _lastVerifyStartedAt = [NSDate date];
-        _lastVerifyFinishedAt = nil;
-        _lastVerifyExitCode = nil;
-        NSString* cwd = params[@"cwd"] ?: [_windowController workspacePath];
-        if (cwd.length > 0 && [_windowController workspacePath] && !PathIsInsideWorkspace(cwd, [_windowController workspacePath])) {
+        NSString* ws = [self safeWorkspacePath];
+        NSString* cwd = params[@"cwd"] ?: ws;
+        if (cwd.length > 0 && ws && !PathIsInsideWorkspace(cwd, ws)) {
             *outErrCode = @"outside_workspace";
             *outErrMsg = @"verify.run cwd must be inside workspace.";
             return;
         }
-        NSString* shellCommand = [NSString stringWithFormat:@"%@; printf '\\n[DietCode verify] command=%@ exit=%%s\\n' \"$?\"", command, command];
-        [_windowController runTerminalCommand:shellCommand cwd:cwd show:YES];
-        *outResult = @{ @"started": @YES, @"command": command, @"cwd": cwd ?: @"", @"startedAt": ISODateString(_lastVerifyStartedAt), @"visible": @YES, @"stoppable": @YES };
+        NSDictionary* result = [self runVerificationCommand:command cwd:cwd];
+        *outResult = result;
         return;
     }
 
@@ -2865,13 +3752,32 @@ NSArray<NSString*>* ContextLines(const std::vector<std::string>& lines, NSIntege
     [self sendResponse:resp clientFd:clientFd];
 }
 
-- (void)sendError:(NSString*)reqId code:(NSString*)code message:(NSString*)message clientFd:(int)clientFd {
+- (void)sendError:(NSString*)reqId code:(id)code message:(NSString*)message clientFd:(int)clientFd {
+    NSNumber* numericCode = @(-32603); // default internal error
+    NSString* stringCode = @"internal_error";
+    if ([code isKindOfClass:[NSNumber class]]) {
+        numericCode = code;
+        if ([code integerValue] == -32601) stringCode = @"method_not_found";
+        else if ([code integerValue] == -32600) stringCode = @"invalid_request";
+    } else if ([code isKindOfClass:[NSString class]]) {
+        stringCode = code;
+        if ([stringCode isEqualToString:@"invalid_request"]) numericCode = @(-32600);
+        else if ([stringCode isEqualToString:@"method_not_found"]) numericCode = @(-32601);
+        else if ([stringCode isEqualToString:@"outside_workspace"] || [stringCode isEqualToString:@"outside_scope"]) numericCode = @(4001);
+        else if ([stringCode isEqualToString:@"lock_conflict"] || [stringCode isEqualToString:@"dirty_buffer_conflict"]) numericCode = @(4002);
+        else if ([stringCode isEqualToString:@"budget_exceeded"]) numericCode = @(4003);
+        else if ([stringCode isEqualToString:@"verification_failed"] || [stringCode isEqualToString:@"verify_failed"] || [stringCode isEqualToString:@"patch_failed"]) numericCode = @(4004);
+        else if ([stringCode isEqualToString:@"rollback_conflict"] || [stringCode isEqualToString:@"rollback_failed"]) numericCode = @(4005);
+        else if ([stringCode isEqualToString:@"permission_denied"]) numericCode = @(4006);
+    }
+    
     NSDictionary* resp = @{
-        @"id": reqId,
+        @"id": reqId ?: @"unknown",
         @"ok": @NO,
         @"error": @{
-            @"code": code,
-            @"message": message
+            @"code": numericCode,
+            @"string_code": stringCode,
+            @"message": message ?: @""
         }
     };
     [self sendResponse:resp clientFd:clientFd];
