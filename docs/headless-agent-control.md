@@ -123,11 +123,23 @@ Useful flags:
 --params-file PATH      load RPC params from a JSON file
 --params-stdin          load RPC params from stdin
 --path PATH             path for patch stdin/file helpers
+--grep QUERY            call workspace.grep with a literal query
+--search-text QUERY     call search.text with a literal query
+--result-offset N       zero-based result cursor for workspace.grep or search.text
+--max-results N         maximum results for workspace.grep or search.text
+--before N              context lines before each search.text result
+--after N               context lines after each search.text result
+--case-sensitive        use case-sensitive literal grep/text search
+--include GLOB          include glob for grep/text search, repeatable
+--exclude GLOB          exclude glob for grep/text search, repeatable
 --diff-source SOURCE    call diff.chunk for unstaged, staged, or file
 --diff-hunks            use diff.hunks with --diff-source instead of diff.chunk
 --offset BYTES          byte offset for diff.chunk or patch.chunk
 --max-bytes BYTES       maximum bytes for diff.chunk or patch.chunk
 --max-hunks N           maximum hunk summaries for diff.hunks or patch.hunks
+--hunk-offset N         zero-based hunk cursor for diff.hunks or patch.hunks
+--include-lines         include literal per-row old/new line evidence in hunk responses
+--max-lines-per-hunk N  maximum literal line rows per returned hunk
 --patch-file PATH       load unified diff text from a file
 --patch-stdin           load unified diff text from stdin
 --patch-hunks           default patch stdin/file calls to patch.hunks
@@ -227,15 +239,31 @@ contextBefore/contextAfter
 
 Use `matchSpans` rather than re-inferring columns from `preview`.
 
+For large searches, page literal results instead of assuming omitted matches:
+
+```sh
+python3 scripts/dietcode_agent_client.py workspace.grep '{"query":"TODO","maxResults":100,"resultOffset":0}'
+python3 scripts/dietcode_agent_client.py workspace.grep '{"query":"TODO","maxResults":100,"resultOffset":100}'
+python3 scripts/dietcode_agent_client.py --grep TODO --max-results 100 --result-offset 0 --compact
+python3 scripts/dietcode_agent_client.py --search-text TODO --before 1 --after 1 --max-results 100 --result-offset 100 --compact
+```
+
+`workspace.grep` and `search.text` return `resultIndex`, `resultOffset`, `nextResultOffset`, `hasMore`, and `lineSha256`. Page until `hasMore` is false. Use `lineSha256` with `path`, `line`, and `matchSpans` when carrying evidence across turns.
+
 For changed files, prefer hunk maps before raw diff text when the agent only needs exact locations:
 
 ```sh
 python3 scripts/dietcode_agent_client.py diff.hunks '{"source":"unstaged","maxHunks":200}'
+python3 scripts/dietcode_agent_client.py diff.hunks '{"source":"unstaged","maxHunks":200,"hunkOffset":200}'
 python3 scripts/dietcode_agent_client.py diff.hunks '{"source":"file","path":"src/app.py","maxHunks":50}'
 python3 scripts/dietcode_agent_client.py --diff-source unstaged --diff-hunks --max-hunks 200 --compact
+python3 scripts/dietcode_agent_client.py --diff-source unstaged --diff-hunks --max-hunks 200 --hunk-offset 200 --compact
+python3 scripts/dietcode_agent_client.py --diff-source unstaged --diff-hunks --include-lines --max-lines-per-hunk 120 --compact
 ```
 
-`diff.hunks` returns literal unified diff file headers, hunk headers, diff-text line ranges, old/new line ranges, added/removed/context counts, `sha256`, and `truncated`. It does not infer symbols, intent, ownership, or fuzzy path matches.
+`diff.hunks` returns literal unified diff file headers, hunk headers, diff-text line ranges, old/new line ranges, added/removed/context counts, `hunkIndex`, `sha256`, `nextHunkOffset`, `hasMoreHunks`, and `truncated`. With `includeLines`, each returned hunk also includes exact row objects with `diffLine`, `kind`, `oldLine`, `newLine`, `raw`, and `text`; added rows have `oldLine: null`, removed rows have `newLine: null`. It does not infer symbols, intent, ownership, or fuzzy path matches.
+
+For large diffs, page until `hasMoreHunks` is false. Pass the prior response's `nextHunkOffset` as the next request's `hunkOffset`. Each response includes the same full-diff `sha256`; if it changes between pages, restart the read because the working tree changed.
 
 For large diffs, prefer chunked reads:
 
@@ -265,6 +293,8 @@ Use `--patch-hunks` to inspect streamed patch structure without applying or vali
 
 ```sh
 generate_patch | python3 scripts/dietcode_agent_client.py --patch-stdin --patch-hunks --max-hunks 200 --compact
+generate_patch | python3 scripts/dietcode_agent_client.py --patch-stdin --patch-hunks --max-hunks 200 --hunk-offset 200 --compact
+generate_patch | python3 scripts/dietcode_agent_client.py --patch-stdin --patch-hunks --include-lines --max-lines-per-hunk 120 --compact
 python3 scripts/dietcode_agent_client.py patch.hunks --patch-file /tmp/change.diff
 ```
 

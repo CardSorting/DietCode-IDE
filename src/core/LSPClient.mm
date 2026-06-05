@@ -1,7 +1,9 @@
 #import <Foundation/Foundation.h>
 #include "LSPClient.hpp"
-#include <unistd.h>
+#include <atomic>
 #include <iostream>
+#include <unistd.h>
+#include <unordered_map>
 
 // --- LSP Reader Interface ---
 @interface DietCodeLSPReader : NSObject
@@ -248,7 +250,7 @@
     
     [self writePayload:payload];
     
-    int timeoutMs = [method isEqualToString:@"initialize"] ? 1000 : 250;
+    int timeoutMs = [method isEqualToString:@"initialize"] ? 10000 : 5000;
     dispatch_time_t timeout = dispatch_time(DISPATCH_TIME_NOW, (int64_t)(timeoutMs * NSEC_PER_MSEC));
     long waitRes = dispatch_semaphore_wait(sema, timeout);
     
@@ -341,12 +343,20 @@ public:
     
     DietCodeLSPClientManager* manager;
     bool running = false;
+
+    // Thread-safe flag to guard ObjC block captures. When the LSPClient is
+    // destroyed, alive_ is set to false so that any in-flight blocks from
+    // the reader thread no-op instead of dereferencing a dangling pointer.
+    std::shared_ptr<std::atomic<bool>> alive = std::make_shared<std::atomic<bool>>(true);
+
+    // Per-document version counters for LSP spec compliance (S-10).
+    std::unordered_map<std::string, int> documentVersions;
 };
 
 LSPClient::LSPClient(const std::string& language, const std::string& serverPath, const std::string& workspacePath,
                      std::function<void(const std::string&, const std::vector<Diagnostic>&)> diagnosticCallback,
-                     std::function<void(const std::string&)> errorCallback) {
-    impl_ = new Impl();
+                     std::function<void(const std::string&)> errorCallback)
+    : impl_(std::make_unique<Impl>()) {
     impl_->language = language;
     impl_->serverPath = serverPath;
     impl_->workspacePath = workspacePath;
@@ -359,9 +369,14 @@ LSPClient::LSPClient(const std::string& language, const std::string& serverPath,
     
     impl_->manager = [[DietCodeLSPClientManager alloc] initWithServerPath:sPath workspacePath:wPath language:lang];
     
-    Impl* rawImpl = impl_;
+    // Capture a weak (shared_ptr) reference to the alive flag so blocks can
+    // safely check whether the Impl is still valid. This prevents
+    // use-after-free when blocks fire after LSPClient destruction.
+    std::weak_ptr<std::atomic<bool>> weakAlive = impl_->alive;
+    Impl* rawImpl = impl_.get();
     impl_->manager.diagnosticHandler = ^(NSString* filePath, NSArray* diagnostics) {
-        if (!rawImpl) return;
+        auto alivePtr = weakAlive.lock();
+        if (!alivePtr || !alivePtr->load()) return;
         std::vector<Diagnostic> diags;
         for (NSDictionary* d in diagnostics) {
             Diagnostic diag;
@@ -383,15 +398,21 @@ LSPClient::LSPClient(const std::string& language, const std::string& serverPath,
     };
     
     impl_->manager.errorHandler = ^(NSString* err) {
-        if (!rawImpl) return;
+        auto alivePtr = weakAlive.lock();
+        if (!alivePtr || !alivePtr->load()) return;
         rawImpl->errCallback(std::string([err UTF8String]));
     };
 }
 
 LSPClient::~LSPClient() {
-    stop();
-    delete impl_;
+    if (impl_) {
+        impl_->alive->store(false);
+        stop();
+    }
 }
+
+LSPClient::LSPClient(LSPClient&&) noexcept = default;
+LSPClient& LSPClient::operator=(LSPClient&&) noexcept = default;
 
 bool LSPClient::start() {
     if (impl_->running) return true;
@@ -419,6 +440,7 @@ void LSPClient::didOpen(const std::string& filePath, const std::string& text) {
     else if (impl_->language == "python") langId = @"python";
     else if (impl_->language == "javascript" || impl_->language == "typescript") langId = @"typescript";
     
+    impl_->documentVersions[filePath] = 1;
     [impl_->manager sendNotification:@"textDocument/didOpen" params:@{
         @"textDocument": @{
             @"uri": uri,
@@ -431,15 +453,26 @@ void LSPClient::didOpen(const std::string& filePath, const std::string& text) {
 
 void LSPClient::didChange(const std::string& filePath, const std::string& text) {
     NSString* uri = [NSString stringWithFormat:@"file://%@", [NSString stringWithUTF8String:filePath.c_str()]];
+    int version = ++(impl_->documentVersions[filePath]);
     [impl_->manager sendNotification:@"textDocument/didChange" params:@{
         @"textDocument": @{
             @"uri": uri,
-            @"version": @2
+            @"version": @(version)
         },
         @"contentChanges": @[
             @{ @"text": [NSString stringWithUTF8String:text.c_str()] }
         ]
     }];
+}
+
+void LSPClient::didClose(const std::string& filePath) {
+    NSString* uri = [NSString stringWithFormat:@"file://%@", [NSString stringWithUTF8String:filePath.c_str()]];
+    [impl_->manager sendNotification:@"textDocument/didClose" params:@{
+        @"textDocument": @{
+            @"uri": uri
+        }
+    }];
+    impl_->documentVersions.erase(filePath);
 }
 
 void LSPClient::didSave(const std::string& filePath) {
@@ -562,12 +595,17 @@ std::vector<DocumentSymbol> LSPClient::getDocumentSymbols(const std::string& fil
             default: s.kind = "Symbol"; break;
         }
         
-        // Symbol range
+        // Symbol range — start position
         NSDictionary* range = sym[@"range"] ?: sym[@"location"][@"range"];
         if (range) {
             NSDictionary* start = range[@"start"];
             s.line = [start[@"line"] intValue] + 1;
             s.column = [start[@"character"] intValue] + 1;
+            NSDictionary* end = range[@"end"];
+            if (end) {
+                s.endLine = [end[@"line"] intValue] + 1;
+                s.endColumn = [end[@"character"] intValue] + 1;
+            }
         } else {
             s.line = 1;
             s.column = 1;

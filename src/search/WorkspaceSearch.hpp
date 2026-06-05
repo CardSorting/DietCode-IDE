@@ -2,6 +2,7 @@
 
 #include "SearchResult.hpp"
 
+#include <atomic>
 #include <filesystem>
 #include <string>
 #include <vector>
@@ -15,7 +16,7 @@ struct WorkspaceSearchResult {
 
 struct WorkspaceSearchOptions {
     bool caseSensitive{false};
-    bool cancelRequested{false};
+    std::atomic<bool> cancelRequested{false};
 };
 
 } // namespace dietcode::search

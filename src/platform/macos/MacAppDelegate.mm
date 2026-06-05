@@ -48,6 +48,20 @@
     return NO;
 }
 
+// Modern replacement for application:openFile: (macOS 13+).
+- (void)application:(NSApplication *)application openURLs:(NSArray<NSURL *> *)urls {
+    for (NSURL* url in urls) {
+        if ([url isFileURL]) {
+            NSString* path = [url path];
+            if (self.windowController && [[self.windowController window] isVisible]) {
+                [self.windowController openFileAtPath:path line:1 column:1];
+            } else {
+                self.pendingFileToOpen = path;
+            }
+        }
+    }
+}
+
 - (BOOL)applicationShouldTerminateAfterLastWindowClosed:(NSApplication*)sender {
     return YES;
 }

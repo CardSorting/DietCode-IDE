@@ -273,6 +273,12 @@ def load_params(args: argparse.Namespace) -> dict[str, Any]:
             params["maxBytes"] = args.max_bytes
         if args.max_hunks is not None:
             params["maxHunks"] = args.max_hunks
+        if args.hunk_offset is not None:
+            params["hunkOffset"] = args.hunk_offset
+        if args.include_lines:
+            params["includeLines"] = True
+        if args.max_lines_per_hunk is not None:
+            params["maxLinesPerHunk"] = args.max_lines_per_hunk
         return params
 
     sources = [args.params_json is not None, args.params_file is not None, args.params_stdin]
@@ -558,6 +564,9 @@ def run_self_test() -> dict[str, Any]:
         offset=None,
         max_bytes=None,
         max_hunks=None,
+        hunk_offset=None,
+        include_lines=False,
+        max_lines_per_hunk=None,
     )
     patch_args.params_json = "{}"
     try:
@@ -566,6 +575,23 @@ def run_self_test() -> dict[str, Any]:
     except ValueError:
         conflict_ok = True
     checks.append({"name": "patch.params_conflict", "ok": conflict_ok})
+    patch_args.params_json = None
+    patch_args.patch_file = "/dev/null"
+    patch_args.patch_stdin = False
+    patch_args.hunk_offset = 25
+    patch_args.include_lines = True
+    patch_args.max_lines_per_hunk = 12
+    try:
+        patch_params = load_params(patch_args)
+        cursor_ok = (
+            patch_params.get("hunkOffset") == 25
+            and patch_params.get("includeLines") is True
+            and patch_params.get("maxLinesPerHunk") == 12
+            and patch_params.get("patch") == ""
+        )
+    except ValueError:
+        cursor_ok = False
+    checks.append({"name": "patch.params_hunk_offset", "ok": cursor_ok})
 
     ok = all(check["ok"] for check in checks)
     return {"ok": ok, "checks": checks}
@@ -597,11 +623,23 @@ def main() -> int:
     parser.add_argument("--params-file", help="Read RPC params JSON object from a file.")
     parser.add_argument("--params-stdin", action="store_true", help="Read RPC params JSON object from stdin.")
     parser.add_argument("--path", help="Path used with --patch-file or --patch-stdin.")
+    parser.add_argument("--grep", help="Call workspace.grep with a literal query.")
+    parser.add_argument("--search-text", help="Call search.text with a literal query.")
+    parser.add_argument("--result-offset", type=int, help="Zero-based result cursor for workspace.grep or search.text.")
+    parser.add_argument("--max-results", type=int, help="Maximum results for workspace.grep or search.text.")
+    parser.add_argument("--before", type=int, help="Context lines before each search.text result.")
+    parser.add_argument("--after", type=int, help="Context lines after each search.text result.")
+    parser.add_argument("--case-sensitive", action="store_true", help="Use case-sensitive literal grep/text search.")
+    parser.add_argument("--include", action="append", help="Include glob for grep/text search. May be repeated.")
+    parser.add_argument("--exclude", action="append", help="Exclude glob for grep/text search. May be repeated.")
     parser.add_argument("--diff-source", choices=["unstaged", "staged", "file"], help="Call diff.chunk for unstaged, staged, or file diff.")
     parser.add_argument("--diff-hunks", action="store_true", help="Use diff.hunks with --diff-source instead of diff.chunk.")
     parser.add_argument("--offset", type=int, help="Byte offset for diff.chunk or patch.chunk.")
     parser.add_argument("--max-bytes", type=int, help="Maximum bytes for diff.chunk or patch.chunk.")
     parser.add_argument("--max-hunks", type=int, help="Maximum hunk summaries for diff.hunks or patch.hunks.")
+    parser.add_argument("--hunk-offset", type=int, help="Zero-based hunk cursor for diff.hunks or patch.hunks.")
+    parser.add_argument("--include-lines", action="store_true", help="Include literal per-row old/new line evidence in hunk responses.")
+    parser.add_argument("--max-lines-per-hunk", type=int, help="Maximum literal line rows per returned hunk.")
     parser.add_argument("--patch-file", help="Read unified diff patch text from a file.")
     parser.add_argument("--patch-stdin", action="store_true", help="Read unified diff patch text from stdin.")
     parser.add_argument("--patch-hunks", action="store_true", help="Default patch stdin/file calls to patch.hunks instead of patch.validate.")
@@ -665,6 +703,8 @@ def main() -> int:
 
         if args.batch_stdin and args.params_stdin:
             raise ValueError("provide only one of --batch-stdin or --params-stdin")
+        if args.grep and args.search_text:
+            raise ValueError("provide only one of --grep or --search-text")
         batch_mode = args.batch_file is not None or args.batch_stdin
         batch_requests = load_batch_requests(args)
         if batch_mode:
@@ -697,6 +737,30 @@ def main() -> int:
                 shortcut_params["maxBytes"] = args.max_bytes
             if args.max_hunks is not None:
                 shortcut_params["maxHunks"] = args.max_hunks
+            if args.hunk_offset is not None:
+                shortcut_params["hunkOffset"] = args.hunk_offset
+            if args.include_lines:
+                shortcut_params["includeLines"] = True
+            if args.max_lines_per_hunk is not None:
+                shortcut_params["maxLinesPerHunk"] = args.max_lines_per_hunk
+        elif args.grep or args.search_text:
+            shortcut_method = "workspace.grep" if args.grep else "search.text"
+            shortcut_params = {"query": args.grep or args.search_text}
+            if args.max_results is not None:
+                shortcut_params["maxResults"] = args.max_results
+            if args.result_offset is not None:
+                shortcut_params["resultOffset"] = args.result_offset
+            if args.case_sensitive:
+                shortcut_params["caseSensitive"] = True
+            if args.include:
+                shortcut_params["include"] = args.include
+            if args.exclude:
+                shortcut_params["exclude"] = args.exclude
+            if args.search_text:
+                if args.before is not None:
+                    shortcut_params["before"] = args.before
+                if args.after is not None:
+                    shortcut_params["after"] = args.after
         elif args.capabilities:
             with DietCodeAgentClient(
                 app_path=app_path,

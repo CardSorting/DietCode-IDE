@@ -13,16 +13,23 @@
 
 static char g_sockPath[1024] = {0};
 static char g_tokenPath[1024] = {0};
+static volatile sig_atomic_t g_shouldTerminate = 0;
 
 void handle_termination_signal(int sig) {
     (void)sig;
-    if (g_sockPath[0] != '\0') {
-        unlink(g_sockPath);
-    }
-    if (g_tokenPath[0] != '\0') {
-        unlink(g_tokenPath);
-    }
-    _exit(0);
+    g_shouldTerminate = 1;
+    // Post a graceful termination to the main run loop instead of _exit().
+    // This allows applicationShouldTerminate: to confirm unsaved changes
+    // and cleanupProcesses to run before exit.
+    dispatch_async(dispatch_get_main_queue(), ^{
+        if (g_sockPath[0] != '\0') {
+            unlink(g_sockPath);
+        }
+        if (g_tokenPath[0] != '\0') {
+            unlink(g_tokenPath);
+        }
+        [NSApp terminate:nil];
+    });
 }
 
 static bool connect_control_socket(const char* sockPath) {

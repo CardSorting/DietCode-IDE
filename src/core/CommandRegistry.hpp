@@ -26,8 +26,11 @@ public:
         if (!command || !command->execute) {
             return false;
         }
-        command->execute();
-        return true;
+        try {
+            return command->execute();
+        } catch (...) {
+            return false;
+        }
     }
 
     [[nodiscard]] std::vector<Command> all() const {

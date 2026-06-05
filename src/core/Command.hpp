@@ -18,7 +18,7 @@ struct Command {
     std::string menuPath;
     std::string shortcut;
     CommandRisk risk{CommandRisk::Low};
-    std::function<void()> execute;
+    std::function<bool()> execute;
 };
 
 } // namespace dietcode::core

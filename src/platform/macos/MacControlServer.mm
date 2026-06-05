@@ -158,8 +158,10 @@ NSString* CleanUnifiedDiffPath(NSString* rawPath) {
     return path;
 }
 
-NSDictionary* UnifiedDiffHunksResponse(NSString* diffText, NSInteger maxHunks) {
+NSDictionary* UnifiedDiffHunksResponse(NSString* diffText, NSInteger maxHunks, NSInteger hunkOffset, BOOL includeLines, NSInteger maxLinesPerHunk) {
     NSInteger limit = maxHunks > 0 ? MIN(maxHunks, 5000) : 500;
+    NSInteger offset = MAX(hunkOffset, 0);
+    NSInteger lineLimit = maxLinesPerHunk > 0 ? MIN(maxLinesPerHunk, 1000) : 200;
     NSMutableArray* files = [NSMutableArray array];
     NSError* regErr = nil;
     NSRegularExpression* hunkRegex = [NSRegularExpression regularExpressionWithPattern:@"^@@ -(\\d+),?(\\d*) \\+(\\d+),?(\\d*) @@" options:0 error:&regErr];
@@ -172,16 +174,27 @@ NSDictionary* UnifiedDiffHunksResponse(NSString* diffText, NSInteger maxHunks) {
     __block NSMutableDictionary* currentFile = nil;
     __block NSMutableArray* currentHunks = nil;
     __block NSMutableDictionary* currentHunk = nil;
+    __block NSMutableArray* currentLineRows = nil;
     __block NSInteger added = 0;
     __block NSInteger removed = 0;
     __block NSInteger context = 0;
+    __block NSInteger oldLineCursor = 0;
+    __block NSInteger newLineCursor = 0;
+    __block NSInteger currentHunkTotalLineRows = 0;
+    __block NSInteger currentHunkReturnedLineRows = 0;
+    __block BOOL currentHunkLinesTruncated = NO;
+    __block BOOL collectCurrentLines = NO;
     __block NSInteger totalFiles = 0;
     __block NSInteger totalHunks = 0;
     __block NSInteger returnedHunks = 0;
     __block NSInteger totalAdded = 0;
     __block NSInteger totalRemoved = 0;
     __block BOOL truncated = NO;
-    __block BOOL currentFileTruncated = NO;
+    __block NSInteger currentFileTotalHunks = 0;
+    __block NSInteger currentFileOmittedBefore = 0;
+    __block NSInteger currentFileOmittedAfter = 0;
+    __block NSInteger currentFileAdded = 0;
+    __block NSInteger currentFileRemoved = 0;
 
     void (^ensureFile)(NSInteger) = ^(NSInteger lineNumber) {
         if (currentFile) return;
@@ -199,36 +212,69 @@ NSDictionary* UnifiedDiffHunksResponse(NSString* diffText, NSInteger maxHunks) {
         currentHunk[@"addedLines"] = @(added);
         currentHunk[@"removedLines"] = @(removed);
         currentHunk[@"contextLines"] = @(context);
+        if (includeLines) {
+            currentHunk[@"lines"] = currentLineRows ?: @[];
+            currentHunk[@"totalLineRows"] = @(currentHunkTotalLineRows);
+            currentHunk[@"returnedLineRows"] = @(currentHunkReturnedLineRows);
+            currentHunk[@"linesTruncated"] = @(currentHunkLinesTruncated);
+        }
+        NSInteger hunkIndex = totalHunks;
+        currentHunk[@"hunkIndex"] = @(hunkIndex);
+        currentHunk[@"hunkOrdinal"] = @(hunkIndex + 1);
         totalHunks++;
+        currentFileTotalHunks++;
         totalAdded += added;
         totalRemoved += removed;
-        if (returnedHunks < limit) {
+        currentFileAdded += added;
+        currentFileRemoved += removed;
+        if (hunkIndex < offset) {
+            currentFileOmittedBefore++;
+        } else if (returnedHunks < limit) {
             [currentHunks addObject:currentHunk];
             returnedHunks++;
         } else {
             truncated = YES;
-            currentFileTruncated = YES;
+            currentFileOmittedAfter++;
         }
         currentHunk = nil;
+        currentLineRows = nil;
         added = 0;
         removed = 0;
         context = 0;
+        oldLineCursor = 0;
+        newLineCursor = 0;
+        currentHunkTotalLineRows = 0;
+        currentHunkReturnedLineRows = 0;
+        currentHunkLinesTruncated = NO;
+        collectCurrentLines = NO;
     };
 
     void (^finishFile)(void) = ^{
         if (!currentFile) return;
         finishHunk();
-        BOOL hasEvidence = [currentFile[@"fileHeader"] length] > 0 || [currentFile[@"oldPath"] length] > 0 || [currentFile[@"newPath"] length] > 0 || currentHunks.count > 0;
-        if (hasEvidence) {
+        BOOL hasFileEvidence = currentFileTotalHunks > 0 || [currentFile[@"fileHeader"] length] > 0 || [currentFile[@"oldPath"] length] > 0 || [currentFile[@"newPath"] length] > 0;
+        if (hasFileEvidence) {
             totalFiles++;
+        }
+        BOOL hasMetadataOnlyEvidence = currentFileTotalHunks == 0 && hasFileEvidence;
+        if (currentHunks.count > 0 || hasMetadataOnlyEvidence) {
             currentFile[@"hunks"] = currentHunks ?: @[];
             currentFile[@"returnedHunks"] = @(currentHunks.count);
-            currentFile[@"truncated"] = @(currentFileTruncated);
+            currentFile[@"totalHunks"] = @(currentFileTotalHunks);
+            currentFile[@"omittedBefore"] = @(currentFileOmittedBefore);
+            currentFile[@"omittedAfter"] = @(currentFileOmittedAfter);
+            currentFile[@"addedLines"] = @(currentFileAdded);
+            currentFile[@"removedLines"] = @(currentFileRemoved);
+            currentFile[@"truncated"] = @(currentFileOmittedAfter > 0);
             [files addObject:currentFile];
         }
         currentFile = nil;
         currentHunks = nil;
-        currentFileTruncated = NO;
+        currentFileTotalHunks = 0;
+        currentFileOmittedBefore = 0;
+        currentFileOmittedAfter = 0;
+        currentFileAdded = 0;
+        currentFileRemoved = 0;
     };
 
     for (NSUInteger index = 0; index < lineCount; index++) {
@@ -275,22 +321,67 @@ NSDictionary* UnifiedDiffHunksResponse(NSString* diffText, NSInteger maxHunks) {
                 @"newStart": @([newStart integerValue]),
                 @"newLines": @(newCount.length > 0 ? [newCount integerValue] : 1)
             } mutableCopy];
+            oldLineCursor = [oldStart integerValue];
+            newLineCursor = [newStart integerValue];
+            NSInteger candidateHunkIndex = totalHunks;
+            collectCurrentLines = includeLines && candidateHunkIndex >= offset && candidateHunkIndex < offset + limit;
+            currentLineRows = collectCurrentLines ? [NSMutableArray array] : nil;
+            currentHunkTotalLineRows = 0;
+            currentHunkReturnedLineRows = 0;
+            currentHunkLinesTruncated = NO;
             continue;
         }
 
         if (currentHunk) {
             currentHunk[@"lineEnd"] = @(lineNumber);
+            NSString* kind = @"meta";
+            id oldLineValue = [NSNull null];
+            id newLineValue = [NSNull null];
+            NSString* text = line;
             if ([line hasPrefix:@"+"] && ![line hasPrefix:@"+++"]) {
+                kind = @"add";
+                newLineValue = @(newLineCursor);
+                text = [line substringFromIndex:1];
                 added++;
+                newLineCursor++;
             } else if ([line hasPrefix:@"-"] && ![line hasPrefix:@"---"]) {
+                kind = @"remove";
+                oldLineValue = @(oldLineCursor);
+                text = [line substringFromIndex:1];
                 removed++;
+                oldLineCursor++;
             } else if ([line hasPrefix:@" "]) {
+                kind = @"context";
+                oldLineValue = @(oldLineCursor);
+                newLineValue = @(newLineCursor);
+                text = [line substringFromIndex:1];
                 context++;
+                oldLineCursor++;
+                newLineCursor++;
+            } else if ([line hasPrefix:@"\\"]) {
+                kind = @"meta";
+            }
+            if (includeLines && collectCurrentLines) {
+                currentHunkTotalLineRows++;
+                if (currentHunkReturnedLineRows < lineLimit) {
+                    [currentLineRows addObject:@{
+                        @"diffLine": @(lineNumber),
+                        @"kind": kind,
+                        @"oldLine": oldLineValue,
+                        @"newLine": newLineValue,
+                        @"raw": line,
+                        @"text": text
+                    }];
+                    currentHunkReturnedLineRows++;
+                } else {
+                    currentHunkLinesTruncated = YES;
+                }
             }
         }
     }
 
     finishFile();
+    BOOL hasMoreHunks = offset + returnedHunks < totalHunks;
     return @{
         @"files": files,
         @"totalFiles": @(totalFiles),
@@ -299,6 +390,11 @@ NSDictionary* UnifiedDiffHunksResponse(NSString* diffText, NSInteger maxHunks) {
         @"totalAddedLines": @(totalAdded),
         @"totalRemovedLines": @(totalRemoved),
         @"maxHunks": @(limit),
+        @"hunkOffset": @(offset),
+        @"nextHunkOffset": hasMoreHunks ? @(offset + returnedHunks) : [NSNull null],
+        @"hasMoreHunks": @(hasMoreHunks),
+        @"includeLines": @(includeLines),
+        @"maxLinesPerHunk": @(lineLimit),
         @"truncated": @(truncated)
     };
 }
@@ -1519,11 +1615,11 @@ NSArray<NSString*>* ContextLines(const std::vector<std::string>& lines, NSIntege
             @{ @"name": @"workspace.getRoot", @"permission": @"Read", @"params": @{}, @"returns": @{ @"path": @"string" } },
             @{ @"name": @"workspace.openFolder", @"permission": @"Destructive", @"params": @{ @"path": @"directory path" }, @"returns": @{ @"opened": @"boolean" } },
             @{ @"name": @"workspace.listFiles", @"permission": @"Read", @"params": @{}, @"returns": @{ @"files": @"array" } },
-            @{ @"name": @"workspace.grep", @"permission": @"Read", @"params": @{ @"query": @"literal string", @"maxResults": @"number <= 500 optional" }, @"returns": @{ @"matches": @"array with matchSpans/contextBefore/contextAfter", @"mode": @"literal_substring", @"truncated": @"boolean" } },
+            @{ @"name": @"workspace.grep", @"permission": @"Read", @"params": @{ @"query": @"literal string", @"maxResults": @"number <= 500 optional", @"resultOffset": @"number optional" }, @"returns": @{ @"matches": @"array with resultIndex/matchSpans/contextBefore/contextAfter", @"mode": @"literal_substring", @"nextResultOffset": @"number|null", @"truncated": @"boolean" } },
             @{ @"name": @"workspace.openFile", @"permission": @"Read", @"params": @{ @"path": @"string" }, @"returns": @{ @"opened": @"boolean" } },
             @{ @"name": @"workspace.getRecentFiles", @"permission": @"Read", @"params": @{}, @"returns": @{ @"files": @"array" } },
             @{ @"name": @"search.files", @"permission": @"Read", @"params": @{ @"query": @"string", @"include": @"array optional", @"exclude": @"array optional", @"maxResults": @"number <= 500 optional" }, @"returns": @{ @"results": @"array" } },
-            @{ @"name": @"search.text", @"permission": @"Read", @"params": @{ @"query": @"literal string", @"before": @"number optional", @"after": @"number optional", @"maxResults": @"number <= 500 optional" }, @"returns": @{ @"results": @"array with matchSpans", @"mode": @"literal_substring", @"truncated": @"boolean" } },
+            @{ @"name": @"search.text", @"permission": @"Read", @"params": @{ @"query": @"literal string", @"before": @"number optional", @"after": @"number optional", @"maxResults": @"number <= 500 optional", @"resultOffset": @"number optional" }, @"returns": @{ @"results": @"array with resultIndex/matchSpans", @"mode": @"literal_substring", @"nextResultOffset": @"number|null", @"truncated": @"boolean" } },
             @{ @"name": @"search.todo", @"permission": @"Read", @"params": @{ @"include": @"array optional", @"maxResults": @"number <= 500 optional" }, @"returns": @{ @"results": @"array" } },
             @{ @"name": @"search.diagnostics", @"permission": @"Read", @"params": @{ @"severity": @"string optional", @"source": @"string optional" }, @"returns": @{ @"results": @"array" } },
             @{ @"name": @"file.read", @"permission": @"Read", @"params": @{ @"path": @"string" }, @"returns": @{ @"text": @"string" } },
@@ -1560,12 +1656,12 @@ NSArray<NSString*>* ContextLines(const std::vector<std::string>& lines, NSIntege
             @{ @"name": @"diff.stats", @"permission": @"Read", @"params": @{}, @"returns": @{ @"files": @"array", @"totalAdded": @"number", @"totalDeleted": @"number" } },
             @{ @"name": @"diff.file", @"permission": @"Read", @"params": @{ @"path": @"string" }, @"returns": @{ @"diff": @"string" } },
             @{ @"name": @"diff.chunk", @"permission": @"Read", @"params": @{ @"source": @"unstaged|staged|file", @"path": @"string optional", @"offset": @"number optional", @"maxBytes": @"number optional" }, @"returns": @{ @"chunk": @"string", @"offset": @"number", @"nextOffset": @"number", @"hasMore": @"boolean", @"sha256": @"string" } },
-            @{ @"name": @"diff.hunks", @"permission": @"Read", @"params": @{ @"source": @"unstaged|staged|file", @"path": @"string optional", @"maxHunks": @"number optional <= 5000" }, @"returns": @{ @"files": @"array with literal unified diff hunk headers", @"totalHunks": @"number", @"truncated": @"boolean", @"sha256": @"string" } },
+            @{ @"name": @"diff.hunks", @"permission": @"Read", @"params": @{ @"source": @"unstaged|staged|file", @"path": @"string optional", @"maxHunks": @"number optional <= 5000", @"hunkOffset": @"number optional", @"includeLines": @"boolean optional", @"maxLinesPerHunk": @"number optional <= 1000" }, @"returns": @{ @"files": @"array with literal unified diff hunk headers/lines", @"totalHunks": @"number", @"nextHunkOffset": @"number|null", @"truncated": @"boolean", @"sha256": @"string" } },
             @{ @"name": @"diff.previewPatch", @"permission": @"Read", @"params": @{ @"path": @"string", @"patch": @"unified diff" }, @"returns": @{ @"ok": @"boolean", @"risk": @"string" } },
             @{ @"name": @"patch.validate", @"permission": @"Read", @"params": @{ @"path": @"string", @"patch": @"unified diff" }, @"returns": @{ @"applies": @"boolean", @"changedLines": @"number", @"hunks": @"number" } },
             @{ @"name": @"patch.preview", @"permission": @"Read", @"params": @{ @"path": @"string", @"patch": @"unified diff" }, @"returns": @{ @"addedLines": @"number", @"removedLines": @"number", @"hunks": @"array" } },
             @{ @"name": @"patch.chunk", @"permission": @"Read", @"params": @{ @"patch": @"unified diff", @"offset": @"number optional", @"maxBytes": @"number optional" }, @"returns": @{ @"chunk": @"string", @"offset": @"number", @"nextOffset": @"number", @"hasMore": @"boolean", @"sha256": @"string" } },
-            @{ @"name": @"patch.hunks", @"permission": @"Read", @"params": @{ @"patch": @"unified diff", @"maxHunks": @"number optional <= 5000" }, @"returns": @{ @"files": @"array with literal unified diff hunk headers", @"totalHunks": @"number", @"truncated": @"boolean", @"sha256": @"string" } },
+            @{ @"name": @"patch.hunks", @"permission": @"Read", @"params": @{ @"patch": @"unified diff", @"maxHunks": @"number optional <= 5000", @"hunkOffset": @"number optional", @"includeLines": @"boolean optional", @"maxLinesPerHunk": @"number optional <= 1000" }, @"returns": @{ @"files": @"array with literal unified diff hunk headers/lines", @"totalHunks": @"number", @"nextHunkOffset": @"number|null", @"truncated": @"boolean", @"sha256": @"string" } },
             @{ @"name": @"patch.apply", @"permission": @"Edit/Destructive", @"params": @{ @"path": @"string", @"patch": @"unified diff", @"confirm": @"boolean optional" }, @"returns": @{ @"patched": @"boolean" } },
             @{ @"name": @"patch.applyBatch", @"permission": @"Edit/Destructive", @"params": @{ @"patches": @"array", @"dryRun": @"boolean optional", @"confirm": @"boolean optional" }, @"returns": @{ @"results": @"array" } },
             @{ @"name": @"patch.revertLast", @"permission": @"Edit", @"params": @{}, @"returns": @{ @"reverted": @"boolean" } },
@@ -4308,6 +4404,12 @@ static BOOL IsTextBinary(NSString* text) {
         NSArray* excludePatterns = params[@"exclude"] ?: @[];
         BOOL caseSensitive = [params[@"caseSensitive"] boolValue];
         NSInteger maxResults = params[@"maxResults"] ? [params[@"maxResults"] integerValue] : 200;
+        NSInteger resultOffset = params[@"resultOffset"] ? MAX([params[@"resultOffset"] integerValue], 0) : 0;
+        if (maxResults <= 0) {
+            *outErrCode = @"invalid_params";
+            *outErrMsg = @"maxResults must be greater than zero.";
+            return;
+        }
         if (maxResults > kMaxGrepResults) {
             *outErrCode = @"response_too_large";
             *outErrMsg = [NSString stringWithFormat:@"maxResults exceeds limit of %ld.", (long)kMaxGrepResults];
@@ -4319,6 +4421,8 @@ static BOOL IsTextBinary(NSString* text) {
         NSMutableArray* matches = [NSMutableArray array];
         BOOL truncated = NO;
         BOOL scanLimitReached = NO;
+        NSInteger totalMatchesSeen = 0;
+        BOOL hasMore = NO;
         
         std::error_code ec;
         std::filesystem::recursive_directory_iterator it(folder, ec);
@@ -4326,7 +4430,7 @@ static BOOL IsTextBinary(NSString* text) {
         NSInteger scannedFiles = 0;
         for (; it != end && !ec; it.increment(ec)) {
             const auto& entry = *it;
-            if (matches.count >= (NSUInteger)maxResults) break;
+            if (hasMore) break;
             std::filesystem::path p = entry.path();
             std::string filename = p.filename().string();
             std::string relForDir = std::filesystem::relative(p, folder, ec).string();
@@ -4382,33 +4486,45 @@ static BOOL IsTextBinary(NSString* text) {
                         NSArray* spans = LiteralMatchSpans(lineText, stdQuery, caseSensitive);
                         
                         if (spans.count > 0) {
+                            NSInteger resultIndex = totalMatchesSeen++;
+                            if (resultIndex < resultOffset) {
+                                continue;
+                            }
+                            if (matches.count >= (NSUInteger)maxResults) {
+                                truncated = YES;
+                                hasMore = YES;
+                                break;
+                            }
                             NSInteger lineNumber = (NSInteger)lineIdx + 1;
                             NSDictionary* firstSpan = spans.firstObject;
+                            NSString* preview = NSStringFromStdString(lineText);
                             [matches addObject:@{
+                                @"resultIndex": @(resultIndex),
                                 @"path": NSStringFromStdString(relPath),
                                 @"line": @(lineNumber),
                                 @"column": firstSpan[@"columnStart"] ?: @1,
                                 @"matchSpans": spans,
                                 @"matchCountOnLine": @(spans.count),
-                                @"preview": NSStringFromStdString(lineText),
+                                @"preview": preview,
+                                @"lineSha256": StableHashForString(preview),
                                 @"contextBefore": ContextLines(fileLines, (NSInteger)lineIdx - 2, (NSInteger)lineIdx - 1),
                                 @"contextAfter": ContextLines(fileLines, (NSInteger)lineIdx + 1, (NSInteger)lineIdx + 2)
                             }];
-                            if (matches.count >= (NSUInteger)maxResults) {
-                                truncated = YES;
-                                break;
-                            }
                         }
                     }
                 }
             }
         }
+        id nextOffset = hasMore ? @(resultOffset + (NSInteger)matches.count) : [NSNull null];
         *outResult = @{
             @"matches": matches,
             @"query": query,
             @"mode": @"literal_substring",
             @"caseSensitive": @(caseSensitive),
             @"maxResults": @(maxResults),
+            @"resultOffset": @(resultOffset),
+            @"nextResultOffset": nextOffset,
+            @"hasMore": @(hasMore),
             @"truncated": @(truncated || scanLimitReached),
             @"scanLimitReached": @(scanLimitReached),
             @"scannedFiles": @(MIN(scannedFiles, kMaxSearchScanFiles))
@@ -4498,6 +4614,11 @@ static BOOL IsTextBinary(NSString* text) {
             return;
         }
         NSInteger maxResults = params[@"maxResults"] ? [params[@"maxResults"] integerValue] : 200;
+        if (maxResults <= 0) {
+            *outErrCode = @"invalid_params";
+            *outErrMsg = @"maxResults must be greater than zero.";
+            return;
+        }
         if (maxResults > kMaxGrepResults) {
             *outErrCode = @"too_many_results";
             *outErrMsg = [NSString stringWithFormat:@"maxResults exceeds limit of %ld.", (long)kMaxGrepResults];
@@ -4505,6 +4626,7 @@ static BOOL IsTextBinary(NSString* text) {
         }
         NSInteger before = params[@"before"] ? [params[@"before"] integerValue] : 2;
         NSInteger after = params[@"after"] ? [params[@"after"] integerValue] : 2;
+        NSInteger resultOffset = params[@"resultOffset"] ? MAX([params[@"resultOffset"] integerValue], 0) : 0;
         BOOL caseSensitive = [params[@"caseSensitive"] boolValue];
         NSArray* includes = params[@"include"] ?: @[];
         NSArray* excludes = params[@"exclude"] ?: @[];
@@ -4515,11 +4637,13 @@ static BOOL IsTextBinary(NSString* text) {
         NSInteger scannedFiles = 0;
         BOOL truncated = NO;
         BOOL scanLimitReached = NO;
+        NSInteger totalMatchesSeen = 0;
+        BOOL hasMore = NO;
         std::filesystem::recursive_directory_iterator it(folder, ec);
         std::filesystem::recursive_directory_iterator end;
         for (; it != end && !ec; it.increment(ec)) {
             const auto& entry = *it;
-            if (results.count >= (NSUInteger)maxResults) break;
+            if (hasMore) break;
             std::filesystem::path p = entry.path();
             std::string relPath = std::filesystem::relative(p, folder, ec).string();
             if (entry.is_directory(ec)) {
@@ -4544,29 +4668,39 @@ static BOOL IsTextBinary(NSString* text) {
             for (size_t i = 0; i < lines.size(); i++) {
                 NSArray* spans = LiteralMatchSpans(lines[i], needle, caseSensitive);
                 if (spans.count == 0) continue;
+                NSInteger resultIndex = totalMatchesSeen++;
+                if (resultIndex < resultOffset) continue;
+                if (results.count >= (NSUInteger)maxResults) {
+                    truncated = YES;
+                    hasMore = YES;
+                    break;
+                }
                 NSDictionary* firstSpan = spans.firstObject;
+                NSString* preview = NSStringFromStdString(lines[i]);
                 [results addObject:@{
+                    @"resultIndex": @(resultIndex),
                     @"path": NSStringFromStdString(relPath),
                     @"line": @(i + 1),
                     @"column": firstSpan[@"columnStart"] ?: @1,
                     @"matchSpans": spans,
                     @"matchCountOnLine": @(spans.count),
-                    @"preview": NSStringFromStdString(lines[i]),
+                    @"preview": preview,
+                    @"lineSha256": StableHashForString(preview),
                     @"contextBefore": ContextLines(lines, (NSInteger)i - before, (NSInteger)i - 1),
                     @"contextAfter": ContextLines(lines, (NSInteger)i + 1, (NSInteger)i + after)
                 }];
-                if (results.count >= (NSUInteger)maxResults) {
-                    truncated = YES;
-                    break;
-                }
             }
         }
+        id nextOffset = hasMore ? @(resultOffset + (NSInteger)results.count) : [NSNull null];
         *outResult = @{
             @"results": results,
             @"query": query,
             @"mode": @"literal_substring",
             @"caseSensitive": @(caseSensitive),
             @"maxResults": @(maxResults),
+            @"resultOffset": @(resultOffset),
+            @"nextResultOffset": nextOffset,
+            @"hasMore": @(hasMore),
             @"truncated": @(truncated || scanLimitReached),
             @"scanLimitReached": @(scanLimitReached),
             @"scannedFiles": @(MIN(scannedFiles, kMaxSearchScanFiles))
@@ -5232,6 +5366,9 @@ static BOOL IsTextBinary(NSString* text) {
         NSString* ws = [self safeWorkspacePath];
         NSString* source = [params[@"source"] lowercaseString] ?: @"unstaged";
         NSInteger maxHunks = params[@"maxHunks"] ? [params[@"maxHunks"] integerValue] : 500;
+        NSInteger hunkOffset = params[@"hunkOffset"] ? [params[@"hunkOffset"] integerValue] : 0;
+        BOOL includeLines = [params[@"includeLines"] boolValue];
+        NSInteger maxLinesPerHunk = params[@"maxLinesPerHunk"] ? [params[@"maxLinesPerHunk"] integerValue] : 200;
         if (!ws) {
             *outErrCode = @"invalid_request";
             *outErrMsg = @"No open workspace.";
@@ -5256,7 +5393,7 @@ static BOOL IsTextBinary(NSString* text) {
             *outErrMsg = @"source must be one of unstaged, staged, or file.";
             return;
         }
-        NSMutableDictionary* response = [UnifiedDiffHunksResponse(diff ?: @"", maxHunks) mutableCopy];
+        NSMutableDictionary* response = [UnifiedDiffHunksResponse(diff ?: @"", maxHunks, hunkOffset, includeLines, maxLinesPerHunk) mutableCopy];
         response[@"source"] = source;
         response[@"path"] = absPath ?: @"";
         response[@"mode"] = @"literal_unified_diff_hunks";
@@ -5355,12 +5492,15 @@ static BOOL IsTextBinary(NSString* text) {
     if ([method isEqualToString:@"patch.hunks"]) {
         NSString* patchStr = params[@"patch"] ?: @"";
         NSInteger maxHunks = params[@"maxHunks"] ? [params[@"maxHunks"] integerValue] : 500;
+        NSInteger hunkOffset = params[@"hunkOffset"] ? [params[@"hunkOffset"] integerValue] : 0;
+        BOOL includeLines = [params[@"includeLines"] boolValue];
+        NSInteger maxLinesPerHunk = params[@"maxLinesPerHunk"] ? [params[@"maxLinesPerHunk"] integerValue] : 200;
         if (patchStr.length == 0) {
             *outErrCode = @"invalid_params";
             *outErrMsg = @"patch parameter required.";
             return;
         }
-        NSMutableDictionary* response = [UnifiedDiffHunksResponse(patchStr, maxHunks) mutableCopy];
+        NSMutableDictionary* response = [UnifiedDiffHunksResponse(patchStr, maxHunks, hunkOffset, includeLines, maxLinesPerHunk) mutableCopy];
         response[@"mode"] = @"literal_unified_diff_hunks";
         response[@"sha256"] = StableHashForString(patchStr ?: @"");
         *outResult = response;

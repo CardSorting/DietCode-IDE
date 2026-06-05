@@ -15,6 +15,7 @@
     NSString* tempDir = NSTemporaryDirectory() ?: @"/tmp";
     NSString* tempPath = [tempDir stringByAppendingPathComponent:[NSString stringWithFormat:@"dietcode_buffer_diff_%u.txt", arc4random()]];
 
+    @try {
     NSError* err = nil;
     unlink([tempPath UTF8String]);
     [currentText writeToFile:tempPath atomically:YES encoding:NSUTF8StringEncoding error:&err];
@@ -33,11 +34,13 @@
         NSData* data = [[outPipe fileHandleForReading] readDataToEndOfFile];
         [task waitUntilExit];
         NSString* diff = [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
-        [[NSFileManager defaultManager] removeItemAtPath:tempPath error:nil];
         return diff ?: @"";
     } @catch (NSException* e) {
-        [[NSFileManager defaultManager] removeItemAtPath:tempPath error:nil];
         return @"";
+    }
+
+    } @finally {
+        [[NSFileManager defaultManager] removeItemAtPath:tempPath error:nil];
     }
 }
 

@@ -125,6 +125,8 @@ BOOL checkBracketBalance(NSString* text) {
     NSString* tempSrcPath = [tempDir stringByAppendingPathComponent:[NSString stringWithFormat:@"dietcode_preview_src_%u.txt", arc4random()]];
     NSString* tempDiffPath = [tempDir stringByAppendingPathComponent:[NSString stringWithFormat:@"dietcode_preview_diff_%u.diff", arc4random()]];
 
+    // RAII-style cleanup: guarantee temp files are removed on all exit paths.
+    @try {
     NSError* err = nil;
     unlink([tempSrcPath UTF8String]);
     [currentText writeToFile:tempSrcPath atomically:YES encoding:NSUTF8StringEncoding error:&err];
@@ -134,7 +136,6 @@ BOOL checkBracketBalance(NSString* text) {
     unlink([tempDiffPath UTF8String]);
     [patch writeToFile:tempDiffPath atomically:YES encoding:NSUTF8StringEncoding error:&err];
     if (err) {
-        [[NSFileManager defaultManager] removeItemAtPath:tempSrcPath error:nil];
         return @{ @"ok": @NO, @"error": @"Failed to write temp diff patch." };
     }
 
@@ -154,8 +155,6 @@ BOOL checkBracketBalance(NSString* text) {
     int status = [task terminationStatus];
     if (status != 0) {
         NSString* errMsg = [[NSString alloc] initWithData:errData encoding:NSUTF8StringEncoding];
-        [[NSFileManager defaultManager] removeItemAtPath:tempSrcPath error:nil];
-        [[NSFileManager defaultManager] removeItemAtPath:tempDiffPath error:nil];
 
         return @{
             @"ok": @NO,
@@ -165,8 +164,6 @@ BOOL checkBracketBalance(NSString* text) {
     }
 
     NSString* patchedText = [NSString stringWithContentsOfFile:tempSrcPath encoding:NSUTF8StringEncoding error:nil];
-    [[NSFileManager defaultManager] removeItemAtPath:tempSrcPath error:nil];
-    [[NSFileManager defaultManager] removeItemAtPath:tempDiffPath error:nil];
 
     if (!patchedText) {
         return @{ @"ok": @NO, @"error": @"Failed to read patched output." };
@@ -266,6 +263,12 @@ BOOL checkBracketBalance(NSString* text) {
     result[@"syntaxErrors"] = syntaxErrors;
 
     return result;
+
+    } @finally {
+        // Guaranteed cleanup of temp files on all exit paths (normal, error, exception).
+        [[NSFileManager defaultManager] removeItemAtPath:tempSrcPath error:nil];
+        [[NSFileManager defaultManager] removeItemAtPath:tempDiffPath error:nil];
+    }
 }
 
 @end

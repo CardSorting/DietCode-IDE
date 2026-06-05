@@ -14,9 +14,14 @@ struct UndoEntry {
 
 class UndoRedoStack {
 public:
+    static constexpr std::size_t kMaxUndoDepth = 500;
+
     void record(std::string before, std::string after) {
         if (before == after) {
             return;
+        }
+        if (undo_.size() >= kMaxUndoDepth) {
+            undo_.erase(undo_.begin());
         }
         undo_.push_back(UndoEntry{std::move(before), std::move(after)});
         redo_.clear();

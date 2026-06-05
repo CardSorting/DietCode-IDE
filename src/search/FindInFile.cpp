@@ -1,4 +1,5 @@
 #include "search/FindInFile.hpp"
+#include "utils/StringUtils.hpp"
 
 #include <algorithm>
 #include <cctype>
@@ -7,13 +8,8 @@ namespace dietcode::search {
 
 namespace {
 
-std::string lowerCopy(const std::string& value) {
-    std::string lowered = value;
-    std::transform(lowered.begin(), lowered.end(), lowered.begin(), [](unsigned char ch) {
-        return static_cast<char>(std::tolower(ch));
-    });
-    return lowered;
-}
+// Use dietcode::utils::toLowerAscii for case-insensitive matching.
+using dietcode::utils::toLowerAscii;
 
 } // namespace
 
@@ -25,11 +21,11 @@ std::vector<SearchResult> findInFile(const editor::TextBuffer& buffer,
         return results;
     }
 
-    const std::string needle = options.caseSensitive ? query : lowerCopy(query);
+    const std::string needle = options.caseSensitive ? query : toLowerAscii(query);
 
     for (std::size_t lineIndex = 0; lineIndex < buffer.lineCount(); ++lineIndex) {
         const std::string& originalLine = buffer.line(lineIndex);
-        const std::string haystack = options.caseSensitive ? originalLine : lowerCopy(originalLine);
+        const std::string haystack = options.caseSensitive ? originalLine : toLowerAscii(originalLine);
 
         std::size_t offset = 0;
         while (true) {

@@ -1,14 +1,29 @@
 #include "filesystem/FileService.hpp"
 
+#include <cerrno>
+#include <chrono>
+#include <cstdio>
 #include <fstream>
 #include <iterator>
 #include <system_error>
 #include <utility>
-#include <chrono>
+
+#ifdef __APPLE__
+#include <unistd.h>
+#endif
 
 namespace dietcode::filesystem {
 
+static constexpr std::uintmax_t kMaxReadableFileSize = 50ULL * 1024 * 1024; // 50 MB
+
 FileReadResult FileService::readTextFile(const std::filesystem::path& path) const {
+    // Guard against opening excessively large files that would OOM.
+    std::error_code sizeEc;
+    const auto fileSize = std::filesystem::file_size(path, sizeEc);
+    if (!sizeEc && fileSize > kMaxReadableFileSize) {
+        return FileReadResult{false, {}, "File too large to open (" + std::to_string(fileSize / (1024 * 1024)) + " MB). Maximum is 50 MB."};
+    }
+
     std::ifstream file(path, std::ios::binary);
     if (!file) {
         return FileReadResult{false, {}, "Could not open the file for reading."};
@@ -41,6 +56,17 @@ FileWriteResult FileService::writeTextFile(const std::filesystem::path& path, co
         std::filesystem::remove(tempPath, ec);
         return FileWriteResult{false, "The file could not be written completely."};
     }
+
+    // Flush the C++ stream buffer, then fsync the underlying fd to ensure
+    // data is durable on disk before we rename. Without this, a power loss
+    // after rename can leave a zero-length file on APFS/HFS+.
+    file.flush();
+#ifdef __APPLE__
+    if (FILE* cFile = std::fopen(tempPath.c_str(), "r")) {
+        ::fsync(::fileno(cFile));
+        std::fclose(cFile);
+    }
+#endif
     file.close();
 
     std::error_code ec;
