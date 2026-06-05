@@ -42,7 +42,7 @@ def get_sha256(data):
     return hashlib.sha256(data).hexdigest()
 
 def main():
-    print("=== DietCode v1.6.2 Manifest Discipline Verification Suite ===")
+    print("=== DietCode v1.6.3 Version Consistency Verification Suite ===")
     
     if not os.path.exists(SOCKET_PATH):
         print(f"Control socket not found: {SOCKET_PATH}", file=sys.stderr)
@@ -59,6 +59,7 @@ def main():
         res = call(sock, token, "rpc.ping")
         print(f"Ping result: {res}")
         assert res.get("ok"), "Ping failed"
+        assert res.get("result", {}).get("version") == "1.6.3", f"Expected version 1.6.3 in ping, got {res.get('result', {}).get('version')}"
 
         # Get workspace root
         res = call(sock, token, "workspace.getRoot")
@@ -73,7 +74,7 @@ def main():
         assert workspace_root, "Failed to get workspace root"
 
         # Create a test target file
-        test_file_path = os.path.join(workspace_root, "test_target_v1_6_2.txt")
+        test_file_path = os.path.join(workspace_root, "test_target_v1_6_3.txt")
         
         def reset_test_file():
             with open(test_file_path, "w") as f:
@@ -84,12 +85,12 @@ def main():
 
         try:
             print("Opening file in editor...")
-            call(sock, token, "workspace.openFile", {"path": "test_target_v1_6_2.txt"})
+            call(sock, token, "workspace.openFile", {"path": "test_target_v1_6_3.txt"})
             time.sleep(0.5)
 
             diff_content = (
-                "--- test_target_v1_6_2.txt\n"
-                "+++ test_target_v1_6_2.txt\n"
+                "--- test_target_v1_6_3.txt\n"
+                "+++ test_target_v1_6_3.txt\n"
                 "@@ -1,3 +1,3 @@\n"
                 " Line 1: Initial state\n"
                 "-Line 2: Unchanged content\n"
@@ -99,7 +100,7 @@ def main():
 
             combo_plan = {
                 "schemaVersion": "1.6.2",
-                "goal": "Test v1.6.2 Manifest Discipline",
+                "goal": "Test v1.6.3 Version Consistency",
                 "policy": {
                     "permissions": ["edit", "read"]
                 },
@@ -108,14 +109,14 @@ def main():
                     "maxFilesTouched": 2
                 },
                 "scope": {
-                    "include": ["test_target_v1_6_2.txt"]
+                    "include": ["test_target_v1_6_3.txt"]
                 },
                 "steps": [
                     {
                         "id": "s1",
                         "chip": "patch.apply@1",
                         "params": {
-                            "path": "test_target_v1_6_2.txt",
+                            "path": "test_target_v1_6_3.txt",
                             "patch": diff_content,
                             "allowDirtyBuffer": True
                         }
@@ -332,11 +333,6 @@ def main():
             call(sock, token, "rpc.ping")
             time.sleep(0.1) # brief sleep for IO persistence
             
-            # Check if rotation happened correctly:
-            # - log3_path should contain "legacy log 2"
-            # - log2_path should contain "legacy log 1"
-            # - log1_path should contain the 5MB log
-            # - AUDIT_LOG_PATH should contain the new audit log entry
             assert os.path.exists(log3_path), "log.3 should exist"
             assert os.path.exists(log2_path), "log.2 should exist"
             assert os.path.exists(log1_path), "log.1 should exist"
@@ -355,7 +351,35 @@ def main():
             assert os.path.getsize(log1_path) > 5 * 1024 * 1024, "log.1 should be the oversized log"
             assert os.path.getsize(AUDIT_LOG_PATH) < 1000, "Active log should be small"
             
-            print("\nAll v1.6.2 Manifest Discipline Verification Cases Passed Successfully!")
+            # Case 11: rpc.version and recovery.schemaInfo reporting consistency
+            print("\nCase 11: Version reporting consistency")
+            v_res = call(sock, token, "rpc.version")
+            print(f"rpc.version result: {v_res}")
+            assert v_res.get("ok"), "rpc.version failed"
+            v_info = v_res.get("result", {})
+            assert v_info.get("appVersion") == "1.6.3"
+            assert v_info.get("controlProtocolVersion") == "1.6"
+            assert v_info.get("transactionSchemaVersion") == "1.6.2"
+            assert v_info.get("supportedRollbackSchemas") == ["1.6.2"]
+            assert v_info.get("supportedInspectOnlySchemas") == ["1.6.1"]
+
+            s_res = call(sock, token, "recovery.schemaInfo")
+            print(f"recovery.schemaInfo result: {s_res}")
+            assert s_res.get("ok"), "recovery.schemaInfo failed"
+            s_info = s_res.get("result", {})
+            assert s_info.get("transactionSchemaVersion") == "1.6.2"
+            assert s_info.get("supportedRollbackSchemas") == ["1.6.2"]
+            assert s_info.get("supportedInspectOnlySchemas") == ["1.6.1"]
+            
+            # Assert rpc.version constants match manifest creation
+            # Load manifest from valid combo (Case 1)
+            cid1_manifest_path = os.path.join(BACKUPS_DIR, cid1, "manifest.json")
+            with open(cid1_manifest_path, "r") as f:
+                manifest_parsed = json.loads(f.read())
+            print(f"Case 1 manifest schemaVersion: {manifest_parsed.get('schemaVersion')}")
+            assert manifest_parsed.get("schemaVersion") == v_info.get("transactionSchemaVersion"), "schemaVersion mismatch!"
+
+            print("\nAll v1.6.3 Version Consistency Verification Cases Passed Successfully!")
             return 0
 
         finally:

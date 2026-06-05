@@ -886,6 +886,7 @@ NSArray<NSString*>* ContextLines(const std::vector<std::string>& lines, NSIntege
     dispatch_once(&onceToken, ^{
         methods = @[
             @{ @"name": @"rpc.ping", @"permission": @"Read", @"params": @{}, @"returns": @{ @"pong": @"boolean", @"server": @"string" } },
+            @{ @"name": @"rpc.version", @"permission": @"Read", @"params": @{}, @"returns": @{ @"appVersion": @"string", @"controlProtocolVersion": @"string", @"transactionSchemaVersion": @"string", @"supportedRollbackSchemas": @"array", @"supportedInspectOnlySchemas": @"array" } },
             @{ @"name": @"rpc.methods", @"permission": @"Read", @"params": @{}, @"returns": @{ @"methods": @"array" } },
             @{ @"name": @"rpc.describe", @"permission": @"Read", @"params": @{ @"method": @"string optional" }, @"returns": @{ @"methods": @"array" } },
             @{ @"name": @"chip.list", @"permission": @"Read", @"params": @{}, @"returns": @{ @"chips": @"array" } },
@@ -897,6 +898,7 @@ NSArray<NSString*>* ContextLines(const std::vector<std::string>& lines, NSIntege
             @{ @"name": @"combo.cancel", @"permission": @"Read", @"params": @{ @"comboId": @"string" }, @"returns": @{ @"cancelled": @"boolean" } },
             @{ @"name": @"combo.rollback", @"permission": @"Edit", @"params": @{ @"comboId": @"string optional" }, @"returns": @{ @"reverted": @"boolean" } },
             @{ @"name": @"recovery.scan", @"permission": @"Read", @"params": @{}, @"returns": @{ @"backups": @"array" } },
+            @{ @"name": @"recovery.schemaInfo", @"permission": @"Read", @"params": @{}, @"returns": @{ @"transactionSchemaVersion": @"string", @"supportedRollbackSchemas": @"array", @"supportedInspectOnlySchemas": @"array" } },
             @{ @"name": @"workspace.getRoot", @"permission": @"Read", @"params": @{}, @"returns": @{ @"path": @"string" } },
             @{ @"name": @"workspace.openFolder", @"permission": @"Destructive", @"params": @{ @"path": @"directory path" }, @"returns": @{ @"opened": @"boolean" } },
             @{ @"name": @"workspace.listFiles", @"permission": @"Read", @"params": @{}, @"returns": @{ @"files": @"array" } },
@@ -2999,7 +3001,18 @@ static BOOL IsTextBinary(NSString* text) {
     }
 
     if ([method isEqualToString:@"rpc.ping"]) {
-        *outResult = @{ @"pong": @YES, @"server": @"DietCodeControlServer", @"version": @"1.6" };
+        *outResult = @{ @"pong": @YES, @"server": @"DietCodeControlServer", @"version": @"1.6.3" };
+        return;
+    }
+
+    if ([method isEqualToString:@"rpc.version"]) {
+        *outResult = @{
+            @"appVersion": @"1.6.3",
+            @"controlProtocolVersion": @"1.6",
+            @"transactionSchemaVersion": @"1.6.2",
+            @"supportedRollbackSchemas": @[@"1.6.2"],
+            @"supportedInspectOnlySchemas": @[@"1.6.1"]
+        };
         return;
     }
 
@@ -3175,6 +3188,15 @@ static BOOL IsTextBinary(NSString* text) {
             return;
         }
         *outResult = report;
+        return;
+    }
+
+    if ([method isEqualToString:@"recovery.schemaInfo"]) {
+        *outResult = @{
+            @"transactionSchemaVersion": @"1.6.2",
+            @"supportedRollbackSchemas": @[@"1.6.2"],
+            @"supportedInspectOnlySchemas": @[@"1.6.1"]
+        };
         return;
     }
     
