@@ -149,6 +149,7 @@ extern char** environ;
 @property(nonatomic, strong) NSTextView* controlLogTextView;
 @property(nonatomic, strong) NSTextField* controlStatusLabel;
 @property(nonatomic, strong) NSButton* externalControlBtn;
+@property(nonatomic, strong) NSPopUpButton* agentAutonomyBtn;
 @property(nonatomic, strong) id controlServer; // Typed loosely as id to avoid cyclic header imports
 
 
@@ -667,6 +668,7 @@ static NSString* FindBinaryPath(NSString* name, NSString* fallback) {
         _eslintPath = [defaults stringForKey:@"EslintPath"] ?: FindBinaryPath(@"eslint", @"/opt/homebrew/bin/eslint");
         
         _externalControlEnabled = [defaults boolForKey:@"ExternalControlEnabled"];
+        _agentAutonomyLevel = [defaults objectForKey:@"AgentAutonomyLevel"] ? [defaults integerForKey:@"AgentAutonomyLevel"] : 2; // Default to Bounded Autonomy (2)
         _controlServer = [[DietCodeControlServer alloc] initWithWindowController:self];
         if (_externalControlEnabled) {
             [_controlServer start];
@@ -1488,6 +1490,14 @@ static NSString* FindBinaryPath(NSString* name, NSString* fallback) {
     [self.externalControlBtn setState:(self.externalControlEnabled ? NSControlStateValueOn : NSControlStateValueOff)];
     [self.externalControlBtn setAccessibilityLabel:@"Enable external control agent socket"];
     [setStack addArrangedSubview:self.externalControlBtn];
+    
+    [setStack addArrangedSubview:MakeLabel(@"Agent Autonomy Level:", 11, NSFontWeightRegular)];
+    self.agentAutonomyBtn = [[NSPopUpButton alloc] initWithFrame:NSMakeRect(0, 0, 200, 24) pullsDown:NO];
+    [self.agentAutonomyBtn addItemsWithTitles:@[@"Prompt on Destructive", @"Permissionless (Full)", @"Bounded Autonomy"]];
+    [self.agentAutonomyBtn selectItemAtIndex:self.agentAutonomyLevel];
+    [self.agentAutonomyBtn setTarget:self];
+    [self.agentAutonomyBtn setAction:@selector(settingsChanged:)];
+    [setStack addArrangedSubview:self.agentAutonomyBtn];
 }
 
 - (void)applyThemeColors {
@@ -2856,6 +2866,8 @@ static NSString* FindBinaryPath(NSString* name, NSString* fallback) {
         [self updateControlStatusIndicator];
     }
     
+    self.agentAutonomyLevel = [self.agentAutonomyBtn indexOfSelectedItem];
+    
     // Save to NSUserDefaults
     NSUserDefaults* defaults = [NSUserDefaults standardUserDefaults];
     [defaults setInteger:self.currentFontSize forKey:@"FontSize"];
@@ -2866,6 +2878,7 @@ static NSString* FindBinaryPath(NSString* name, NSString* fallback) {
     [defaults setBool:self.currentLintOnSave forKey:@"LintOnSave"];
     [defaults setBool:self.currentDiagnosticsEnabled forKey:@"DiagnosticsEnabled"];
     [defaults setBool:self.externalControlEnabled forKey:@"ExternalControlEnabled"];
+    [defaults setInteger:self.agentAutonomyLevel forKey:@"AgentAutonomyLevel"];
     
     [defaults setObject:self.clangdPath forKey:@"ClangdPath"];
     [defaults setObject:self.pyrightPath forKey:@"PyrightPath"];

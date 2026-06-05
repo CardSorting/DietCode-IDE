@@ -456,6 +456,7 @@ NSArray<NSString*>* ContextLines(const std::vector<std::string>& lines, NSIntege
 - (NSDictionary*)paramsForComboStep:(NSDictionary*)step;
 - (NSArray<NSString*>*)pathsDeclaredByParams:(NSDictionary*)params chip:(NSString*)chip;
 - (BOOL)comboPolicy:(NSDictionary*)policy allowsPermission:(NSString*)permission;
+- (BOOL)isDestructiveRequestSafe:(NSString*)method params:(NSDictionary*)params;
 - (BOOL)validateCombo:(NSDictionary*)combo normalizedPlan:(NSDictionary**)planOut errors:(NSArray<NSDictionary*>**)errorsOut;
 - (NSDictionary*)serializableCombo:(NSMutableDictionary*)combo;
 - (NSUInteger)activeComboCount;
@@ -805,19 +806,26 @@ NSArray<NSString*>* ContextLines(const std::vector<std::string>& lines, NSIntege
     
     __block BOOL allowed = YES;
     if ([permission isEqualToString:@"Destructive"]) {
-        __block NSString* alertMsg = [NSString stringWithFormat:@"An external agent is requesting to execute a destructive command:\n\nMethod: %@\nParams: %@", method, params];
-        dispatch_semaphore_t sem = dispatch_semaphore_create(0);
-        dispatch_async(dispatch_get_main_queue(), ^{
-            NSAlert* alert = [[NSAlert alloc] init];
-            [alert setMessageText:@"External Control Confirmation"];
-            [alert setInformativeText:alertMsg];
-            [alert addButtonWithTitle:@"Allow"];
-            [alert addButtonWithTitle:@"Deny"];
-            NSModalResponse res = [alert runModal];
-            allowed = (res == NSAlertFirstButtonReturn);
-            dispatch_semaphore_signal(sem);
-        });
-        dispatch_semaphore_wait(sem, DISPATCH_TIME_FOREVER);
+        NSInteger autonomy = [_windowController agentAutonomyLevel];
+        if (autonomy == 1) {
+            allowed = YES;
+        } else if (autonomy == 2) {
+            allowed = [self isDestructiveRequestSafe:method params:params];
+        } else {
+            __block NSString* alertMsg = [NSString stringWithFormat:@"An external agent is requesting to execute a destructive command:\n\nMethod: %@\nParams: %@", method, params];
+            dispatch_semaphore_t sem = dispatch_semaphore_create(0);
+            dispatch_async(dispatch_get_main_queue(), ^{
+                NSAlert* alert = [[NSAlert alloc] init];
+                [alert setMessageText:@"External Control Confirmation"];
+                [alert setInformativeText:alertMsg];
+                [alert addButtonWithTitle:@"Allow"];
+                [alert addButtonWithTitle:@"Deny"];
+                NSModalResponse res = [alert runModal];
+                allowed = (res == NSAlertFirstButtonReturn);
+                dispatch_semaphore_signal(sem);
+            });
+            dispatch_semaphore_wait(sem, DISPATCH_TIME_FOREVER);
+        }
     } else if ([permission isEqualToString:@"Execute"]) {
         dispatch_async(dispatch_get_main_queue(), ^{
             if ([method hasPrefix:@"terminal"]) {
@@ -853,7 +861,27 @@ NSArray<NSString*>* ContextLines(const std::vector<std::string>& lines, NSIntege
                               [method isEqualToString:@"search.files"] ||
                               [method isEqualToString:@"workspace.listFiles"] ||
                               [method isEqualToString:@"recovery.scan"] ||
-                              [method isEqualToString:@"combo.run"];
+                              [method isEqualToString:@"combo.run"] ||
+                              [method isEqualToString:@"file.read"] ||
+                              [method isEqualToString:@"file.readRange"] ||
+                              [method isEqualToString:@"file.readAround"] ||
+                              [method isEqualToString:@"file.getChunks"] ||
+                              [method isEqualToString:@"file.stat"] ||
+                              [method isEqualToString:@"git.status"] ||
+                              [method isEqualToString:@"git.diff"] ||
+                              [method isEqualToString:@"analysis.workspaceSummary"] ||
+                              [method isEqualToString:@"analysis.searchRanked"] ||
+                              [method isEqualToString:@"analysis.fileSummary"] ||
+                              [method isEqualToString:@"analysis.relatedFiles"] ||
+                              [method isEqualToString:@"symbols.document"] ||
+                              [method isEqualToString:@"symbols.outline"] ||
+                              [method isEqualToString:@"symbols.activeDocument"] ||
+                              [method isEqualToString:@"symbols.references"] ||
+                              [method isEqualToString:@"editor.getActiveFile"] ||
+                              [method isEqualToString:@"editor.getOpenFiles"] ||
+                              [method isEqualToString:@"editor.getText"] ||
+                              [method isEqualToString:@"session.info"] ||
+                              [method isEqualToString:@"session.workflowState"];
     
     if (isBackgroundMethod) {
         [self executeMethod:method params:params outResult:&result outErrCode:&errCode outErrMsg:&errMsg outPaths:&affectedPaths];
@@ -1101,6 +1129,63 @@ NSArray<NSString*>* ContextLines(const std::vector<std::string>& lines, NSIntege
         if (filePath.length > 0) [paths addObject:filePath];
     }
     return paths;
+}
+
+- (BOOL)isDestructiveRequestSafe:(NSString*)method params:(NSDictionary*)params {
+    NSString* ws = [_windowController workspacePath];
+    if (!ws) return NO;
+    
+    if ([method isEqualToString:@"git.commit"]) {
+        return YES; // Git commit inside the active workspace repo is safe
+    }
+    if ([method isEqualToString:@"workspace.openFolder"]) {
+        return NO; // Opening a new workspace is unsafe / outside current bounds
+    }
+    
+    // Check path parameter if present
+    NSString* path = params[@"path"];
+    if (path) {
+        NSString* checkedPath = AbsolutePathForRPCPath(path, ws);
+        if (!PathIsInsideWorkspace(checkedPath, ws)) {
+            return NO;
+        }
+    }
+    
+    // Check patch.applyBatch which has a 'patches' parameter
+    if ([method isEqualToString:@"patch.applyBatch"]) {
+        NSArray* patches = params[@"patches"];
+        if ([patches isKindOfClass:[NSArray class]]) {
+            for (NSDictionary* patchDict in patches) {
+                if ([patchDict isKindOfClass:[NSDictionary class]]) {
+                    NSString* pPath = patchDict[@"path"];
+                    if (pPath) {
+                        NSString* checkedPath = AbsolutePathForRPCPath(pPath, ws);
+                        if (!PathIsInsideWorkspace(checkedPath, ws)) {
+                            return NO;
+                        }
+                    }
+                }
+            }
+        }
+    }
+    
+    // Check combo.run steps
+    if ([method isEqualToString:@"combo.run"]) {
+        NSDictionary* combo = params[@"combo"] ?: params;
+        for (NSDictionary* step in combo[@"steps"] ?: @[]) {
+            NSString* chip = [self chipNameForStep:step];
+            NSDictionary* stepParams = [self paramsForComboStep:step];
+            NSArray<NSString*>* affectedPaths = [self mutationPathsForChip:chip params:stepParams];
+            for (NSString* p in affectedPaths) {
+                NSString* checkedPath = AbsolutePathForRPCPath(p, ws);
+                if (!PathIsInsideWorkspace(checkedPath, ws)) {
+                    return NO;
+                }
+            }
+        }
+    }
+    
+    return YES;
 }
 
 - (BOOL)comboPolicy:(NSDictionary*)policy allowsPermission:(NSString*)permission {
@@ -3854,14 +3939,14 @@ static BOOL IsTextBinary(NSString* text) {
 
     // File reading primitives
     if ([method isEqualToString:@"file.read"] || [method isEqualToString:@"file.readRange"] || [method isEqualToString:@"file.readAround"] || [method isEqualToString:@"file.getChunks"] || [method isEqualToString:@"file.stat"]) {
-        NSString* ws = [_windowController workspacePath];
+        NSString* ws = [self safeWorkspacePath];
         NSString* targetPath = AbsolutePathForRPCPath(params[@"path"], ws);
         if (!targetPath) {
             *outErrCode = @"invalid_params";
             *outErrMsg = @"path parameter required.";
             return;
         }
-        NSString* text = [_windowController textForFileAtPath:targetPath];
+        NSString* text = [self safeTextForFileAtPath:targetPath];
         if (!text) {
             *outErrCode = @"invalid_request";
             *outErrMsg = @"File is not readable.";
@@ -3870,8 +3955,8 @@ static BOOL IsTextBinary(NSString* text) {
         NSArray<NSString*>* lines = LinesFromText(text);
         NSDictionary* attrs = [[NSFileManager defaultManager] attributesOfItemAtPath:targetPath error:nil];
         NSUInteger sizeBytes = [text lengthOfBytesUsingEncoding:NSUTF8StringEncoding];
-        BOOL open = [[_windowController openFilePaths] containsObject:targetPath];
-        BOOL dirty = [DirtyFilePathsFromTabs(_windowController.openTabs ?: @[]) containsObject:targetPath];
+        BOOL open = [[self safeOpenFilePaths] containsObject:targetPath];
+        BOOL dirty = [DirtyFilePathsFromTabs([self safeOpenTabs] ?: @[]) containsObject:targetPath];
         if ([method isEqualToString:@"file.stat"]) {
             *outResult = @{
                 @"path": targetPath,
@@ -3944,25 +4029,25 @@ static BOOL IsTextBinary(NSString* text) {
     
     // Editor commands
     if ([method isEqualToString:@"editor.getActiveFile"]) {
-        NSString* active = [_windowController activeFilePath] ?: @"";
+        NSString* active = [self safeActiveFilePath] ?: @"";
         *outResult = @{ @"path": active };
         return;
     }
     
     if ([method isEqualToString:@"editor.getOpenFiles"]) {
-        NSArray* list = [_windowController openFilePaths];
+        NSArray* list = [self safeOpenFilePaths];
         *outResult = @{ @"files": list };
         return;
     }
     
     if ([method isEqualToString:@"editor.getText"]) {
-        NSString* targetPath = params[@"path"] ?: [_windowController activeFilePath];
+        NSString* targetPath = params[@"path"] ?: [self safeActiveFilePath];
         if (!targetPath) {
             *outErrCode = @"invalid_params";
             *outErrMsg = @"Open document path required.";
             return;
         }
-        NSString* text = [_windowController textForFileAtPath:targetPath];
+        NSString* text = [self safeTextForFileAtPath:targetPath];
         if (!text) {
             *outErrCode = @"invalid_request";
             *outErrMsg = @"File is not open and is not in workspace.";
@@ -4131,15 +4216,15 @@ static BOOL IsTextBinary(NSString* text) {
     
     // Analysis commands
     if ([method isEqualToString:@"analysis.workspaceSummary"]) {
-        NSString* ws = [_windowController workspacePath];
+        NSString* ws = [self safeWorkspacePath];
         if (!ws) {
             *outErrCode = @"invalid_request";
             *outErrMsg = @"No open workspace.";
             return;
         }
 
-        NSDictionary* git = [_windowController gitStatusInfo] ?: @{};
-        NSMutableArray* modified = [NSMutableArray arrayWithArray:DirtyFilePathsFromTabs(_windowController.openTabs ?: @[])];
+        NSDictionary* git = [self safeGitStatusInfo] ?: @{};
+        NSMutableArray* modified = [NSMutableArray arrayWithArray:DirtyFilePathsFromTabs([self safeOpenTabs] ?: @[])];
         for (NSString* key in @[@"modified", @"staged", @"untracked"]) {
             for (NSString* rel in git[key] ?: @[]) {
                 NSString* abs = AbsolutePathForRPCPath(rel, ws);
@@ -4149,9 +4234,9 @@ static BOOL IsTextBinary(NSString* text) {
             }
         }
 
-        NSArray* problems = [_windowController problemsList] ?: @[];
+        NSArray* problems = [self safeProblemsList] ?: @[];
         *outResult = [DietCodeWorkspaceAnalysisService summaryOfWorkspace:ws
-                                                                 openFiles:[_windowController openFilePaths]
+                                                                 openFiles:[self safeOpenFilePaths]
                                                              modifiedFiles:modified
                                                                diagnostics:DiagnosticsSummaryFromProblems(problems)
                                                                  gitBranch:git[@"branch"]];
@@ -4159,19 +4244,21 @@ static BOOL IsTextBinary(NSString* text) {
     }
 
     if ([method isEqualToString:@"analysis.searchRanked"]) {
-        NSString* ws = [_windowController workspacePath];
+        NSString* ws = [self safeWorkspacePath];
         NSString* query = params[@"query"];
         if (!ws || query.length == 0) {
             *outErrCode = @"invalid_params";
             *outErrMsg = @"Query string and workspace required.";
             return;
         }
-        if (![_windowController.sessionLastSearches containsObject:query]) {
-            [_windowController.sessionLastSearches insertObject:query atIndex:0];
-            if (_windowController.sessionLastSearches.count > 50) {
-                [_windowController.sessionLastSearches removeLastObject];
+        dispatch_async(dispatch_get_main_queue(), ^{
+            if (![_windowController.sessionLastSearches containsObject:query]) {
+                [_windowController.sessionLastSearches insertObject:query atIndex:0];
+                if (_windowController.sessionLastSearches.count > 50) {
+                    [_windowController.sessionLastSearches removeLastObject];
+                }
             }
-        }
+        });
 
         NSInteger requestedMax = params[@"maxResults"] ? [params[@"maxResults"] integerValue] : kMaxGrepResults;
         if (requestedMax > kMaxGrepResults) {
@@ -4181,7 +4268,7 @@ static BOOL IsTextBinary(NSString* text) {
         }
         NSArray* ranked = [DietCodeWorkspaceAnalysisService searchRankedForQuery:query
                                                                        workspace:ws
-                                                                       openFiles:[_windowController openFilePaths]
+                                                                       openFiles:[self safeOpenFilePaths]
                                                                      recentFiles:[[NSUserDefaults standardUserDefaults] stringArrayForKey:@"RecentFiles"] ?: @[]
                                                                          include:params[@"include"] ?: @[]
                                                                          exclude:params[@"exclude"] ?: @[]
@@ -4195,22 +4282,22 @@ static BOOL IsTextBinary(NSString* text) {
     }
 
     if ([method isEqualToString:@"analysis.fileSummary"]) {
-        NSString* ws = [_windowController workspacePath];
-        NSString* targetPath = AbsolutePathForRPCPath(params[@"path"] ?: [_windowController activeFilePath], ws);
+        NSString* ws = [self safeWorkspacePath];
+        NSString* targetPath = AbsolutePathForRPCPath(params[@"path"] ?: [self safeActiveFilePath], ws);
         if (!targetPath) {
             *outErrCode = @"invalid_params";
             *outErrMsg = @"path parameter or active file required.";
             return;
         }
-        NSString* text = [_windowController textForFileAtPath:targetPath] ?: @"";
+        NSString* text = [self safeTextForFileAtPath:targetPath] ?: @"";
         NSArray* symbols = [DietCodeSymbolIndexService symbolsForFileContent:text extension:[[targetPath pathExtension] lowercaseString]];
         *outResult = [DietCodeWorkspaceAnalysisService fileSummaryForPath:targetPath symbolsCount:symbols.count];
         return;
     }
 
     if ([method isEqualToString:@"analysis.relatedFiles"]) {
-        NSString* ws = [_windowController workspacePath];
-        NSString* targetPath = AbsolutePathForRPCPath(params[@"path"] ?: [_windowController activeFilePath], ws);
+        NSString* ws = [self safeWorkspacePath];
+        NSString* targetPath = AbsolutePathForRPCPath(params[@"path"] ?: [self safeActiveFilePath], ws);
         if (!ws || !targetPath) {
             *outErrCode = @"invalid_params";
             *outErrMsg = @"Workspace and path required.";
@@ -4222,14 +4309,14 @@ static BOOL IsTextBinary(NSString* text) {
 
     // Symbol commands
     if ([method isEqualToString:@"symbols.document"] || [method isEqualToString:@"symbols.outline"]) {
-        NSString* ws = [_windowController workspacePath];
-        NSString* targetPath = AbsolutePathForRPCPath(params[@"path"] ?: [_windowController activeFilePath], ws);
+        NSString* ws = [self safeWorkspacePath];
+        NSString* targetPath = AbsolutePathForRPCPath(params[@"path"] ?: [self safeActiveFilePath], ws);
         if (!targetPath) {
             *outErrCode = @"invalid_params";
             *outErrMsg = @"path parameter or active file required.";
             return;
         }
-        NSString* text = [_windowController textForFileAtPath:targetPath];
+        NSString* text = [self safeTextForFileAtPath:targetPath];
         if (!text) {
             *outErrCode = @"invalid_request";
             *outErrMsg = @"File is not readable.";
@@ -4243,8 +4330,8 @@ static BOOL IsTextBinary(NSString* text) {
     }
 
     if ([method isEqualToString:@"symbols.activeDocument"]) {
-        NSString* targetPath = [_windowController activeFilePath];
-        NSString* text = targetPath ? [_windowController textForFileAtPath:targetPath] : nil;
+        NSString* targetPath = [self safeActiveFilePath];
+        NSString* text = targetPath ? [self safeTextForFileAtPath:targetPath] : nil;
         if (!targetPath || !text) {
             *outErrCode = @"invalid_request";
             *outErrMsg = @"No active readable file.";
@@ -4258,14 +4345,14 @@ static BOOL IsTextBinary(NSString* text) {
     }
 
     if ([method isEqualToString:@"symbols.references"]) {
-        NSString* ws = [_windowController workspacePath];
+        NSString* ws = [self safeWorkspacePath];
         NSString* symbol = params[@"symbol"];
         if (!ws || symbol.length == 0) {
             *outErrCode = @"invalid_params";
             *outErrMsg = @"symbol and workspace required.";
             return;
         }
-        NSArray* problems = [_windowController problemsList] ?: @[];
+        NSArray* problems = [self safeProblemsList] ?: @[];
         NSMutableArray* diagFiles = [NSMutableArray array];
         for (NSDictionary* problem in problems) {
             NSString* abs = AbsolutePathForRPCPath(problem[@"path"], ws);
@@ -4277,7 +4364,7 @@ static BOOL IsTextBinary(NSString* text) {
             @"symbol": symbol,
             @"references": [DietCodeSymbolIndexService referencesForSymbol:symbol
                                                                 inWorkspace:ws
-                                                                  openFiles:[_windowController openFilePaths]
+                                                                  openFiles:[self safeOpenFilePaths]
                                                            diagnosticsFiles:diagFiles]
         };
         return;
@@ -4678,28 +4765,53 @@ static BOOL IsTextBinary(NSString* text) {
 
     // Session workflow commands
     if ([method isEqualToString:@"session.info"] || [method isEqualToString:@"session.workflowState"]) {
-        NSString* ws = [_windowController workspacePath] ?: @"";
-        NSDictionary* git = [_windowController gitStatusInfo] ?: @{};
+        __block NSString* ws = nil;
+        __block NSString* activeFile = nil;
+        __block NSArray* openFiles = nil;
+        __block NSArray* dirtyFiles = nil;
+        __block NSArray* recentCmds = nil;
+        __block NSArray* lastSearches = nil;
+        __block pid_t termPid = 0;
+        
+        dispatch_sync(dispatch_get_main_queue(), ^{
+            ws = [_windowController workspacePath];
+            activeFile = [_windowController activeFilePath];
+            openFiles = [_windowController openFilePaths];
+            dirtyFiles = DirtyFilePathsFromTabs(_windowController.openTabs ?: @[]);
+            recentCmds = [_windowController.sessionRecentCommands copy];
+            lastSearches = [_windowController.sessionLastSearches copy];
+            termPid = [_windowController terminalPid];
+        });
+        
+        NSDictionary* git = [self safeGitStatusInfo] ?: @{};
         *outResult = @{
-            @"workspace": ws,
-            @"activeFile": [_windowController activeFilePath] ?: @"",
-            @"openFiles": [_windowController openFilePaths] ?: @[],
-            @"dirtyFiles": DirtyFilePathsFromTabs(_windowController.openTabs ?: @[]),
+            @"workspace": ws ?: @"",
+            @"activeFile": activeFile ?: @"",
+            @"openFiles": openFiles ?: @[],
+            @"dirtyFiles": dirtyFiles ?: @[],
             @"gitBranch": git[@"branch"] ?: @"",
-            @"recentCommands": _windowController.sessionRecentCommands ?: @[],
-            @"lastSearches": _windowController.sessionLastSearches ?: @[],
-            @"terminalPid": @([_windowController terminalPid])
+            @"recentCommands": recentCmds ?: @[],
+            @"lastSearches": lastSearches ?: @[],
+            @"terminalPid": @(termPid)
         };
         return;
     }
 
     if ([method isEqualToString:@"session.recentCommands"]) {
-        *outResult = @{ @"commands": _windowController.sessionRecentCommands ?: @[] };
+        __block NSArray* recentCmds = nil;
+        dispatch_sync(dispatch_get_main_queue(), ^{
+            recentCmds = [_windowController.sessionRecentCommands copy];
+        });
+        *outResult = @{ @"commands": recentCmds ?: @[] };
         return;
     }
 
     if ([method isEqualToString:@"session.lastSearches"]) {
-        *outResult = @{ @"searches": _windowController.sessionLastSearches ?: @[] };
+        __block NSArray* lastSearches = nil;
+        dispatch_sync(dispatch_get_main_queue(), ^{
+            lastSearches = [_windowController.sessionLastSearches copy];
+        });
+        *outResult = @{ @"searches": lastSearches ?: @[] };
         return;
     }
 
@@ -5017,14 +5129,14 @@ static BOOL IsTextBinary(NSString* text) {
     
     // Git commands
     if ([method isEqualToString:@"git.status"]) {
-        NSDictionary* info = [_windowController gitStatusInfo];
+        NSDictionary* info = [self safeGitStatusInfo];
         *outResult = info;
         return;
     }
     
     if ([method isEqualToString:@"git.diff"]) {
         NSString* targetPath = params[@"path"] ?: @"";
-        NSString* diff = [_windowController gitDiffForFile:targetPath];
+        NSString* diff = [self safeGitDiffForFile:targetPath];
         *outResult = @{ @"diff": diff };
         return;
     }
