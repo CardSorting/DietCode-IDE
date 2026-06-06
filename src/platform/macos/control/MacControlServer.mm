@@ -42,9 +42,17 @@
 @property (nonatomic, assign) int fd;
 @property (nonatomic, assign) BOOL readEOF;
 @property (nonatomic, assign) NSInteger pendingRequestsCount;
+@property (nonatomic, strong) NSMutableSet<NSString*>* subscriptions;
 @end
 
 @implementation DietCodeClientConnection
+- (instancetype)init {
+    self = [super init];
+    if (self) {
+        _subscriptions = [NSMutableSet set];
+    }
+    return self;
+}
 @end
 
 @interface DietCodeControlServer ()
@@ -499,8 +507,39 @@
             return;
         }
         
-        NSString* caller = @"unix_socket";
+        // Agent Attribution & Rationale
+        NSString* agentId = req[@"agentId"] ?: params[@"agentId"];
+        if (![agentId isKindOfClass:[NSString class]]) agentId = nil;
+        NSString* rationale = req[@"rationale"] ?: params[@"rationale"];
+        if (![rationale isKindOfClass:[NSString class]]) rationale = nil;
+        
+        NSString* caller = agentId ?: @"unix_socket";
         NSString* permission = [self permissionLevelForMethod:method params:params];
+        
+        if ([method isEqualToString:@"event.subscribe"]) {
+            NSArray* types = params[@"types"];
+            if ([types isKindOfClass:[NSArray class]]) {
+                for (NSString* t in types) {
+                    if ([t isKindOfClass:[NSString class]]) [conn.subscriptions addObject:t];
+                }
+            }
+            [self sendSuccess:reqId result:@{ @"subscribed": @YES } clientFd:clientFd];
+            [self decrementPendingRequestsForConnection:conn];
+            return;
+        }
+        
+        if ([method isEqualToString:@"event.unsubscribe"]) {
+            NSArray* types = params[@"types"];
+            if ([types isKindOfClass:[NSArray class]]) {
+                for (NSString* t in types) {
+                    if ([t isKindOfClass:[NSString class]]) [conn.subscriptions removeObject:t];
+                }
+            }
+            [self sendSuccess:reqId result:@{ @"unsubscribed": @YES } clientFd:clientFd];
+            [self decrementPendingRequestsForConnection:conn];
+            return;
+        }
+        
         dispatch_async(dispatch_get_main_queue(), ^{
             [_windowController setControlActiveCommand:method caller:caller];
         });
@@ -513,7 +552,10 @@
             } else if (autonomy == 2) {
                 allowed = [self isDestructiveRequestSafe:method params:params];
             } else {
-                __block NSString* alertMsg = [NSString stringWithFormat:@"An external agent is requesting to execute a destructive command:\n\nMethod: %@\nParams: %@", method, params];
+                NSMutableString* alertMsg = [NSMutableString stringWithFormat:@"An external agent is requesting to execute a destructive command:\n\nMethod: %@\nParams: %@", method, params];
+                if (rationale.length > 0) {
+                    [alertMsg appendFormat:@"\n\nRationale: %@", rationale];
+                }
                 dispatch_semaphore_t sem = dispatch_semaphore_create(0);
                 dispatch_async(dispatch_get_main_queue(), ^{
                     NSAlert* alert = [[NSAlert alloc] init];
@@ -2882,6 +2924,29 @@
         if (out.is_open()) {
             out << [logLine UTF8String];
             out.close();
+        }
+    }
+}
+
+- (void)notifyEvent:(NSString*)type detail:(NSString*)detail {
+    NSDictionary* notification = @{
+        @"method": @"event.emitted",
+        @"params": @{
+            @"type": type ?: @"unknown",
+            @"detail": detail ?: @""
+        }
+    };
+    NSData* data = [NSJSONSerialization dataWithJSONObject:notification options:0 error:nil];
+    if (!data) return;
+    
+    NSMutableData* frame = [data mutableCopy];
+    [frame appendBytes:"\n" length:1];
+    
+    @synchronized(self) {
+        for (DietCodeClientConnection* conn in [_activeConnections allValues]) {
+            if ([conn.subscriptions containsObject:type] || [conn.subscriptions containsObject:@"*"]) {
+                write(conn.fd, frame.bytes, frame.length);
+            }
         }
     }
 }

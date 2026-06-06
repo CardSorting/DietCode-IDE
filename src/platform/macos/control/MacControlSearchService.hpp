@@ -24,6 +24,10 @@
                  outErrCode:(NSString**)outErrCode 
                   outErrMsg:(NSString**)outErrMsg;
 
+- (NSDictionary*)searchSemantic:(NSDictionary*)params 
+                     outErrCode:(NSString**)outErrCode 
+                      outErrMsg:(NSString**)outErrMsg;
+
 - (NSDictionary*)searchDiagnostics:(NSDictionary*)params 
                         outErrCode:(NSString**)outErrCode 
                          outErrMsg:(NSString**)outErrMsg;

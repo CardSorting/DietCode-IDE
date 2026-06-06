@@ -3,6 +3,8 @@
 #import "MacControlSupport.hpp"
 #import "MacControlPathSecurity.hpp"
 #import "MacControlSerialization.hpp"
+#import "WorkspaceAnalysisService.hpp"
+#import "SymbolIndexService.hpp"
 
 #include <filesystem>
 #include <vector>
@@ -384,6 +386,80 @@ using namespace dietcode::platform::macos;
         }
     }
     return @{ @"results": all };
+}
+
+- (NSDictionary*)searchSemantic:(NSDictionary*)params 
+                     outErrCode:(NSString**)outErrCode 
+                      outErrMsg:(NSString**)outErrMsg {
+    NSString* ws = [_windowBridge workspacePath];
+    NSString* query = params[@"query"];
+    if (!ws || !query || query.length == 0) {
+        *outErrCode = @"invalid_params";
+        *outErrMsg = @"query and workspace required.";
+        return nil;
+    }
+    
+    NSInteger maxResults = params[@"maxResults"] ? [params[@"maxResults"] integerValue] : 50;
+    maxResults = MIN(MAX(1, maxResults), 100);
+    
+    // 1. Get ranked literal matches
+    NSArray* ranked = [DietCodeWorkspaceAnalysisService searchRankedForQuery:query 
+                                                                   workspace:ws 
+                                                                   openFiles:[_windowBridge openTabs] 
+                                                                 recentFiles:@[] 
+                                                                     include:@[] 
+                                                                     exclude:@[] 
+                                                               caseSensitive:NO];
+    
+    // 2. Get symbol references
+    NSArray* references = [DietCodeSymbolIndexService referencesForSymbol:query 
+                                                              inWorkspace:ws 
+                                                                openFiles:[_windowBridge openTabs] 
+                                                         diagnosticsFiles:@[]];
+    
+    NSMutableArray* combined = [NSMutableArray array];
+    NSMutableSet* seen = [NSMutableSet set];
+    
+    for (NSDictionary* ref in references) {
+        if (combined.count >= (NSUInteger)maxResults) break;
+        NSString* key = [NSString stringWithFormat:@"%@:%@", ref[@"path"], ref[@"line"]];
+        if (![seen containsObject:key]) {
+            [combined addObject:@{
+                @"path": ref[@"path"],
+                @"line": ref[@"line"],
+                @"column": ref[@"column"],
+                @"preview": ref[@"preview"] ?: @"",
+                @"score": @([ref[@"score"] doubleValue] + 2.0), // Boost symbol matches
+                @"type": @"symbol_reference"
+            }];
+            [seen addObject:key];
+        }
+    }
+    
+    for (NSDictionary* item in ranked) {
+        if (combined.count >= (NSUInteger)maxResults) break;
+        for (NSDictionary* match in item[@"matches"] ?: @[]) {
+            if (combined.count >= (NSUInteger)maxResults) break;
+            NSString* key = [NSString stringWithFormat:@"%@:%@", item[@"path"], match[@"line"]];
+            if (![seen containsObject:key]) {
+                [combined addObject:@{
+                    @"path": item[@"path"],
+                    @"line": match[@"line"],
+                    @"column": match[@"column"],
+                    @"preview": match[@"preview"] ?: @"",
+                    @"score": item[@"score"],
+                    @"type": @"ranked_literal"
+                }];
+                [seen addObject:key];
+            }
+        }
+    }
+    
+    [combined sortUsingComparator:^NSComparisonResult(NSDictionary* a, NSDictionary* b) {
+        return [b[@"score"] compare:a[@"score"]];
+    }];
+    
+    return @{ @"results": combined, @"query": query };
 }
 
 - (NSDictionary*)searchDiagnostics:(NSDictionary*)params 

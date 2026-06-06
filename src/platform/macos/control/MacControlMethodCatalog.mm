@@ -32,6 +32,7 @@ NSArray<NSDictionary*>* MacControlRPCMethodDescriptions(void) {
             @{ @"name": @"search.files", @"permission": @"Read", @"params": @{ @"query": @"string", @"include": @"array optional", @"exclude": @"array optional", @"maxResults": @"number <= 500 optional" }, @"returns": @{ @"results": @"array" } },
             @{ @"name": @"search.text", @"permission": @"Read", @"params": @{ @"query": @"literal string", @"before": @"number optional", @"after": @"number optional", @"maxResults": @"number <= 500 optional", @"resultOffset": @"number optional" }, @"returns": @{ @"results": @"array with resultIndex/matchSpans", @"mode": @"literal_substring", @"nextResultOffset": @"number|null", @"truncated": @"boolean" } },
             @{ @"name": @"search.todo", @"permission": @"Read", @"params": @{ @"include": @"array optional", @"maxResults": @"number <= 500 optional" }, @"returns": @{ @"results": @"array" } },
+            @{ @"name": @"search.semantic", @"permission": @"Read", @"params": @{ @"query": @"string", @"maxResults": @"number <= 100 optional" }, @"returns": @{ @"results": @"array with path/score/symbols" } },
             @{ @"name": @"search.diagnostics", @"permission": @"Read", @"params": @{ @"severity": @"string optional", @"source": @"string optional" }, @"returns": @{ @"results": @"array" } },
             @{ @"name": @"file.read", @"permission": @"Read", @"params": @{ @"path": @"string" }, @"returns": @{ @"text": @"string" } },
             @{ @"name": @"file.readRange", @"permission": @"Read", @"params": @{ @"path": @"string", @"startLine": @"number", @"endLine": @"number" }, @"returns": @{ @"text": @"string" } },
@@ -132,7 +133,9 @@ NSArray<NSDictionary*>* MacControlRPCMethodDescriptions(void) {
             @{ @"name": @"session.workflowState", @"permission": @"Read", @"params": @{}, @"returns": @{ @"workspace": @"string", @"activeFile": @"string" } },
             @{ @"name": @"session.recentCommands", @"permission": @"Read", @"params": @{}, @"returns": @{ @"commands": @"array" } },
             @{ @"name": @"session.lastSearches", @"permission": @"Read", @"params": @{}, @"returns": @{ @"searches": @"array" } },
-            @{ @"name": @"session.clearHistory", @"permission": @"Read", @"params": @{}, @"returns": @{ @"cleared": @"boolean" } }
+            @{ @"name": @"session.clearHistory", @"permission": @"Read", @"params": @{}, @"returns": @{ @"cleared": @"boolean" } },
+            @{ @"name": @"event.subscribe", @"permission": @"Read", @"params": @{ @"types": @"array" }, @"returns": @{ @"subscribed": @"boolean" } },
+            @{ @"name": @"event.unsubscribe", @"permission": @"Read", @"params": @{ @"types": @"array" }, @"returns": @{ @"unsubscribed": @"boolean" } }
         ];
     });
     return methods;
@@ -158,6 +161,7 @@ NSArray<NSDictionary*>* MacControlChipRegistry(void) {
             @{ @"name": @"search.files", @"version": @1, @"category": @"read", @"permission": @"read", @"deterministic": @YES, @"idempotency": @"conditionally_idempotent", @"sideEffects": @{ @"readsWorkspace": @YES, @"writesWorkspace": @NO, @"runsProcess": @NO, @"usesTerminal": @NO }, @"rollback": @{ @"supported": @NO }, @"requiredParams": @[@"query"] },
             @{ @"name": @"search.text", @"version": @1, @"category": @"read", @"permission": @"read", @"deterministic": @YES, @"idempotency": @"conditionally_idempotent", @"sideEffects": @{ @"readsWorkspace": @YES, @"writesWorkspace": @NO, @"runsProcess": @NO, @"usesTerminal": @NO }, @"rollback": @{ @"supported": @NO }, @"requiredParams": @[@"query"] },
             @{ @"name": @"search.todo", @"version": @1, @"category": @"read", @"permission": @"read", @"deterministic": @YES, @"idempotency": @"conditionally_idempotent", @"sideEffects": @{ @"readsWorkspace": @YES, @"writesWorkspace": @NO, @"runsProcess": @NO, @"usesTerminal": @NO }, @"rollback": @{ @"supported": @NO }, @"requiredParams": @[] },
+            @{ @"name": @"search.semantic", @"version": @1, @"category": @"read", @"permission": @"read", @"deterministic": @YES, @"idempotency": @"conditionally_idempotent", @"sideEffects": @{ @"readsWorkspace": @YES, @"writesWorkspace": @NO, @"runsProcess": @NO, @"usesTerminal": @NO }, @"rollback": @{ @"supported": @NO }, @"requiredParams": @[@"query"] },
             @{ @"name": @"search.diagnostics", @"version": @1, @"category": @"read", @"permission": @"read", @"deterministic": @YES, @"idempotency": @"conditionally_idempotent", @"sideEffects": @{ @"readsWorkspace": @NO, @"writesWorkspace": @NO, @"runsProcess": @NO, @"usesTerminal": @NO }, @"rollback": @{ @"supported": @NO }, @"requiredParams": @[] },
             @{ @"name": @"patch.validate", @"version": @1, @"category": @"read", @"permission": @"read", @"deterministic": @YES, @"idempotency": @"conditionally_idempotent", @"sideEffects": @{ @"readsWorkspace": @YES, @"writesWorkspace": @NO, @"runsProcess": @NO, @"usesTerminal": @NO }, @"rollback": @{ @"supported": @NO }, @"requiredParams": @[@"path", @"patch"] },
             @{ @"name": @"patch.preview", @"version": @1, @"category": @"read", @"permission": @"read", @"deterministic": @YES, @"idempotency": @"conditionally_idempotent", @"sideEffects": @{ @"readsWorkspace": @YES, @"writesWorkspace": @NO, @"runsProcess": @NO, @"usesTerminal": @NO }, @"rollback": @{ @"supported": @NO }, @"requiredParams": @[@"path", @"patch"] },

@@ -13,5 +13,6 @@
 - (void)start;
 - (void)stop;
 - (void)appendLogLine:(NSString*)line;
+- (void)notifyEvent:(NSString*)type detail:(NSString*)detail;
 
 @end

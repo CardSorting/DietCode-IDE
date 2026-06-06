@@ -345,6 +345,8 @@ def send_rpc(
     params: dict[str, Any] | None = None,
     request_id: str | None = None,
     request_timeout: float | None = None,
+    agent_id: str | None = None,
+    rationale: str | None = None,
     max_request_bytes: int = MAX_REQUEST_BYTES,
     max_response_bytes: int = MAX_RESPONSE_BYTES,
 ) -> dict[str, Any]:
@@ -355,6 +357,10 @@ def send_rpc(
         "params": params or {},
         "token": token,
     }
+    if agent_id:
+        payload["agentId"] = agent_id
+    if rationale:
+        payload["rationale"] = rationale
     encoded = json.dumps(payload, separators=(",", ":")).encode("utf-8") + b"\n"
     if len(encoded) > max_request_bytes:
         raise RuntimeError(f"request exceeds maximum allowed size of {max_request_bytes} bytes")
@@ -379,8 +385,10 @@ def call(
     params: dict[str, Any] | None = None,
     request_id: str | None = None,
     request_timeout: float | None = None,
+    agent_id: str | None = None,
+    rationale: str | None = None,
 ) -> dict[str, Any]:
-    response = send_rpc(sock, token, method, params, request_id, request_timeout=request_timeout)
+    response = send_rpc(sock, token, method, params, request_id, request_timeout=request_timeout, agent_id=agent_id, rationale=rationale)
     if not response.get("ok"):
         raise DietCodeRpcError(method, response)
     return response.get("result", {})
@@ -398,6 +406,8 @@ class DietCodeAgentClient:
         request_timeout: float = 30.0,
         start: bool = True,
         retries: int = 0,
+        agent_id: str | None = None,
+        rationale: str | None = None,
     ) -> None:
         self.app_path = app_path
         self.socket_path = socket_path
@@ -406,6 +416,8 @@ class DietCodeAgentClient:
         self.request_timeout = request_timeout
         self.start = start
         self.retries = max(0, retries)
+        self.agent_id = agent_id
+        self.rationale = rationale
         self.sock: socket.socket | None = None
         self.token: str | None = None
 
@@ -439,6 +451,8 @@ class DietCodeAgentClient:
         method: str,
         params: dict[str, Any] | None = None,
         request_id: str | None = None,
+        agent_id: str | None = None,
+        rationale: str | None = None,
     ) -> dict[str, Any]:
         transport_attempts = 0
         token_refreshed = False
@@ -455,6 +469,8 @@ class DietCodeAgentClient:
                     params,
                     request_id,
                     request_timeout=self.request_timeout,
+                    agent_id=agent_id or self.agent_id,
+                    rationale=rationale or self.rationale,
                 )
             except (OSError, DietCodeTransportError) as exc:
                 if transport_attempts >= self.retries:
@@ -619,12 +635,16 @@ def main() -> int:
     parser.add_argument("--describe", help="Call rpc.describe for one method and exit.")
     parser.add_argument("--raw-response", action="store_true", help="Print the full JSON-RPC response envelope.")
     parser.add_argument("--compact", action="store_true", help="Print compact JSON on one line.")
+    parser.add_argument("--listen", action="store_true", help="Listen for asynchronous event notifications.")
     parser.add_argument("--request-id", help="Override the JSON-RPC request id.")
+    parser.add_argument("--agent-id", help="Identify the agent calling the RPC.")
+    parser.add_argument("--rationale", help="Provide a human-readable explanation for the action.")
     parser.add_argument("--params-file", help="Read RPC params JSON object from a file.")
     parser.add_argument("--params-stdin", action="store_true", help="Read RPC params JSON object from stdin.")
     parser.add_argument("--path", help="Path used with --patch-file or --patch-stdin.")
     parser.add_argument("--grep", help="Call workspace.grep with a literal query.")
     parser.add_argument("--search-text", help="Call search.text with a literal query.")
+    parser.add_argument("--search-semantic", help="Call search.semantic with a symbol or conceptual query.")
     parser.add_argument("--result-offset", type=int, help="Zero-based result cursor for workspace.grep or search.text.")
     parser.add_argument("--max-results", type=int, help="Maximum results for workspace.grep or search.text.")
     parser.add_argument("--before", type=int, help="Context lines before each search.text result.")
@@ -718,6 +738,8 @@ def main() -> int:
                 request_timeout=request_timeout,
                 start=not args.no_start,
                 retries=retries,
+                agent_id=args.agent_id,
+                rationale=args.rationale,
             ) as client:
                 responses = client.batch(batch_requests)
             for response in responses:
@@ -743,9 +765,9 @@ def main() -> int:
                 shortcut_params["includeLines"] = True
             if args.max_lines_per_hunk is not None:
                 shortcut_params["maxLinesPerHunk"] = args.max_lines_per_hunk
-        elif args.grep or args.search_text:
-            shortcut_method = "workspace.grep" if args.grep else "search.text"
-            shortcut_params = {"query": args.grep or args.search_text}
+        elif args.grep or args.search_text or args.search_semantic:
+            shortcut_method = "workspace.grep" if args.grep else ("search.text" if args.search_text else "search.semantic")
+            shortcut_params = {"query": args.grep or args.search_text or args.search_semantic}
             if args.max_results is not None:
                 shortcut_params["maxResults"] = args.max_results
             if args.result_offset is not None:
@@ -770,6 +792,8 @@ def main() -> int:
                 request_timeout=request_timeout,
                 start=not args.no_start,
                 retries=retries,
+                agent_id=args.agent_id,
+                rationale=args.rationale,
             ) as client:
                 response = client.capabilities()
             print(json_text(response, compact=args.compact))
@@ -783,6 +807,41 @@ def main() -> int:
             shortcut_method = "rpc.describe"
             shortcut_params = {"method": args.describe}
 
+        if args.listen:
+            with DietCodeAgentClient(
+                app_path=app_path,
+                socket_path=socket_path,
+                token_path=token_path,
+                timeout=timeout,
+                request_timeout=request_timeout,
+                start=not args.no_start,
+                retries=retries,
+                agent_id=args.agent_id,
+                rationale=args.rationale,
+            ) as client:
+                print("Listening for events... (Press Ctrl+C to stop)")
+                sock_buffer = b""
+                while True:
+                    try:
+                        client.sock.settimeout(1.0)
+                        chunk = client.sock.recv(65536)
+                        if not chunk:
+                            print("Socket closed by server.")
+                            break
+                        sock_buffer += chunk
+                        while b"\n" in sock_buffer:
+                            line, sock_buffer = sock_buffer.split(b"\n", 1)
+                            if not line: continue
+                            try:
+                                print(json_text(json.loads(line), compact=args.compact))
+                            except json.JSONDecodeError:
+                                print(f"Failed to decode frame: {line!r}")
+                    except socket.timeout:
+                        continue
+                    except KeyboardInterrupt:
+                        break
+            return 0
+
         if shortcut_method:
             with DietCodeAgentClient(
                 app_path=app_path,
@@ -792,6 +851,8 @@ def main() -> int:
                 request_timeout=request_timeout,
                 start=not args.no_start,
                 retries=retries,
+                agent_id=args.agent_id,
+                rationale=args.rationale,
             ) as client:
                 if args.raw_response:
                     response = client.raw_call(shortcut_method, shortcut_params, args.request_id)
@@ -812,6 +873,8 @@ def main() -> int:
             request_timeout=request_timeout,
             start=not args.no_start,
             retries=retries,
+            agent_id=args.agent_id,
+            rationale=args.rationale,
         ) as client:
             if args.raw_response:
                 response = client.raw_call(effective_method, params, args.request_id)

@@ -1674,6 +1674,8 @@ static NSString* FindBinaryPath(NSString* name, NSString* fallback) {
         [targetView setAutoresizingMask:NSViewWidthSizable | NSViewHeightSizable];
         [self.sidebarInnerView addSubview:targetView];
     }
+    
+    [self notifyAgentEvent:@"ActivityChanged" detail:activity];
 }
 
 - (void)toggleSidebar:(id)sender {
@@ -1922,8 +1924,12 @@ static NSString* FindBinaryPath(NSString* name, NSString* fallback) {
     [self deleteBackupForTab:tab];
 
     // Remove from array and headers
+    NSString* closedPath = tab.path;
     [self.openTabs removeObject:tab];
     [self saveOpenTabsState];
+    if (closedPath) {
+        [self notifyAgentEvent:@"DocumentClosed" detail:closedPath];
+    }
     [tab.tabButtonView removeFromSuperview];
     
     // Remove from NSTabView
@@ -2655,6 +2661,8 @@ static NSString* FindBinaryPath(NSString* name, NSString* fallback) {
     [self updateTabHeaderLayout];
     [self updateWindowTitleAndStatus];
     [self refreshFilesTree:nil]; // Reload in case it was a new file
+    
+    [self notifyAgentEvent:@"DocumentSaved" detail:tab.path];
     
     // Lint on Save & LSP didSave
     if (!tab.isReadOnly && !tab.isDiff) {
@@ -4982,6 +4990,12 @@ static NSString* FindBinaryPath(NSString* name, NSString* fallback) {
     [alert runModal];
 }
 
+- (void)notifyAgentEvent:(NSString*)type detail:(NSString*)detail {
+    if (self.controlServer) {
+        [(DietCodeControlServer*)self.controlServer notifyEvent:type detail:detail];
+    }
+}
+
 // --- Git Service Integration Actions ---
 
 - (void)refreshGitStatus {
@@ -5557,6 +5571,8 @@ static NSString* FindBinaryPath(NSString* name, NSString* fallback) {
         [self.textView scrollRangeToVisible:lineRange];
         [[self window] makeFirstResponder:self.textView];
     }
+    
+    [self notifyAgentEvent:@"DocumentOpened" detail:path];
 }
 
 // --- Autocomplete & Context Menu Delegate Methods ---
