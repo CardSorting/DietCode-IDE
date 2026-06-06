@@ -1,4 +1,7 @@
 #import "BufferStateService.hpp"
+#import "SubprocessRunner.hpp"
+
+using namespace dietcode::platform::macos;
 
 @implementation DietCodeBufferStateService
 
@@ -16,29 +19,21 @@
     NSString* tempPath = [tempDir stringByAppendingPathComponent:[NSString stringWithFormat:@"dietcode_buffer_diff_%u.txt", arc4random()]];
 
     @try {
-    NSError* err = nil;
-    unlink([tempPath UTF8String]);
-    [currentText writeToFile:tempPath atomically:YES encoding:NSUTF8StringEncoding error:&err];
-    if (err) return @"";
+        NSError* err = nil;
+        unlink([tempPath UTF8String]);
+        [currentText writeToFile:tempPath atomically:YES encoding:NSUTF8StringEncoding error:&err];
+        if (err) return @"";
 
-    NSTask* task = [[NSTask alloc] init];
-    [task setLaunchPath:@"/usr/bin/diff"];
-    [task setArguments:@[@"-u", path, tempPath]];
+        std::vector<std::string> args = {"-u", [path UTF8String], [tempPath UTF8String]};
+        SubprocessResult res = SubprocessRunner::run("/usr/bin/diff", args, "", 5.0);
 
-    NSPipe* outPipe = [NSPipe pipe];
-    [task setStandardOutput:outPipe];
-    [task setStandardError:outPipe];
+        if (res.timedOut) {
+            return @"--- diff timed out ---";
+        }
 
-    @try {
-        [task launch];
-        NSData* data = [[outPipe fileHandleForReading] readDataToEndOfFile];
-        [task waitUntilExit];
-        NSString* diff = [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
-        return diff ?: @"";
+        return [NSString stringWithUTF8String:res.stdOut.c_str()] ?: @"";
     } @catch (NSException* e) {
         return @"";
-    }
-
     } @finally {
         [[NSFileManager defaultManager] removeItemAtPath:tempPath error:nil];
     }

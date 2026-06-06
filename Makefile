@@ -13,7 +13,8 @@ CORE_CPP := \
 	src/editor/TextBuffer.cpp \
 	src/editor/EditorDocument.cpp \
 	src/search/FindInFile.cpp \
-	src/filesystem/FileService.cpp
+	src/filesystem/FileService.cpp \
+	src/syntax/Tokenizer.cpp
 
 MACOS_MM := \
 	src/platform/macos/main.mm \
@@ -24,11 +25,25 @@ MACOS_MM := \
 	src/platform/macos/MacClipboard.mm \
 	src/platform/macos/MacTextRendering.mm \
 	src/platform/macos/MacControlServer.mm \
+	src/platform/macos/MacControlSupport.mm \
+	src/platform/macos/MacControlPathSecurity.mm \
+	src/platform/macos/MacControlSerialization.mm \
+	src/platform/macos/MacControlDiffParsing.mm \
+	src/platform/macos/MacControlRecoveryStore.mm \
+	src/platform/macos/MacControlSearchService.mm \
+	src/platform/macos/MacControlPatchService.mm \
+	src/platform/macos/MacControlTaskRuntime.mm \
+	src/platform/macos/MacControlComboRuntime.mm \
+	src/platform/macos/MacControlRoutingPolicy.mm \
+	src/platform/macos/MacControlMethodCatalog.mm \
+	src/platform/macos/MacControlWindowBridge.mm \
 	src/platform/macos/SymbolIndexService.mm \
 	src/platform/macos/DiffAnalysisService.mm \
 	src/platform/macos/WorkspaceAnalysisService.mm \
 	src/platform/macos/BufferStateService.mm \
+	src/platform/macos/SubprocessRunner.mm \
 	src/filesystem/GitService.mm \
+	src/filesystem/FileWatcher.mm \
 	src/core/LSPClient.mm
 
 .PHONY: all app run headless ensure-socket agent-ready agent-status agent-ping agent-methods agent-capabilities agent-self-test control-smoke test clean

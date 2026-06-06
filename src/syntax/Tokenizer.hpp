@@ -7,14 +7,19 @@
 
 namespace dietcode::syntax {
 
+enum class Language {
+    PlainText,
+    Cpp,
+    Python
+};
+
 class Tokenizer {
 public:
-    [[nodiscard]] std::vector<Token> tokenizeLine(const std::string& line) const {
-        if (line.empty()) {
-            return {};
-        }
-        return {Token{TokenKind::Text, 0, line.size()}};
-    }
+    explicit Tokenizer(Language lang = Language::PlainText);
+    [[nodiscard]] std::vector<Token> tokenizeLine(const std::string& line) const;
+
+private:
+    Language language_;
 };
 
 } // namespace dietcode::syntax

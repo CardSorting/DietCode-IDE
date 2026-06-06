@@ -61,14 +61,19 @@ const std::vector<std::string>& TextBuffer::lines() const noexcept {
 }
 
 std::string TextBuffer::toString() const {
-    std::string output;
+    if (cacheValid_) {
+        return cachedString_;
+    }
+
+    cachedString_.clear();
     for (std::size_t i = 0; i < lines_.size(); ++i) {
-        output += lines_[i];
+        cachedString_ += lines_[i];
         if (i + 1 < lines_.size()) {
-            output += '\n';
+            cachedString_ += '\n';
         }
     }
-    return output;
+    cacheValid_ = true;
+    return cachedString_;
 }
 
 CursorPosition TextBuffer::clamp(CursorPosition position) const noexcept {
@@ -106,7 +111,8 @@ std::string TextBuffer::textInRange(TextRange range) const {
     return output;
 }
 
-CursorPosition TextBuffer::insert(CursorPosition position, std::string_view text) {
+TextRange TextBuffer::insert(CursorPosition position, std::string_view text) {
+    invalidateCache();
     const CursorPosition safePosition = clamp(position);
     std::vector<std::string> insertedLines = splitLines(text);
 
@@ -114,52 +120,62 @@ CursorPosition TextBuffer::insert(CursorPosition position, std::string_view text
     const std::string before = targetLine.substr(0, safePosition.column);
     const std::string after = targetLine.substr(safePosition.column);
 
+    CursorPosition end;
     if (insertedLines.size() == 1) {
         targetLine = before + insertedLines.front() + after;
-        return CursorPosition{safePosition.line, safePosition.column + insertedLines.front().size()};
+        end = CursorPosition{safePosition.line, safePosition.column + insertedLines.front().size()};
+    } else {
+        insertedLines.front() = before + insertedLines.front();
+        insertedLines.back() += after;
+
+        lines_.erase(lines_.begin() + static_cast<std::ptrdiff_t>(safePosition.line));
+        lines_.insert(lines_.begin() + static_cast<std::ptrdiff_t>(safePosition.line), insertedLines.begin(), insertedLines.end());
+
+        end = CursorPosition{safePosition.line + insertedLines.size() - 1, insertedLines.back().size() - after.size()};
     }
-
-    insertedLines.front() = before + insertedLines.front();
-    insertedLines.back() += after;
-
-    lines_.erase(lines_.begin() + static_cast<std::ptrdiff_t>(safePosition.line));
-    lines_.insert(lines_.begin() + static_cast<std::ptrdiff_t>(safePosition.line), insertedLines.begin(), insertedLines.end());
-
-    return CursorPosition{safePosition.line + insertedLines.size() - 1, insertedLines.back().size() - after.size()};
+    return TextRange{safePosition, end};
 }
 
-void TextBuffer::erase(TextRange range) {
+std::string TextBuffer::erase(TextRange range) {
+    invalidateCache();
     const TextRange normalized = range.normalized();
     const CursorPosition start = clamp(normalized.start);
     const CursorPosition end = clamp(normalized.end);
 
     if (end < start || start == end) {
-        return;
+        return {};
     }
+
+    std::string deleted = textInRange(normalized);
 
     if (start.line == end.line) {
         lines_[start.line].erase(start.column, end.column - start.column);
-        return;
+    } else {
+        const std::string merged = lines_[start.line].substr(0, start.column) + lines_[end.line].substr(end.column);
+        lines_.erase(lines_.begin() + static_cast<std::ptrdiff_t>(start.line),
+                    lines_.begin() + static_cast<std::ptrdiff_t>(end.line + 1));
+        lines_.insert(lines_.begin() + static_cast<std::ptrdiff_t>(start.line), merged);
     }
-
-    const std::string merged = lines_[start.line].substr(0, start.column) + lines_[end.line].substr(end.column);
-    lines_.erase(lines_.begin() + static_cast<std::ptrdiff_t>(start.line),
-                 lines_.begin() + static_cast<std::ptrdiff_t>(end.line + 1));
-    lines_.insert(lines_.begin() + static_cast<std::ptrdiff_t>(start.line), merged);
 
     if (lines_.empty()) {
         lines_.push_back(std::string{});
     }
+    return deleted;
 }
 
-void TextBuffer::replace(TextRange range, std::string_view text) {
-    const TextRange normalized = range.normalized();
-    erase(normalized);
-    insert(normalized.start, text);
+std::string TextBuffer::replace(TextRange range, std::string_view text) {
+    std::string deleted = erase(range);
+    insert(range.normalized().start, text);
+    return deleted;
 }
 
 void TextBuffer::setText(std::string_view text) {
+    invalidateCache();
     lines_ = splitLines(text);
+}
+
+void TextBuffer::invalidateCache() const noexcept {
+    cacheValid_ = false;
 }
 
 } // namespace dietcode::editor

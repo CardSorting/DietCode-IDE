@@ -1,5 +1,8 @@
 #pragma once
 
+#include "Cursor.hpp"
+#include "Selection.hpp"
+
 #include <optional>
 #include <string>
 #include <utility>
@@ -7,23 +10,29 @@
 
 namespace dietcode::editor {
 
+struct TextOperation {
+    enum class Kind { Insert, Erase };
+    Kind kind;
+    TextRange range;
+    std::string text;
+};
+
 struct UndoEntry {
-    std::string before;
-    std::string after;
+    std::vector<TextOperation> operations;
 };
 
 class UndoRedoStack {
 public:
     static constexpr std::size_t kMaxUndoDepth = 500;
 
-    void record(std::string before, std::string after) {
-        if (before == after) {
+    void record(UndoEntry entry) {
+        if (entry.operations.empty()) {
             return;
         }
         if (undo_.size() >= kMaxUndoDepth) {
             undo_.erase(undo_.begin());
         }
-        undo_.push_back(UndoEntry{std::move(before), std::move(after)});
+        undo_.push_back(std::move(entry));
         redo_.clear();
     }
 

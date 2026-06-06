@@ -1,40 +1,26 @@
 #import <Foundation/Foundation.h>
 #include "GitService.hpp"
+#include "../platform/macos/SubprocessRunner.hpp"
 #include <sstream>
 #include <filesystem>
 #include <iostream>
 
+using namespace dietcode::platform::macos;
+
 namespace dietcode::filesystem {
 
-static std::string runCommand(const std::string& dir, NSString* launchPath, NSArray<NSString*>* args, int* exitCodeOut = nullptr) {
-    NSTask* task = [[NSTask alloc] init];
-    [task setLaunchPath:launchPath];
-    [task setArguments:args];
-    [task setCurrentDirectoryPath:[NSString stringWithUTF8String:dir.c_str()]];
+static std::string runCommand(const std::string& dir, const std::string& launchPath, const std::vector<std::string>& args, int* exitCodeOut = nullptr) {
+    SubprocessResult res = SubprocessRunner::run(launchPath, args, dir, 10.0);
     
-    NSPipe* outPipe = [NSPipe pipe];
-    [task setStandardOutput:outPipe];
-    [task setStandardError:outPipe];
-    
-    @try {
-        [task launch];
-        
-        NSData* outData = [[outPipe fileHandleForReading] readDataToEndOfFile];
-        [task waitUntilExit];
-        
-        NSString* outStr = [[NSString alloc] initWithData:outData encoding:NSUTF8StringEncoding] ?: @"";
-        
-        if (exitCodeOut) {
-            *exitCodeOut = task.terminationStatus;
-        }
-        
-        return std::string([outStr UTF8String]);
-    } @catch (NSException* e) {
-        if (exitCodeOut) {
-            *exitCodeOut = -1;
-        }
-        return "Failed to launch task: " + std::string([[e reason] UTF8String]);
+    if (exitCodeOut) {
+        *exitCodeOut = res.exitCode;
     }
+    
+    if (res.timedOut) {
+        return "Command timed out";
+    }
+    
+    return res.stdOut;
 }
 
 GitStatusResult GitService::getStatus(const std::string& workspacePath) {
@@ -43,16 +29,16 @@ GitStatusResult GitService::getStatus(const std::string& workspacePath) {
     
     // Check if it is a git repository
     int exitCode = 0;
-    runCommand(workspacePath, @"/usr/bin/git", @[@"rev-parse", @"--is-inside-work-tree"], &exitCode);
+    runCommand(workspacePath, "/usr/bin/git", {"rev-parse", "--is-inside-work-tree"}, &exitCode);
     if (exitCode != 0) {
         return result; // Not a git repo
     }
     
     // Get current branch
-    std::string branchOut = runCommand(workspacePath, @"/usr/bin/git", @[@"symbolic-ref", @"--short", @"HEAD"], &exitCode);
+    std::string branchOut = runCommand(workspacePath, "/usr/bin/git", {"symbolic-ref", "--short", "HEAD"}, &exitCode);
     if (exitCode != 0) {
         // Detached HEAD or other issue, try rev-parse
-        branchOut = runCommand(workspacePath, @"/usr/bin/git", @[@"rev-parse", @"--abbrev-ref", @"HEAD"], &exitCode);
+        branchOut = runCommand(workspacePath, "/usr/bin/git", {"rev-parse", "--abbrev-ref", "HEAD"}, &exitCode);
     }
     
     // Clean branch name
@@ -67,7 +53,7 @@ GitStatusResult GitService::getStatus(const std::string& workspacePath) {
     }
     
     // Get porcelain status
-    std::string statusOut = runCommand(workspacePath, @"/usr/bin/git", @[@"status", @"--porcelain", @"-u"]);
+    std::string statusOut = runCommand(workspacePath, "/usr/bin/git", {"status", "--porcelain", "-u"});
     std::stringstream ss(statusOut);
     std::string line;
     while (std::getline(ss, line)) {
@@ -116,14 +102,14 @@ GitStatusResult GitService::getStatus(const std::string& workspacePath) {
 
 bool GitService::stageFile(const std::string& workspacePath, const std::string& relativePath, std::string& errorOut) {
     int exitCode = 0;
-    std::string out = runCommand(workspacePath, @"/usr/bin/git", @[@"add", [NSString stringWithUTF8String:relativePath.c_str()]], &exitCode);
+    std::string out = runCommand(workspacePath, "/usr/bin/git", {"add", relativePath}, &exitCode);
     if (exitCode != 0) { errorOut = out.empty() ? "git add failed (exit " + std::to_string(exitCode) + ")" : out; }
     return exitCode == 0;
 }
 
 bool GitService::unstageFile(const std::string& workspacePath, const std::string& relativePath, std::string& errorOut) {
     int exitCode = 0;
-    std::string out = runCommand(workspacePath, @"/usr/bin/git", @[@"reset", @"HEAD", [NSString stringWithUTF8String:relativePath.c_str()]], &exitCode);
+    std::string out = runCommand(workspacePath, "/usr/bin/git", {"reset", "HEAD", relativePath}, &exitCode);
     if (exitCode != 0) { errorOut = out.empty() ? "git reset HEAD failed (exit " + std::to_string(exitCode) + ")" : out; }
     return exitCode == 0;
 }
@@ -148,7 +134,7 @@ bool GitService::discardChanges(const std::string& workspacePath, const std::str
         return !ec;
     } else {
         int exitCode = 0;
-        std::string out = runCommand(workspacePath, @"/usr/bin/git", @[@"checkout", @"--", [NSString stringWithUTF8String:relativePath.c_str()]], &exitCode);
+        std::string out = runCommand(workspacePath, "/usr/bin/git", {"checkout", "--", relativePath}, &exitCode);
         if (exitCode != 0) { errorOut = out.empty() ? "git checkout failed (exit " + std::to_string(exitCode) + ")" : out; }
         return exitCode == 0;
     }
@@ -168,28 +154,28 @@ std::string GitService::getDiff(const std::string& workspacePath, const std::str
     if (untracked) {
         // Diff against /dev/null for untracked files
         int exitCode = 0;
-        std::string diff = runCommand(workspacePath, @"/usr/bin/git", @[
-            @"diff", @"--no-index", @"/dev/null", [NSString stringWithUTF8String:relativePath.c_str()]
-        ], &exitCode);
+        std::string diff = runCommand(workspacePath, "/usr/bin/git", {
+            "diff", "--no-index", "/dev/null", relativePath
+        }, &exitCode);
         // git diff --no-index exits with 1 if there are differences, which is normal
         return diff;
     } else {
         int exitCode = 0;
-        NSArray* args = nil;
+        std::vector<std::string> args;
         if (staged) {
-            args = @[@"diff", @"--cached", @"--", [NSString stringWithUTF8String:relativePath.c_str()]];
+            args = {"diff", "--cached", "--", relativePath};
         } else {
-            args = @[@"diff", @"--", [NSString stringWithUTF8String:relativePath.c_str()]];
+            args = {"diff", "--", relativePath};
         }
-        return runCommand(workspacePath, @"/usr/bin/git", args, &exitCode);
+        return runCommand(workspacePath, "/usr/bin/git", args, &exitCode);
     }
 }
 
 bool GitService::commit(const std::string& workspacePath, const std::string& message, std::string& errorOut) {
     int exitCode = 0;
-    std::string out = runCommand(workspacePath, @"/usr/bin/git", @[
-        @"commit", @"-m", [NSString stringWithUTF8String:message.c_str()]
-    ], &exitCode);
+    std::string out = runCommand(workspacePath, "/usr/bin/git", {
+        "commit", "-m", message
+    }, &exitCode);
     
     if (exitCode != 0) {
         errorOut = out;

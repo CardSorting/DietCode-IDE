@@ -37,31 +37,47 @@ void EditorDocument::setPath(std::string path) {
 }
 
 void EditorDocument::setText(std::string text) {
-    const std::string before = buffer_.toString();
-    buffer_.setText(text);
-    history_.record(before, buffer_.toString());
+    TextRange fullRange = { {0, 0}, {buffer_.lineCount() - 1, buffer_.line(buffer_.lineCount() - 1).size()} };
+    std::string deleted = buffer_.erase(fullRange);
+    TextRange newRange = buffer_.insert({0, 0}, text);
+    
+    UndoEntry entry;
+    entry.operations.push_back({ TextOperation::Kind::Erase, fullRange, std::move(deleted) });
+    entry.operations.push_back({ TextOperation::Kind::Insert, newRange, std::move(text) });
+    history_.record(std::move(entry));
     dirty_ = true;
 }
 
 void EditorDocument::replace(TextRange range, std::string text) {
-    const std::string before = buffer_.toString();
-    buffer_.replace(range, text);
-    history_.record(before, buffer_.toString());
+    const TextRange normalized = range.normalized();
+    std::string deleted = buffer_.textInRange(normalized);
+    buffer_.erase(normalized);
+    TextRange newRange = buffer_.insert(normalized.start, text);
+    
+    UndoEntry entry;
+    entry.operations.push_back({ TextOperation::Kind::Erase, normalized, std::move(deleted) });
+    entry.operations.push_back({ TextOperation::Kind::Insert, newRange, std::move(text) });
+    history_.record(std::move(entry));
     dirty_ = true;
 }
 
 CursorPosition EditorDocument::insert(CursorPosition position, std::string text) {
-    const std::string before = buffer_.toString();
-    const CursorPosition next = buffer_.insert(position, text);
-    history_.record(before, buffer_.toString());
+    TextRange newRange = buffer_.insert(position, text);
+    
+    UndoEntry entry;
+    entry.operations.push_back({ TextOperation::Kind::Insert, newRange, text });
+    history_.record(std::move(entry));
     dirty_ = true;
-    return next;
+    return newRange.end;
 }
 
 void EditorDocument::erase(TextRange range) {
-    const std::string before = buffer_.toString();
-    buffer_.erase(range);
-    history_.record(before, buffer_.toString());
+    const TextRange normalized = range.normalized();
+    std::string deleted = buffer_.erase(normalized);
+    
+    UndoEntry entry;
+    entry.operations.push_back({ TextOperation::Kind::Erase, normalized, std::move(deleted) });
+    history_.record(std::move(entry));
     dirty_ = true;
 }
 
@@ -70,7 +86,16 @@ bool EditorDocument::undo() {
     if (!entry) {
         return false;
     }
-    buffer_.setText(entry->before);
+    
+    // Apply operations in reverse order, with inverse actions
+    for (auto it = entry->operations.rbegin(); it != entry->operations.rend(); ++it) {
+        if (it->kind == TextOperation::Kind::Insert) {
+            buffer_.erase(it->range);
+        } else {
+            buffer_.insert(it->range.start, it->text);
+        }
+    }
+    
     dirty_ = true;
     return true;
 }
@@ -80,7 +105,16 @@ bool EditorDocument::redo() {
     if (!entry) {
         return false;
     }
-    buffer_.setText(entry->after);
+    
+    // Apply operations in normal order
+    for (const auto& op : entry->operations) {
+        if (op.kind == TextOperation::Kind::Insert) {
+            buffer_.insert(op.range.start, op.text);
+        } else {
+            buffer_.erase(op.range);
+        }
+    }
+    
     dirty_ = true;
     return true;
 }

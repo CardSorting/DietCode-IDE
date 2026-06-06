@@ -25,13 +25,17 @@ public:
     [[nodiscard]] CursorPosition clamp(CursorPosition position) const noexcept;
     [[nodiscard]] std::string textInRange(TextRange range) const;
 
-    CursorPosition insert(CursorPosition position, std::string_view text);
-    void erase(TextRange range);
-    void replace(TextRange range, std::string_view text);
+    TextRange insert(CursorPosition position, std::string_view text);
+    std::string erase(TextRange range);
+    std::string replace(TextRange range, std::string_view text);
     void setText(std::string_view text);
 
 private:
+    void invalidateCache() const noexcept;
+
     std::vector<std::string> lines_;
+    mutable std::string cachedString_;
+    mutable bool cacheValid_{false};
 };
 
 } // namespace dietcode::editor

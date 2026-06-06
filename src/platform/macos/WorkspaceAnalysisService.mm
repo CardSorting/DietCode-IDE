@@ -1,10 +1,13 @@
 #import "WorkspaceAnalysisService.hpp"
+#include "../../filesystem/PathUtils.hpp"
 #include <filesystem>
 #include <fstream>
 #include <vector>
 #include <string>
 #include <algorithm>
 #include <fnmatch.h>
+
+using namespace dietcode::filesystem;
 
 namespace {
 static const NSInteger kMaxAnalysisDepth = 10;
@@ -47,21 +50,24 @@ bool fileWithinReadCap(const std::filesystem::path& p) {
     NSInteger totalFiles = 0;
     unsigned long long totalSize = 0;
 
-    std::error_code ec;
-    std::filesystem::recursive_directory_iterator it(folder, ec);
-    std::filesystem::recursive_directory_iterator end;
-    for (; it != end && !ec; it.increment(ec)) {
-        const auto& entry = *it;
+    traverseDirectory(folder, [&](const std::filesystem::directory_entry& entry, int depth, bool& skipRecursion, bool& stop) {
+        std::error_code ec;
         std::filesystem::path p = entry.path();
         std::string filename = p.filename().string();
+
         if (entry.is_directory(ec)) {
-            if (it.depth() >= kMaxAnalysisDepth || isSkippedDirName(filename)) {
-                it.disable_recursion_pending();
+            if (depth >= kMaxAnalysisDepth || isSkippedDirName(filename)) {
+                skipRecursion = true;
             }
-            continue;
+            return;
         }
-        if (!entry.is_regular_file()) continue;
-        if (++totalFiles > kMaxAnalysisFiles) break;
+
+        if (!entry.is_regular_file()) return;
+        if (++totalFiles > kMaxAnalysisFiles) {
+            stop = true;
+            return;
+        }
+
 
         std::error_code sizeEc;
         auto size = std::filesystem::file_size(p, sizeEc);
@@ -75,7 +81,7 @@ bool fileWithinReadCap(const std::filesystem::path& p) {
             NSString* extKey = NSStringFromStd(ext);
             languages[extKey] = @([languages[extKey] integerValue] + 1);
         }
-    }
+    });
 
     result[@"root"] = ws;
     result[@"languages"] = languages;
@@ -151,30 +157,32 @@ bool fileWithinReadCap(const std::filesystem::path& p) {
     NSString* filename = [[path lastPathComponent] stringByDeletingPathExtension];
     std::filesystem::path folder([ws UTF8String]);
 
-    std::error_code ec;
     NSInteger scannedFiles = 0;
-    std::filesystem::recursive_directory_iterator it(folder, ec);
-    std::filesystem::recursive_directory_iterator end;
-    for (; it != end && !ec; it.increment(ec)) {
-        const auto& entry = *it;
+    traverseDirectory(folder, [&](const std::filesystem::directory_entry& entry, int depth, bool& skipRecursion, bool& stop) {
+        std::error_code ec;
         std::filesystem::path p = entry.path();
         std::string filenameStr = p.filename().string();
+        
         if (entry.is_directory(ec)) {
-            if (it.depth() >= kMaxAnalysisDepth || isSkippedDirName(filenameStr)) {
-                it.disable_recursion_pending();
+            if (depth >= kMaxAnalysisDepth || isSkippedDirName(filenameStr)) {
+                skipRecursion = true;
             }
-            continue;
+            return;
         }
-        if (!entry.is_regular_file()) continue;
-        if (++scannedFiles > kMaxAnalysisFiles) break;
-        if (!fileWithinReadCap(p)) continue;
+        
+        if (!entry.is_regular_file()) return;
+        if (++scannedFiles > kMaxAnalysisFiles) {
+            stop = true;
+            return;
+        }
+        if (!fileWithinReadCap(p)) return;
 
         NSString* currentPath = NSStringFromStd(p.string());
-        if ([currentPath isEqualToString:path]) continue;
+        if ([currentPath isEqualToString:path]) return;
 
         // Heuristic: check if current file includes this filename or contains it
         std::ifstream file(p.string());
-        if (!file.is_open()) continue;
+        if (!file.is_open()) return;
 
         std::string line;
         bool related = false;
@@ -190,7 +198,7 @@ bool fileWithinReadCap(const std::filesystem::path& p) {
         if (related) {
             [result addObject:currentPath];
         }
-    }
+    });
 
     return result;
 }
@@ -212,24 +220,26 @@ bool fileWithinReadCap(const std::filesystem::path& p) {
         std::transform(stdQuery.begin(), stdQuery.end(), stdQuery.begin(), ::tolower);
     }
 
-    std::error_code ec;
     NSInteger scannedFiles = 0;
-    std::filesystem::recursive_directory_iterator it(folder, ec);
-    std::filesystem::recursive_directory_iterator end;
-    for (; it != end && !ec; it.increment(ec)) {
-        const auto& entry = *it;
+    traverseDirectory(folder, [&](const std::filesystem::directory_entry& entry, int depth, bool& skipRecursion, bool& stop) {
+        std::error_code ec;
         std::filesystem::path p = entry.path();
         std::string filename = p.filename().string();
         std::string relPath = std::filesystem::relative(p, folder, ec).string();
+        
         if (entry.is_directory(ec)) {
-            if (it.depth() >= kMaxAnalysisDepth || isSkippedDirName(filename)) {
-                it.disable_recursion_pending();
+            if (depth >= kMaxAnalysisDepth || isSkippedDirName(filename)) {
+                skipRecursion = true;
             }
-            continue;
+            return;
         }
-        if (!entry.is_regular_file()) continue;
-        if (++scannedFiles > kMaxAnalysisFiles) break;
-        if (!fileWithinReadCap(p)) continue;
+        
+        if (!entry.is_regular_file()) return;
+        if (++scannedFiles > kMaxAnalysisFiles) {
+            stop = true;
+            return;
+        }
+        if (!fileWithinReadCap(p)) return;
 
         // Glob matching exclusions
         BOOL skip = false;
@@ -240,7 +250,7 @@ bool fileWithinReadCap(const std::filesystem::path& p) {
                 break;
             }
         }
-        if (skip) continue;
+        if (skip) return;
 
         // Glob matching inclusions
         if (includes.count > 0) {
@@ -252,11 +262,11 @@ bool fileWithinReadCap(const std::filesystem::path& p) {
                     break;
                 }
             }
-            if (!matchesInclude) continue;
+            if (!matchesInclude) return;
         }
 
         std::ifstream file(p.string());
-        if (!file.is_open()) continue;
+        if (!file.is_open()) return;
 
         std::vector<std::string> fileLines;
         std::string lineText;
@@ -320,7 +330,7 @@ bool fileWithinReadCap(const std::filesystem::path& p) {
                 @"matches": matches
             }];
         }
-    }
+    });
 
     // Sort files by score descending
     [rankedFiles sortUsingComparator:^NSComparisonResult(NSDictionary* obj1, NSDictionary* obj2) {

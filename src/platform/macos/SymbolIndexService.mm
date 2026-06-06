@@ -1,4 +1,5 @@
 #import "SymbolIndexService.hpp"
+#include "../../filesystem/PathUtils.hpp"
 #include <vector>
 #include <string>
 #include <algorithm>
@@ -6,6 +7,8 @@
 #include <sstream>
 #include <filesystem>
 #include <cctype>
+
+using namespace dietcode::filesystem;
 
 namespace {
 static const NSInteger kMaxSymbolSearchDepth = 10;
@@ -267,30 +270,32 @@ bool symbolFileWithinReadCap(const std::filesystem::path& p) {
     std::filesystem::path folder([ws UTF8String]);
     std::string targetSymbol = [symbol UTF8String];
 
-    std::error_code ec;
     NSInteger scannedFiles = 0;
-    std::filesystem::recursive_directory_iterator it(folder, ec);
-    std::filesystem::recursive_directory_iterator end;
-    for (; it != end && !ec; it.increment(ec)) {
-        const auto& entry = *it;
+    traverseDirectory(folder, [&](const std::filesystem::directory_entry& entry, int depth, bool& skipRecursion, bool& stop) {
+        std::error_code ec;
         std::filesystem::path p = entry.path();
         std::string filename = p.filename().string();
+        
         if (entry.is_directory(ec)) {
-            if (it.depth() >= kMaxSymbolSearchDepth || shouldSkipSymbolDirectory(filename)) {
-                it.disable_recursion_pending();
+            if (depth >= kMaxSymbolSearchDepth || shouldSkipSymbolDirectory(filename)) {
+                skipRecursion = true;
             }
-            continue;
+            return;
         }
-        if (!entry.is_regular_file()) continue;
-        if (++scannedFiles > kMaxSymbolSearchFiles) break;
-        if (!symbolFileWithinReadCap(p)) continue;
+        
+        if (!entry.is_regular_file()) return;
+        if (++scannedFiles > kMaxSymbolSearchFiles) {
+            stop = true;
+            return;
+        }
+        if (!symbolFileWithinReadCap(p)) return;
 
         std::string absPathStr = p.string();
         NSString* absPath = [NSString stringWithUTF8String:absPathStr.c_str()];
 
         // Read file contents
         std::ifstream file(absPathStr);
-        if (!file.is_open()) continue;
+        if (!file.is_open()) return;
 
         std::string line;
         int lineNum = 1;
@@ -326,7 +331,7 @@ bool symbolFileWithinReadCap(const std::filesystem::path& p) {
             }
             lineNum++;
         }
-    }
+    });
 
     // Sort by score descending
     [references sortUsingComparator:^NSComparisonResult(NSDictionary* obj1, NSDictionary* obj2) {
