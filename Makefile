@@ -3,6 +3,9 @@ CXX := clang++
 # Header search paths
 INC_FLAGS := -I./src \
              -I./src/platform/macos/control \
+             -I./src/platform/macos/control/categories \
+             -I./src/platform/macos/control/services \
+             -I./src/platform/macos/control/utils \
              -I./src/platform/macos/ui \
              -I./src/platform/macos/ui/app \
              -I./src/platform/macos/ui/controllers \
@@ -52,18 +55,23 @@ MACOS_MM := \
 	src/platform/macos/ui/app/MacClipboard.mm \
 	src/platform/macos/ui/views/MacTextRendering.mm \
 	src/platform/macos/control/MacControlServer.mm \
-	src/platform/macos/control/MacControlSupport.mm \
-	src/platform/macos/control/MacControlPathSecurity.mm \
-	src/platform/macos/control/MacControlSerialization.mm \
-	src/platform/macos/control/MacControlDiffParsing.mm \
-	src/platform/macos/control/MacControlRecoveryStore.mm \
-	src/platform/macos/control/MacControlSearchService.mm \
-	src/platform/macos/control/MacControlPatchService.mm \
-	src/platform/macos/control/MacControlTaskRuntime.mm \
-	src/platform/macos/control/MacControlComboRuntime.mm \
-	src/platform/macos/control/MacControlRoutingPolicy.mm \
-	src/platform/macos/control/MacControlMethodCatalog.mm \
-	src/platform/macos/control/MacControlWindowBridge.mm \
+	src/platform/macos/control/categories/MacControlServer+File.mm \
+	src/platform/macos/control/categories/MacControlServer+Editor.mm \
+	src/platform/macos/control/categories/MacControlServer+Git.mm \
+	src/platform/macos/control/categories/MacControlServer+Terminal.mm \
+	src/platform/macos/control/categories/MacControlServer+Context.mm \
+	src/platform/macos/control/utils/MacControlSupport.mm \
+	src/platform/macos/control/utils/MacControlPathSecurity.mm \
+	src/platform/macos/control/utils/MacControlSerialization.mm \
+	src/platform/macos/control/utils/MacControlDiffParsing.mm \
+	src/platform/macos/control/services/MacControlRecoveryStore.mm \
+	src/platform/macos/control/services/MacControlSearchService.mm \
+	src/platform/macos/control/services/MacControlPatchService.mm \
+	src/platform/macos/control/services/MacControlTaskRuntime.mm \
+	src/platform/macos/control/services/MacControlComboRuntime.mm \
+	src/platform/macos/control/services/MacControlRoutingPolicy.mm \
+	src/platform/macos/control/services/MacControlMethodCatalog.mm \
+	src/platform/macos/control/services/MacControlWindowBridge.mm \
 	src/platform/macos/services/SymbolIndexService.mm \
 	src/platform/macos/services/DiffAnalysisService.mm \
 	src/platform/macos/services/WorkspaceAnalysisService.mm \

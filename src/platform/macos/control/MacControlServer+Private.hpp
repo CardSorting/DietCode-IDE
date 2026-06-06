@@ -1,0 +1,87 @@
+#pragma once
+
+#import "MacControlServer.hpp"
+#import "MacControlWindowBridge.hpp"
+#import "MacControlRecoveryStore.hpp"
+#import "MacControlSearchService.hpp"
+#import "MacControlPatchService.hpp"
+#import "MacControlTaskRuntime.hpp"
+#import "MacControlComboRuntime.hpp"
+
+@class DietCodeClientConnection;
+
+@interface DietCodeControlServer () {
+@public
+    DietCodeControlWindowBridge* _windowBridge;
+    MacControlRecoveryStore* _recoveryStore;
+    MacControlSearchService* _searchService;
+    MacControlPatchService* _patchService;
+    MacControlTaskRuntime* _taskRuntime;
+    MacControlComboRuntime* _comboRuntime;
+    int _serverFd;
+    NSThread* _acceptThread;
+    NSString* _lastVerifyCommand;
+    NSDate* _lastVerifyStartedAt;
+    NSDate* _lastVerifyFinishedAt;
+    NSNumber* _lastVerifyExitCode;
+    NSMutableDictionary<NSString*, NSDictionary*>* _contextSnapshots;
+    NSInteger _contextSnapshotCounter;
+    NSMutableDictionary<NSString*, NSDictionary*>* _editPlans;
+    NSInteger _editPlanCounter;
+    NSInteger _comboCounter;
+    NSMutableDictionary<NSNumber*, DietCodeClientConnection*>* _activeConnections;
+    NSString* _sessionToken;
+    dispatch_queue_t _executionQueue;
+    dispatch_queue_t _readQueue;
+    BOOL _globalMutationLock;
+    NSDictionary* _lastVerifyStatus;
+    NSString* _lastComboId;
+}
+
+- (NSString*)safeWorkspacePath;
+- (NSString*)safeTextForFileAtPath:(NSString*)path;
+- (BOOL)safeReplaceTextInRange:(NSRange)range withText:(NSString*)text forFileAtPath:(NSString*)path;
+- (NSArray<NSString*>*)safeOpenFilePaths;
+- (NSArray<NSDictionary*>*)safeProblemsList;
+- (NSString*)safeActiveFilePath;
+- (NSArray*)safeOpenTabs;
+- (NSDictionary*)safeGitStatusInfo;
+- (NSString*)safeGitDiffForFile:(NSString*)path;
+- (NSDictionary*)safeActiveSelectionInfo;
+- (NSString*)safeTerminalOutput;
+- (NSArray*)safeSessionRecentCommands;
+- (NSArray*)safeSessionLastSearches;
+- (pid_t)safeTerminalPid;
+- (NSArray*)safeLanguageDiagnosticsForPath:(NSString*)path;
+
+- (BOOL)path:(NSString*)path isAllowedByScope:(NSDictionary*)scope;
+- (BOOL)dirtyBufferExistsAtPath:(NSString*)path;
+- (NSArray<NSString*>*)verificationFailureLines;
+- (NSDictionary*)currentChangesInfo;
+- (NSDictionary*)runVerificationCommand:(NSString*)command cwd:(NSString*)cwd;
+- (NSDictionary*)verificationStatus;
+- (NSDictionary*)contextSnapshotPayload;
+- (NSDictionary*)repairContextForFailure:(NSString*)failure params:(NSDictionary*)params;
+- (void)logAuditMethod:(NSString*)method caller:(NSString*)caller permission:(NSString*)permission duration:(long long)duration result:(NSString*)result paths:(NSString*)paths;
+
+@end
+
+@interface DietCodeControlServer (File)
+- (void)executeFileMethod:(NSString*)method params:(NSDictionary*)params outResult:(NSDictionary**)outResult outErrCode:(NSString**)outErrCode outErrMsg:(NSString**)outErrMsg outPaths:(NSString**)outPaths;
+@end
+
+@interface DietCodeControlServer (Editor)
+- (void)executeEditorMethod:(NSString*)method params:(NSDictionary*)params outResult:(NSDictionary**)outResult outErrCode:(NSString**)outErrCode outErrMsg:(NSString**)outErrMsg outPaths:(NSString**)outPaths;
+@end
+
+@interface DietCodeControlServer (Git)
+- (void)executeGitMethod:(NSString*)method params:(NSDictionary*)params outResult:(NSDictionary**)outResult outErrCode:(NSString**)outErrCode outErrMsg:(NSString**)outErrMsg outPaths:(NSString**)outPaths;
+@end
+
+@interface DietCodeControlServer (Terminal)
+- (void)executeTerminalMethod:(NSString*)method params:(NSDictionary*)params outResult:(NSDictionary**)outResult outErrCode:(NSString**)outErrCode outErrMsg:(NSString**)outErrMsg outPaths:(NSString**)outPaths;
+@end
+
+@interface DietCodeControlServer (Context)
+- (void)executeContextMethod:(NSString*)method params:(NSDictionary*)params outResult:(NSDictionary**)outResult outErrCode:(NSString**)outErrCode outErrMsg:(NSString**)outErrMsg outPaths:(NSString**)outPaths;
+@end

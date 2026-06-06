@@ -24,6 +24,23 @@ DEFAULT_APP_PATH = REPO_ROOT / "build" / "DietCode.app" / "Contents" / "MacOS" /
 MAX_REQUEST_BYTES = 1024 * 1024
 MAX_RESPONSE_BYTES = 4 * 1024 * 1024
 
+READ_METHODS = {
+    "rpc.ping", "rpc.version", "rpc.methods", "rpc.describe", "chip.list", "chip.describe",
+    "combo.status", "combo.result", "recovery.scan", "recovery.schemaInfo", "recovery.list",
+    "workspace.getRoot", "workspace.listFiles", "workspace.grep", "workspace.getRecentFiles",
+    "search.files", "search.text", "search.todo", "search.semantic", "search.diagnostics",
+    "file.read", "file.readRange", "file.readAround", "file.getChunks", "file.stat",
+    "editor.getActiveFile", "editor.getOpenFiles", "editor.getText", "editor.getSelection",
+    "diff.workspaceInfo", "diff.stats", "diff.file", "diff.chunk", "diff.hunks",
+    "diff.current", "diff.staged", "diff.unstaged", "diff.summary",
+    "buffers.snapshot", "buffers.dirty", "buffers.active", "buffers.unsavedDiff",
+    "changes.current", "changes.summary", "patch.chunk", "patch.hunks", "problems.list",
+    "language.diagnostics", "terminal.status", "terminal.jobs", "terminal.history",
+    "terminal.getOutput", "session.info", "session.workflowState", "session.recentCommands",
+    "session.lastSearches"
+}
+
+
 
 class DietCodeRpcError(RuntimeError):
     def __init__(self, method: str, response: dict[str, Any]) -> None:
@@ -473,7 +490,8 @@ class DietCodeAgentClient:
                     rationale=rationale or self.rationale,
                 )
             except (OSError, DietCodeTransportError) as exc:
-                if transport_attempts >= self.retries:
+                max_retries = max(1, self.retries) if method in READ_METHODS else self.retries
+                if transport_attempts >= max_retries:
                     raise
                 transport_attempts += 1
                 self.reconnect()
@@ -608,6 +626,8 @@ def run_self_test() -> dict[str, Any]:
     except ValueError:
         cursor_ok = False
     checks.append({"name": "patch.params_hunk_offset", "ok": cursor_ok})
+    checks.append({"name": "read_methods.ping", "ok": "rpc.ping" in READ_METHODS})
+    checks.append({"name": "read_methods.mutation", "ok": "patch.apply" not in READ_METHODS})
 
     ok = all(check["ok"] for check in checks)
     return {"ok": ok, "checks": checks}
@@ -819,6 +839,7 @@ def main() -> int:
                 agent_id=args.agent_id,
                 rationale=args.rationale,
             ) as client:
+                client.call("event.subscribe", {"types": ["*"]})
                 print("Listening for events... (Press Ctrl+C to stop)")
                 sock_buffer = b""
                 while True:

@@ -9,6 +9,7 @@ BOOL MacControlIsReadQueueMethod(NSString* method) {
             @"search.text",
             @"search.files",
             @"search.todo",
+            @"search.semantic",
             @"search.diagnostics",
             @"diagnostics.list",
             @"diagnostics.summary",

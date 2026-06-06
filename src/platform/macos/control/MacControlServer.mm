@@ -11,6 +11,7 @@
 #include <sys/un.h>
 #include <unistd.h>
 #include <sys/stat.h>
+#include <fcntl.h>
 #include <fnmatch.h>
 #include <fstream>
 #include <sstream>
@@ -37,6 +38,7 @@
 #import "MacControlPatchService.hpp"
 #import "MacControlTaskRuntime.hpp"
 #import "MacControlComboRuntime.hpp"
+#import "MacControlServer+Private.hpp"
 
 @interface DietCodeClientConnection : NSObject
 @property (nonatomic, assign) int fd;
@@ -63,10 +65,8 @@
 - (void)markConnectionEOF:(DietCodeClientConnection*)conn;
 - (void)decrementPendingRequestsForConnection:(DietCodeClientConnection*)conn;
 - (NSString*)permissionLevelForMethod:(NSString*)method params:(NSDictionary*)params;
-- (void)executeMethod:(NSString*)method params:(NSDictionary*)params outResult:(NSDictionary**)outResult outErrCode:(NSString**)outErrCode outErrMsg:(NSString**)outErrMsg outPaths:(NSString**)outPaths;
 - (void)sendError:(NSString*)reqId code:(id)code message:(NSString*)message clientFd:(int)clientFd;
 - (void)sendSuccess:(NSString*)reqId result:(NSDictionary*)result clientFd:(int)clientFd;
-- (void)logAuditMethod:(NSString*)method caller:(NSString*)caller permission:(NSString*)permission duration:(long long)duration result:(NSString*)result paths:(NSString*)paths;
 - (NSString*)chipNameForStep:(NSDictionary*)step;
 - (NSDictionary*)paramsForComboStep:(NSDictionary*)step;
 - (NSArray<NSDictionary*>*)rpcMethodDescriptions;
@@ -75,44 +75,9 @@
 - (NSDictionary*)metadataForChip:(NSString*)chip;
 - (NSDictionary*)primitiveForChip:(NSString*)chip params:(NSDictionary*)params;
 
-- (BOOL)isDestructiveRequestSafe:(NSString*)method params:(NSDictionary*)params;
-- (NSDictionary*)currentChangesInfo;
-- (NSDictionary*)runVerificationCommand:(NSString*)command cwd:(NSString*)cwd;
-- (NSDictionary*)verificationStatus;
-- (NSDictionary*)contextSnapshotPayload;
-- (NSArray<NSString*>*)verificationFailureLines;
-- (BOOL)path:(NSString*)path isAllowedByScope:(NSDictionary*)scope;
-- (BOOL)dirtyBufferExistsAtPath:(NSString*)path;
-- (NSDictionary*)repairContextForFailure:(NSString*)failure params:(NSDictionary*)params;
-
 @end
 
-@implementation DietCodeControlServer {
-    DietCodeControlWindowBridge* _windowBridge;
-    MacControlRecoveryStore* _recoveryStore;
-    MacControlSearchService* _searchService;
-    MacControlPatchService* _patchService;
-    MacControlTaskRuntime* _taskRuntime;
-    int _serverFd;
-    NSThread* _acceptThread;
-    NSString* _lastVerifyCommand;
-    NSDate* _lastVerifyStartedAt;
-    NSDate* _lastVerifyFinishedAt;
-    NSNumber* _lastVerifyExitCode;
-    NSMutableDictionary<NSString*, NSDictionary*>* _contextSnapshots;
-    NSInteger _contextSnapshotCounter;
-    NSMutableDictionary<NSString*, NSDictionary*>* _editPlans;
-    NSInteger _editPlanCounter;
-    MacControlComboRuntime* _comboRuntime;
-    NSInteger _comboCounter;
-    NSMutableDictionary<NSNumber*, DietCodeClientConnection*>* _activeConnections;
-    NSString* _sessionToken;
-    dispatch_queue_t _executionQueue;
-    dispatch_queue_t _readQueue;
-    BOOL _globalMutationLock;
-    NSDictionary* _lastVerifyStatus;
-    NSString* _lastComboId;
-}
+@implementation DietCodeControlServer
 
 - (instancetype)initWithWindowController:(DietCodeWindowController*)controller {
     self = [super init];
@@ -125,9 +90,9 @@
         
         __weak DietCodeControlServer* weakSelf = self;
         _taskRuntime = [[MacControlTaskRuntime alloc] initWithWindowBridge:_windowBridge
-                                                              patchService:_patchService
-                                                             searchService:_searchService
-                                                                  executor:^(NSString* method, NSDictionary* params, NSDictionary** outResult, NSString** outErrCode, NSString** outErrMsg, NSString** outPaths) {
+                                                               patchService:_patchService
+                                                              searchService:_searchService
+                                                                   executor:^(NSString* method, NSDictionary* params, NSDictionary** outResult, NSString** outErrCode, NSString** outErrMsg, NSString** outPaths) {
             [weakSelf executeMethod:method params:params outResult:outResult outErrCode:outErrCode outErrMsg:outErrMsg outPaths:outPaths];
         }];
         
@@ -231,7 +196,6 @@
     NSString* homeDir = NSHomeDirectory();
     NSString* dcDir = [homeDir stringByAppendingPathComponent:@".dietcode"];
     
-    // Pre-verify ~/.dietcode directory owner and symlink safety
     struct stat st;
     if (lstat([dcDir UTF8String], &st) == 0) {
         if (S_ISLNK(st.st_mode)) {
@@ -247,21 +211,32 @@
     }
     [[NSFileManager defaultManager] setAttributes:@{NSFilePosixPermissions: @(0700)} ofItemAtPath:dcDir error:nil];
     
-    // Generate session token
+    mode_t oldUmask = umask(0077);
+    
     NSString* token = [NSString stringWithFormat:@"%08x%08x%08x%08x", 
                        arc4random(), arc4random(), arc4random(), arc4random()];
     NSString* tokenPath = [dcDir stringByAppendingPathComponent:@"session.token"];
-    unlink([tokenPath UTF8String]); // Prevent symlink overwrite write exploits
-    [token writeToFile:tokenPath atomically:YES encoding:NSUTF8StringEncoding error:nil];
+    unlink([tokenPath UTF8String]);
+    
+    int tokenFd = open([tokenPath UTF8String], O_WRONLY | O_CREAT | O_EXCL, 0600);
+    if (tokenFd >= 0) {
+        NSData* tokenData = [token dataUsingEncoding:NSUTF8StringEncoding];
+        write(tokenFd, tokenData.bytes, tokenData.length);
+        close(tokenFd);
+    } else {
+        [token writeToFile:tokenPath atomically:YES encoding:NSUTF8StringEncoding error:nil];
+    }
     [[NSFileManager defaultManager] setAttributes:@{NSFilePosixPermissions: @(0600)} ofItemAtPath:tokenPath error:nil];
     _sessionToken = [token copy];
     
+    // Unix socket setup
     NSString* sockPathStr = [dcDir stringByAppendingPathComponent:@"control.sock"];
     const char* sockPath = [sockPathStr UTF8String];
     
     _serverFd = socket(AF_UNIX, SOCK_STREAM, 0);
     if (_serverFd < 0) {
         [self appendLogLine:@"[Error] Failed to create Unix socket."];
+        umask(oldUmask);
         return;
     }
     
@@ -272,20 +247,23 @@
         [self appendLogLine:[NSString stringWithFormat:@"[Error] Unix socket path is too long: %lu bytes (max %lu bytes). Can't bind.", strlen(sockPath), sizeof(addr.sun_path) - 1]];
         close(_serverFd);
         _serverFd = -1;
+        umask(oldUmask);
         return;
     }
     strncpy(addr.sun_path, sockPath, sizeof(addr.sun_path) - 1);
     
-    unlink(sockPath); // Delete stale socket if any
+    unlink(sockPath);
     
     if (bind(_serverFd, (struct sockaddr*)&addr, sizeof(addr)) < 0) {
         [self appendLogLine:@"[Error] Failed to bind Unix socket."];
         close(_serverFd);
         _serverFd = -1;
+        umask(oldUmask);
         return;
     }
     
-    chmod(sockPath, 0600); // Strict user-only permissions
+    chmod(sockPath, 0600);
+    umask(oldUmask);
     
     if (listen(_serverFd, 5) < 0) {
         [self appendLogLine:@"[Error] Failed to listen on socket."];
@@ -366,7 +344,6 @@
 - (BOOL)isReadQueueMethod:(NSString*)method {
     return MacControlIsReadQueueMethod(method);
 }
-
 
 - (dispatch_queue_t)queueForRequestLine:(const std::string&)line {
     NSData* data = [NSData dataWithBytes:line.data() length:line.size()];
@@ -517,10 +494,12 @@
         NSString* permission = [self permissionLevelForMethod:method params:params];
         
         if ([method isEqualToString:@"event.subscribe"]) {
-            NSArray* types = params[@"types"];
-            if ([types isKindOfClass:[NSArray class]]) {
-                for (NSString* t in types) {
-                    if ([t isKindOfClass:[NSString class]]) [conn.subscriptions addObject:t];
+            @synchronized(self) {
+                NSArray* types = params[@"types"];
+                if ([types isKindOfClass:[NSArray class]]) {
+                    for (NSString* t in types) {
+                        if ([t isKindOfClass:[NSString class]]) [conn.subscriptions addObject:t];
+                    }
                 }
             }
             [self sendSuccess:reqId result:@{ @"subscribed": @YES } clientFd:clientFd];
@@ -529,10 +508,12 @@
         }
         
         if ([method isEqualToString:@"event.unsubscribe"]) {
-            NSArray* types = params[@"types"];
-            if ([types isKindOfClass:[NSArray class]]) {
-                for (NSString* t in types) {
-                    if ([t isKindOfClass:[NSString class]]) [conn.subscriptions removeObject:t];
+            @synchronized(self) {
+                NSArray* types = params[@"types"];
+                if ([types isKindOfClass:[NSArray class]]) {
+                    for (NSString* t in types) {
+                        if ([t isKindOfClass:[NSString class]]) [conn.subscriptions removeObject:t];
+                    }
                 }
             }
             [self sendSuccess:reqId result:@{ @"unsubscribed": @YES } clientFd:clientFd];
@@ -597,7 +578,6 @@
         __block NSString* errMsg = nil;
         __block NSString* affectedPaths = @"";
         
-        // Check if the method runs on a worker queue or needs main-thread mutation APIs.
         BOOL isBackgroundMethod = [method isEqualToString:@"verify.run"] ||
                                   [self isReadQueueMethod:method] ||
                                   [method isEqualToString:@"combo.run"] ||
@@ -690,20 +670,17 @@
     return copy;
 }
 
-
-
 - (BOOL)isDestructiveRequestSafe:(NSString*)method params:(NSDictionary*)params {
     NSString* ws = [self safeWorkspacePath];
     if (!ws) return NO;
     
     if ([method isEqualToString:@"git.commit"]) {
-        return YES; // Git commit inside the active workspace repo is safe
+        return YES;
     }
     if ([method isEqualToString:@"workspace.openFolder"]) {
-        return NO; // Opening a new workspace is unsafe / outside current bounds
+        return NO;
     }
     
-    // Check path parameter if present
     NSString* path = params[@"path"];
     if (path) {
         NSString* checkedPath = AbsolutePathForRPCPath(path, ws);
@@ -712,7 +689,6 @@
         }
     }
     
-    // Check patch.applyBatch which has a 'patches' parameter
     if ([method isEqualToString:@"patch.applyBatch"]) {
         NSArray* patches = params[@"patches"];
         if ([patches isKindOfClass:[NSArray class]]) {
@@ -730,7 +706,6 @@
         }
     }
     
-    // Check combo.run steps
     if ([method isEqualToString:@"combo.run"]) {
         NSDictionary* comboReq = params[@"combo"] ?: params;
         for (NSDictionary* step in comboReq[@"steps"] ?: @[]) {
@@ -1125,1661 +1100,18 @@
         return;
     }
 
-    if ([method isEqualToString:@"combo.validate"]) {
-        NSDictionary* plan = params[@"combo"] ?: params;
-        NSDictionary* normalizedPlan = nil;
-        NSArray* errors = nil;
-        BOOL ok = [_comboRuntime validateCombo:plan normalizedPlan:&normalizedPlan errors:&errors];
-        *outResult = @{
-            @"ok": @(ok),
-            @"errors": errors ?: @[],
-            @"plan": normalizedPlan ?: @{}
-        };
-        return;
+    // Route based on namespace prefixes to respective categories
+    if ([method hasPrefix:@"workspace."] || [method hasPrefix:@"file."] || [method hasPrefix:@"search."]) {
+        [self executeFileMethod:method params:params outResult:outResult outErrCode:outErrCode outErrMsg:outErrMsg outPaths:outPaths];
+    } else if ([method hasPrefix:@"editor."] || [method hasPrefix:@"buffers."] || [method hasPrefix:@"changes."] || [method hasPrefix:@"diff."] || [method hasPrefix:@"patch."]) {
+        [self executeEditorMethod:method params:params outResult:outResult outErrCode:outErrCode outErrMsg:outErrMsg outPaths:outPaths];
+    } else if ([method hasPrefix:@"git."]) {
+        [self executeGitMethod:method params:params outResult:outResult outErrCode:outErrCode outErrMsg:outErrMsg outPaths:outPaths];
+    } else if ([method hasPrefix:@"terminal."] || [method hasPrefix:@"verify."]) {
+        [self executeTerminalMethod:method params:params outResult:outResult outErrCode:outErrCode outErrMsg:outErrMsg outPaths:outPaths];
+    } else {
+        [self executeContextMethod:method params:params outResult:outResult outErrCode:outErrCode outErrMsg:outErrMsg outPaths:outPaths];
     }
-
-    if ([method isEqualToString:@"combo.run"]) {
-        NSDictionary* comboReq = params[@"combo"] ?: params;
-        NSString* comboId = comboReq[@"comboId"] ?: [NSString stringWithFormat:@"combo-%ld", (long)++_comboCounter];
-        
-        NSDictionary* plan = nil;
-        NSArray* errors = nil;
-        if (![_comboRuntime validateCombo:comboReq normalizedPlan:&plan errors:&errors]) {
-            *outErrCode = @"invalid_request";
-            *outErrMsg = @"Combo validation failed.";
-            *outResult = @{ @"errors": errors ?: @[] };
-            return;
-        }
-
-        if ([_comboRuntime activeComboCount] >= (NSUInteger)kMaxActiveCombos) {
-            *outErrCode = @"resource_exhausted";
-            *outErrMsg = @"Maximum number of active combos reached.";
-            return;
-        }
-
-        *outResult = [_comboRuntime runComboWithPlan:plan comboId:comboId sessionToken:_sessionToken];
-        return;
-    }
-
-    if ([method isEqualToString:@"combo.status"] || [method isEqualToString:@"combo.result"]) {
-        NSString* comboId = params[@"comboId"];
-        if (comboId.length == 0) {
-            comboId = _comboRuntime.lastComboId;
-        }
-        NSDictionary* combo = comboId ? _comboRuntime.combos[comboId] : nil;
-        if (!combo) {
-            *outErrCode = @"invalid_params";
-            *outErrMsg = @"Unknown comboId.";
-            return;
-        }
-        *outResult = combo;
-        return;
-    }
-
-    if ([method isEqualToString:@"combo.list"]) {
-        NSMutableArray* list = [NSMutableArray array];
-        for (NSDictionary* c in [_comboRuntime.combos allValues]) {
-            [list addObject:[_comboRuntime serializableCombo:[c mutableCopy]]];
-        }
-        *outResult = @{ @"combos": list };
-        return;
-    }
-
-    if ([method isEqualToString:@"combo.cancel"]) {
-        NSString* comboId = params[@"comboId"];
-        NSMutableDictionary* combo = comboId ? [_comboRuntime.combos[comboId] mutableCopy] : nil;
-        if (!combo) {
-            *outErrCode = @"invalid_params";
-            *outErrMsg = @"Unknown comboId.";
-            return;
-        }
-        combo[@"status"] = @"cancelled";
-        *outResult = @{ @"cancelled": @YES };
-        return;
-    }
-
-    if ([method isEqualToString:@"combo.rollback"]) {
-        NSString* comboId = params[@"comboId"];
-        BOOL confirm = [params[@"confirm"] boolValue];
-        
-        if (comboId.length == 0) {
-            comboId = _comboRuntime.lastComboId;
-        }
-        
-        if (comboId.length == 0) {
-            *outErrCode = @"invalid_request";
-            *outErrMsg = @"No session combo transaction is available to roll back.";
-            return;
-        }
-        
-        NSString* backupDir = [[NSHomeDirectory() stringByAppendingPathComponent:@".dietcode/backups"] stringByAppendingPathComponent:comboId];
-        NSString* manifestPath = [backupDir stringByAppendingPathComponent:@"manifest.json"];
-        
-        NSString* mErr = nil;
-        NSDictionary* manifest = [_recoveryStore loadManifestFromPath:manifestPath error:&mErr];
-        if (!manifest) {
-            if ([mErr isEqualToString:@"Manifest file missing."]) {
-                *outErrCode = @"backup_manifest_missing";
-            } else if ([mErr isEqualToString:@"manifest.sha256 file missing."] || [mErr isEqualToString:@"Manifest checksum verification failed."]) {
-                *outErrCode = @"backup_corrupt";
-            } else {
-                *outErrCode = @"backup_manifest_invalid";
-            }
-            *outErrMsg = mErr ?: @"Manifest missing or invalid.";
-            return;
-        }
-        
-        NSString* schemaVersion = manifest[@"schemaVersion"] ?: @"1.6.1";
-        if (![schemaVersion isEqualToString:@"1.6.2"]) {
-            *outErrCode = @"backup_manifest_invalid";
-            *outErrMsg = [NSString stringWithFormat:@"Unsupported schema version '%@'. Rollback is only supported for schema version 1.6.2.", schemaVersion];
-            return;
-        }
-        
-        NSString* rollbackErr = nil;
-        NSString* rollbackErrorCode = nil;
-        BOOL ok = [_recoveryStore restorePatchFromManifest:manifest backupDir:backupDir confirm:confirm sessionToken:_sessionToken error:&rollbackErr errorCode:&rollbackErrorCode];
-        if (!ok) {
-            *outErrCode = rollbackErrorCode ?: @"rollback_failed";
-            *outErrMsg = rollbackErr ?: @"Rollback failed.";
-            return;
-        }
-        
-        NSMutableArray* pathsArr = [NSMutableArray array];
-        for (NSDictionary* fileEntry in manifest[@"files"] ?: @[]) {
-            [pathsArr addObject:fileEntry[@"workspaceRelativePath"] ?: @""];
-        }
-        *outResult = @{ @"schemaVersion": @"1.6.2", @"reverted": @YES, @"files": pathsArr };
-        return;
-    }
-    
-    if ([method isEqualToString:@"recovery.scan"]) {
-        NSString* errStr = nil;
-        NSDictionary* report = [_recoveryStore performRecoveryScan:&errStr];
-        if (errStr) {
-            *outErrCode = @"internal_error";
-            *outErrMsg = errStr;
-            return;
-        }
-        *outResult = report;
-        return;
-    }
-
-    if ([method isEqualToString:@"recovery.schemaInfo"]) {
-        *outResult = @{
-            @"transactionSchemaVersion": @"1.6.2",
-            @"supportedRollbackSchemas": @[@"1.6.2"],
-            @"supportedInspectOnlySchemas": @[@"1.6.1"]
-        };
-        return;
-    }
-
-    if ([method isEqualToString:@"recovery.list"]) {
-        NSString* errStr = nil;
-        NSArray* backups = [_recoveryStore listBackupsQuickWithActiveCombos:_comboRuntime.combos error:&errStr];
-        if (errStr) {
-            *outErrCode = @"internal_error";
-            *outErrMsg = errStr;
-            return;
-        }
-        *outResult = @{ @"backups": backups };
-        return;
-    }
-
-    if ([method isEqualToString:@"recovery.deleteBackup"]) {
-        NSString* comboId = params[@"comboId"];
-        if (!comboId) {
-            *outErrCode = @"invalid_params";
-            *outErrMsg = @"comboId parameter required.";
-            return;
-        }
-        BOOL confirm = [params[@"confirm"] boolValue];
-        NSString* errStr = nil;
-        NSString* errCode = nil;
-        if (![_recoveryStore deleteBackupWithId:comboId confirm:confirm activeCombos:_comboRuntime.combos error:&errStr errorCode:&errCode]) {
-            *outErrCode = errCode ?: @"delete_failed";
-            *outErrMsg = errStr ?: @"Failed to delete backup.";
-            return;
-        }
-        *outResult = @{ @"deleted": @YES, @"comboId": comboId };
-        
-        // Audit log the deletion
-        NSString* backupDir = [[NSHomeDirectory() stringByAppendingPathComponent:@".dietcode/backups"] stringByAppendingPathComponent:comboId];
-        [self logAuditMethod:@"recovery.deleteBackup" caller:@"unix_socket" permission:@"Edit" duration:0 result:@"success" paths:[NSString stringWithFormat:@"deleted comboId: %@ | path: %@", comboId, backupDir]];
-        return;
-    }
-
-    if ([method isEqualToString:@"recovery.prune"]) {
-        NSNumber* keepLastN = params[@"keepLastN"];
-        NSNumber* olderThanDays = params[@"olderThanDays"];
-        if (!params[@"dryRun"]) {
-            *outErrCode = @"invalid_params";
-            *outErrMsg = @"dryRun parameter required.";
-            return;
-        }
-        BOOL dryRun = [params[@"dryRun"] boolValue];
-        BOOL confirmInvalid = [params[@"confirmInvalid"] boolValue];
-        
-        NSString* errStr = nil;
-        NSDictionary* pruneReport = [_recoveryStore pruneBackupsWithKeepLastN:keepLastN olderThanDays:olderThanDays dryRun:dryRun confirmInvalid:confirmInvalid activeCombos:_comboRuntime.combos error:&errStr];
-        if (errStr) {
-            *outErrCode = @"internal_error";
-            *outErrMsg = errStr;
-            return;
-        }
-        *outResult = pruneReport;
-        return;
-    }
-    
-    if ([method isEqualToString:@"workspace.openFolder"]) {
-        NSString* targetPath = params[@"path"];
-        if (!targetPath) {
-            *outErrCode = @"invalid_params";
-            *outErrMsg = @"path parameter required.";
-            return;
-        }
-        BOOL isDir = NO;
-        if (![[NSFileManager defaultManager] fileExistsAtPath:targetPath isDirectory:&isDir] || !isDir) {
-            *outErrCode = @"invalid_params";
-            *outErrMsg = @"Target path is not a valid directory.";
-            return;
-        }
-        [_windowController openWorkspaceFolder:targetPath];
-        *outResult = @{ @"opened": @YES, @"path": targetPath };
-        return;
-    }
-    
-    if ([method isEqualToString:@"workspace.getRoot"]) {
-        NSString* root = [self safeWorkspacePath] ?: @"";
-        *outResult = @{ @"path": root };
-        return;
-    }
-    
-    if ([method isEqualToString:@"workspace.listFiles"]) {
-        NSString* ws = [self safeWorkspacePath];
-        if (!ws) {
-            *outErrCode = @"invalid_request";
-            *outErrMsg = @"No open workspace.";
-            return;
-        }
-        
-        std::filesystem::path folder([ws UTF8String]);
-        std::vector<std::string> relativePaths;
-        
-        dietcode::filesystem::traverseDirectory(folder, [&](const std::filesystem::directory_entry& entry, int depth, bool& skipRecursion, bool& stop) {
-            if (relativePaths.size() >= 1000) {
-                stop = true;
-                return;
-            }
-            
-            std::filesystem::path p = entry.path();
-            std::string filename = p.filename().string();
-            if (entry.is_directory()) {
-                if (depth >= kMaxSearchDepth || 
-                    filename == ".git" || filename == "build" || filename == "dist" || 
-                    filename == "node_modules" || filename == "DerivedData") {
-                    skipRecursion = true;
-                }
-                return;
-            }
-            
-            if (entry.is_regular_file()) {
-                std::error_code ec;
-                auto rel = std::filesystem::relative(p, folder, ec);
-                if (!ec) {
-                    relativePaths.push_back(rel.string());
-                }
-            }
-        });
-        
-        NSMutableArray* filesArr = [NSMutableArray array];
-        for (const auto& r : relativePaths) {
-            [filesArr addObject:NSStringFromStdString(r)];
-        }
-        *outResult = @{ @"files": filesArr };
-        return;
-    }
-    
-    if ([method isEqualToString:@"workspace.grep"]) {
-        *outResult = [_searchService workspaceGrep:params outErrCode:outErrCode outErrMsg:outErrMsg];
-        return;
-    }
-    
-    if ([method isEqualToString:@"workspace.openFile"]) {
-        NSString* absPath = AbsolutePathForRPCPath(params[@"path"], [self safeWorkspacePath]);
-        if (!absPath) {
-            *outErrCode = @"invalid_params";
-            *outErrMsg = @"path parameter required.";
-            return;
-        }
-        if (![[NSFileManager defaultManager] fileExistsAtPath:absPath]) {
-            *outErrCode = @"not_found";
-            *outErrMsg = [NSString stringWithFormat:@"File does not exist: %@", absPath];
-            return;
-        }
-        [_windowController openFileAtPath:absPath line:1 column:1];
-        *outResult = @{ @"opened": @YES, @"path": absPath };
-        return;
-    }
-    
-    if ([method isEqualToString:@"workspace.getRecentFiles"]) {
-        NSArray* recents = [[NSUserDefaults standardUserDefaults] stringArrayForKey:@"RecentFiles"] ?: @[];
-        *outResult = @{ @"files": recents };
-        return;
-    }
-
-    // Search primitives
-    if ([method isEqualToString:@"search.files"]) {
-        *outResult = [_searchService searchFiles:params outErrCode:outErrCode outErrMsg:outErrMsg];
-        return;
-    }
-
-    if ([method isEqualToString:@"search.text"]) {
-        *outResult = [_searchService searchText:params outErrCode:outErrCode outErrMsg:outErrMsg];
-        return;
-    }
-
-    if ([method isEqualToString:@"search.todo"]) {
-        *outResult = [_searchService searchTodo:params outErrCode:outErrCode outErrMsg:outErrMsg];
-        return;
-    }
-
-    if ([method isEqualToString:@"search.diagnostics"]) {
-        *outResult = [_searchService searchDiagnostics:params outErrCode:outErrCode outErrMsg:outErrMsg];
-        return;
-    }
-
-    // File reading primitives
-    if ([method isEqualToString:@"file.read"] || [method isEqualToString:@"file.readRange"] || [method isEqualToString:@"file.readAround"] || [method isEqualToString:@"file.getChunks"] || [method isEqualToString:@"file.stat"]) {
-        NSString* ws = [self safeWorkspacePath];
-        NSString* targetPath = AbsolutePathForRPCPath(params[@"path"], ws);
-        if (!targetPath) {
-            *outErrCode = @"invalid_params";
-            *outErrMsg = @"path parameter required.";
-            return;
-        }
-        NSString* text = [self safeTextForFileAtPath:targetPath];
-        if (!text) {
-            *outErrCode = @"invalid_request";
-            *outErrMsg = @"File is not readable.";
-            return;
-        }
-        NSArray<NSString*>* lines = LinesFromText(text);
-        NSDictionary* attrs = [[NSFileManager defaultManager] attributesOfItemAtPath:targetPath error:nil];
-        NSUInteger sizeBytes = [text lengthOfBytesUsingEncoding:NSUTF8StringEncoding];
-        BOOL open = [[self safeOpenFilePaths] containsObject:targetPath];
-        BOOL dirty = [DirtyFilePathsFromTabs([self safeOpenTabs] ?: @[]) containsObject:targetPath];
-        if ([method isEqualToString:@"file.stat"]) {
-            *outResult = @{
-                @"path": targetPath,
-                @"sizeBytes": @(attrs.fileSize ?: sizeBytes),
-                @"lineCount": @(lines.count),
-                @"modified": @(attrs.fileModificationDate != nil),
-                @"open": @(open),
-                @"dirty": @(dirty)
-            };
-            return;
-        }
-        if ([method isEqualToString:@"file.read"]) {
-            if (sizeBytes > kMaxFileTextBytes) {
-                *outErrCode = @"file_too_large";
-                *outErrMsg = @"File exceeds read cap; use file.getChunks or file.readRange.";
-                return;
-            }
-            *outResult = @{ @"path": targetPath, @"text": text, @"lineCount": @(lines.count), @"sizeBytes": @(sizeBytes) };
-            return;
-        }
-        if ([method isEqualToString:@"file.readRange"]) {
-            NSInteger startLine = [params[@"startLine"] integerValue];
-            NSInteger endLine = [params[@"endLine"] integerValue];
-            NSString* rangeText = TextForLineRange(lines, startLine, endLine);
-            if (!rangeText) {
-                *outErrCode = @"invalid_range";
-                *outErrMsg = @"Invalid line range.";
-                return;
-            }
-            if ([rangeText lengthOfBytesUsingEncoding:NSUTF8StringEncoding] > kMaxFileTextBytes) {
-                *outErrCode = @"response_too_large";
-                *outErrMsg = @"Requested range exceeds response size cap.";
-                return;
-            }
-            *outResult = @{ @"path": targetPath, @"startLine": @(startLine), @"endLine": @(endLine), @"text": rangeText };
-            return;
-        }
-        if ([method isEqualToString:@"file.readAround"]) {
-            NSInteger line = [params[@"line"] integerValue];
-            NSInteger before = params[@"before"] ? [params[@"before"] integerValue] : 40;
-            NSInteger after = params[@"after"] ? [params[@"after"] integerValue] : 80;
-            NSInteger startLine = MAX(1, line - before);
-            NSInteger endLine = MIN((NSInteger)lines.count, line + after);
-            NSString* rangeText = TextForLineRange(lines, startLine, endLine);
-            if (!rangeText || line < 1 || line > (NSInteger)lines.count) {
-                *outErrCode = @"invalid_range";
-                *outErrMsg = @"Invalid line.";
-                return;
-            }
-            *outResult = @{ @"path": targetPath, @"startLine": @(startLine), @"endLine": @(endLine), @"text": rangeText };
-            return;
-        }
-        if ([method isEqualToString:@"file.getChunks"]) {
-            NSInteger chunkSize = params[@"chunkSize"] ? [params[@"chunkSize"] integerValue] : 120;
-            if (chunkSize < 20) chunkSize = 20;
-            if (chunkSize > 500) chunkSize = 500;
-            NSMutableArray* chunks = [NSMutableArray array];
-            for (NSInteger start = 1, idx = 0; start <= (NSInteger)lines.count; start += chunkSize, idx++) {
-                NSInteger end = MIN(start + chunkSize - 1, (NSInteger)lines.count);
-                NSString* preview = TextForLineRange(lines, start, MIN(end, start + 4)) ?: @"";
-                if (preview.length > kMaxChunkPreviewLength) {
-                    preview = [[preview substringToIndex:kMaxChunkPreviewLength] stringByAppendingString:@"..."];
-                }
-                [chunks addObject:@{ @"index": @(idx), @"startLine": @(start), @"endLine": @(end), @"preview": preview }];
-            }
-            *outResult = @{ @"path": targetPath, @"chunks": chunks };
-            return;
-        }
-    }
-
-    if ([method isEqualToString:@"file.write"] || [method isEqualToString:@"file.create"]) {
-        NSString* ws = [self safeWorkspacePath];
-        NSString* targetPath = AbsolutePathForRPCPath(params[@"path"], ws);
-        NSString* content = params[@"content"];
-        if (targetPath.length == 0 || ![content isKindOfClass:[NSString class]]) {
-            *outErrCode = @"invalid_params";
-            *outErrMsg = @"path and content parameters required.";
-            return;
-        }
-        if (!PathIsInsideWorkspace(targetPath, ws)) {
-            *outErrCode = @"outside_workspace";
-            *outErrMsg = @"Target path must be inside workspace.";
-            return;
-        }
-        NSUInteger contentBytes = [content lengthOfBytesUsingEncoding:NSUTF8StringEncoding];
-        if (contentBytes > kMaxFileTextBytes) {
-            *outErrCode = @"file_too_large";
-            *outErrMsg = @"Content exceeds write cap.";
-            return;
-        }
-        BOOL existed = [[NSFileManager defaultManager] fileExistsAtPath:targetPath];
-        if ([method isEqualToString:@"file.create"] && existed) {
-            *outErrCode = @"already_exists";
-            *outErrMsg = [NSString stringWithFormat:@"File already exists: %@", targetPath];
-            return;
-        }
-        NSString* beforeText = existed ? [self safeTextForFileAtPath:targetPath] : @"";
-        if (existed && beforeText == nil) {
-            *outErrCode = @"invalid_request";
-            *outErrMsg = @"Existing file is not readable as UTF-8 text.";
-            return;
-        }
-        NSString* errStr = nil;
-        BOOL ok = [_windowController writeFileAtPath:targetPath content:content errorOut:&errStr];
-        if (!ok) {
-            *outErrCode = @"write_failed";
-            *outErrMsg = errStr ?: @"Failed to write file.";
-            return;
-        }
-        NSString* afterText = [self safeTextForFileAtPath:targetPath] ?: content;
-        [_patchService recordMutationRecords:@[@{
-            @"path": targetPath,
-            @"beforeText": beforeText ?: @"",
-            @"beforeHash": StableHashForString(beforeText ?: @""),
-            @"postHash": StableHashForString(afterText ?: @""),
-            @"existed": @(existed)
-        }]];
-        NSString* key = [method isEqualToString:@"file.create"] ? @"created" : @"written";
-        *outResult = @{ key: @YES, @"path": targetPath, @"sizeBytes": @(contentBytes) };
-        return;
-    }
-    
-    // Editor commands
-    if ([method isEqualToString:@"editor.getActiveFile"]) {
-        NSString* active = [self safeActiveFilePath] ?: @"";
-        *outResult = @{ @"path": active };
-        return;
-    }
-    
-    if ([method isEqualToString:@"editor.getOpenFiles"]) {
-        NSArray* list = [self safeOpenFilePaths];
-        *outResult = @{ @"files": list };
-        return;
-    }
-    
-    if ([method isEqualToString:@"editor.getText"]) {
-        NSString* targetPath = params[@"path"] ?: [self safeActiveFilePath];
-        if (!targetPath) {
-            *outErrCode = @"invalid_params";
-            *outErrMsg = @"Open document path required.";
-            return;
-        }
-        NSString* text = [self safeTextForFileAtPath:targetPath];
-        if (!text) {
-            *outErrCode = @"invalid_request";
-            *outErrMsg = @"File is not open and is not in workspace.";
-            return;
-        }
-        NSUInteger textBytes = [text lengthOfBytesUsingEncoding:NSUTF8StringEncoding];
-        if (textBytes > kMaxFileTextBytes && ![params[@"allowLarge"] boolValue]) {
-            *outErrCode = @"response_too_large";
-            *outErrMsg = @"File text exceeds maximum RPC response size; pass allowLarge=true only when needed.";
-            return;
-        }
-        *outResult = @{ @"text": text };
-        return;
-    }
-    
-    if ([method isEqualToString:@"editor.getSelection"]) {
-        NSDictionary* sel = [self safeActiveSelectionInfo];
-        if (sel.count == 0) {
-            *outErrCode = @"invalid_request";
-            *outErrMsg = @"No active editor tab.";
-            return;
-        }
-        *outResult = sel;
-        return;
-    }
-    
-    if ([method isEqualToString:@"editor.setSelection"]) {
-        NSInteger start = [params[@"start"] integerValue];
-        NSInteger end = [params[@"end"] integerValue];
-        BOOL ok = [_windowController setActiveSelectionStart:start end:end];
-        if (!ok) {
-            *outErrCode = @"invalid_params";
-            *outErrMsg = @"Selection range indices out of bounds or no active editor.";
-            return;
-        }
-        *outResult = @{ @"success": @YES };
-        return;
-    }
-    
-    if ([method isEqualToString:@"editor.insertText"]) {
-        NSString* text = params[@"text"];
-        if (!text) {
-            *outErrCode = @"invalid_params";
-            *outErrMsg = @"text parameter required.";
-            return;
-        }
-        BOOL ok = [_windowController insertTextAtActiveCursor:text];
-        if (!ok) {
-            *outErrCode = @"invalid_request";
-            *outErrMsg = @"Failed to insert text in active editor buffer.";
-            return;
-        }
-        *outResult = @{ @"inserted": @YES };
-        return;
-    }
-    
-    if ([method isEqualToString:@"editor.replaceSelection"]) {
-        NSString* text = params[@"text"];
-        if (!text) {
-            *outErrCode = @"invalid_params";
-            *outErrMsg = @"text parameter required.";
-            return;
-        }
-        BOOL ok = [_windowController replaceActiveSelectionWithText:text];
-        if (!ok) {
-            *outErrCode = @"invalid_request";
-            *outErrMsg = @"Failed to replace selection.";
-            return;
-        }
-        *outResult = @{ @"replaced": @YES };
-        return;
-    }
-    
-    if ([method isEqualToString:@"editor.replaceRange"]) {
-        NSString* targetPath = params[@"path"] ?: [self safeActiveFilePath];
-        NSString* text = params[@"text"];
-        NSInteger start = [params[@"start"] integerValue];
-        NSInteger end = [params[@"end"] integerValue];
-        if (!targetPath || !text || start < 0 || end < start) {
-            *outErrCode = @"invalid_params";
-            *outErrMsg = @"path, text, start, and end parameters required.";
-            return;
-        }
-        NSRange range = NSMakeRange(start, end - start);
-        BOOL ok = [self safeReplaceTextInRange:range withText:text forFileAtPath:targetPath];
-        if (!ok) {
-            *outErrCode = @"invalid_request";
-            *outErrMsg = @"Range is out of bounds or file is read-only.";
-            return;
-        }
-        *outResult = @{ @"replaced": @YES };
-        return;
-    }
-    
-    if ([method isEqualToString:@"editor.applyPatch"]) {
-        NSString* errStr = nil;
-        NSString* errCode = nil;
-        NSDictionary* result = [_patchService applyPatch:params error:&errStr errorCode:&errCode];
-        if (!result) {
-            *outErrCode = errCode ?: @"patch_failed";
-            *outErrMsg = errStr ?: @"Patch application failed.";
-            return;
-        }
-        *outResult = result;
-        return;
-    }
-    
-    if ([method isEqualToString:@"editor.saveFile"]) {
-        NSString* targetPath = params[@"path"] ?: [self safeActiveFilePath];
-        if (!targetPath) {
-            *outErrCode = @"invalid_params";
-            *outErrMsg = @"Open document path required.";
-            return;
-        }
-        [_windowController saveFileAtPath:targetPath];
-        *outResult = @{ @"saved": @YES };
-        return;
-    }
-    
-    if ([method isEqualToString:@"editor.closeFile"]) {
-        NSString* targetPath = params[@"path"] ?: [self safeActiveFilePath];
-        if (!targetPath) {
-            *outErrCode = @"invalid_params";
-            *outErrMsg = @"Open document path required.";
-            return;
-        }
-        [_windowController closeFileAtPath:targetPath];
-        *outResult = @{ @"closed": @YES };
-        return;
-    }
-    
-    if ([method isEqualToString:@"editor.goto"]) {
-        NSString* targetPath = params[@"path"] ?: [self safeActiveFilePath];
-        NSInteger line = [params[@"line"] integerValue];
-        NSInteger col = params[@"column"] ? [params[@"column"] integerValue] : 1;
-        if (!targetPath || line <= 0) {
-            *outErrCode = @"invalid_params";
-            *outErrMsg = @"path and line parameters required.";
-            return;
-        }
-        [_windowController openFileAtPath:targetPath line:line column:col];
-        *outResult = @{ @"navigated": @YES };
-        return;
-    }
-    
-    // Analysis commands
-    if ([method isEqualToString:@"analysis.workspaceSummary"]) {
-        NSString* ws = [self safeWorkspacePath];
-        if (!ws) {
-            *outErrCode = @"invalid_request";
-            *outErrMsg = @"No open workspace.";
-            return;
-        }
-
-        NSDictionary* git = [self safeGitStatusInfo] ?: @{};
-        NSMutableArray* modified = [NSMutableArray arrayWithArray:DirtyFilePathsFromTabs([self safeOpenTabs] ?: @[])];
-        for (NSString* key in @[@"modified", @"staged", @"untracked"]) {
-            for (NSString* rel in git[key] ?: @[]) {
-                NSString* abs = AbsolutePathForRPCPath(rel, ws);
-                if (![modified containsObject:abs]) {
-                    [modified addObject:abs];
-                }
-            }
-        }
-
-        NSArray* problems = [self safeProblemsList] ?: @[];
-        *outResult = [DietCodeWorkspaceAnalysisService summaryOfWorkspace:ws
-                                                                 openFiles:[self safeOpenFilePaths]
-                                                             modifiedFiles:modified
-                                                               diagnostics:DiagnosticsSummaryFromProblems(problems)
-                                                                 gitBranch:git[@"branch"]];
-        return;
-    }
-
-    if ([method isEqualToString:@"analysis.searchRanked"]) {
-        NSString* ws = [self safeWorkspacePath];
-        NSString* query = params[@"query"];
-        if (!ws || query.length == 0) {
-            *outErrCode = @"invalid_params";
-            *outErrMsg = @"Query string and workspace required.";
-            return;
-        }
-        dispatch_async(dispatch_get_main_queue(), ^{
-            if (![_windowController.sessionLastSearches containsObject:query]) {
-                [_windowController.sessionLastSearches insertObject:query atIndex:0];
-                if (_windowController.sessionLastSearches.count > 50) {
-                    [_windowController.sessionLastSearches removeLastObject];
-                }
-            }
-        });
-
-        NSInteger requestedMax = params[@"maxResults"] ? [params[@"maxResults"] integerValue] : kMaxGrepResults;
-        if (requestedMax > kMaxGrepResults) {
-            *outErrCode = @"response_too_large";
-            *outErrMsg = [NSString stringWithFormat:@"maxResults exceeds limit of %ld.", (long)kMaxGrepResults];
-            return;
-        }
-        NSArray* ranked = [DietCodeWorkspaceAnalysisService searchRankedForQuery:query
-                                                                       workspace:ws
-                                                                       openFiles:[self safeOpenFilePaths]
-                                                                     recentFiles:[[NSUserDefaults standardUserDefaults] stringArrayForKey:@"RecentFiles"] ?: @[]
-                                                                         include:params[@"include"] ?: @[]
-                                                                         exclude:params[@"exclude"] ?: @[]
-                                                                   caseSensitive:[params[@"caseSensitive"] boolValue]];
-        NSInteger maxResults = MIN(requestedMax, (NSInteger)ranked.count);
-        if (maxResults >= 0 && maxResults < (NSInteger)ranked.count) {
-            ranked = [ranked subarrayWithRange:NSMakeRange(0, (NSUInteger)maxResults)];
-        }
-        *outResult = @{ @"results": ranked };
-        return;
-    }
-
-    if ([method isEqualToString:@"analysis.fileSummary"]) {
-        NSString* ws = [self safeWorkspacePath];
-        NSString* targetPath = AbsolutePathForRPCPath(params[@"path"] ?: [self safeActiveFilePath], ws);
-        if (!targetPath) {
-            *outErrCode = @"invalid_params";
-            *outErrMsg = @"path parameter or active file required.";
-            return;
-        }
-        NSString* text = [self safeTextForFileAtPath:targetPath] ?: @"";
-        NSArray* symbols = [DietCodeSymbolIndexService symbolsForFileContent:text extension:[[targetPath pathExtension] lowercaseString]];
-        *outResult = [DietCodeWorkspaceAnalysisService fileSummaryForPath:targetPath symbolsCount:symbols.count];
-        return;
-    }
-
-    if ([method isEqualToString:@"analysis.relatedFiles"]) {
-        NSString* ws = [self safeWorkspacePath];
-        NSString* targetPath = AbsolutePathForRPCPath(params[@"path"] ?: [self safeActiveFilePath], ws);
-        if (!ws || !targetPath) {
-            *outErrCode = @"invalid_params";
-            *outErrMsg = @"Workspace and path required.";
-            return;
-        }
-        *outResult = @{ @"files": [DietCodeWorkspaceAnalysisService relatedFilesForPath:targetPath workspace:ws] };
-        return;
-    }
-
-    // Symbol commands
-    if ([method isEqualToString:@"symbols.document"] || [method isEqualToString:@"symbols.outline"]) {
-        NSString* ws = [self safeWorkspacePath];
-        NSString* targetPath = AbsolutePathForRPCPath(params[@"path"] ?: [self safeActiveFilePath], ws);
-        if (!targetPath) {
-            *outErrCode = @"invalid_params";
-            *outErrMsg = @"path parameter or active file required.";
-            return;
-        }
-        NSString* text = [self safeTextForFileAtPath:targetPath];
-        if (!text) {
-            *outErrCode = @"invalid_request";
-            *outErrMsg = @"File is not readable.";
-            return;
-        }
-        *outResult = @{
-            @"path": targetPath,
-            @"symbols": [DietCodeSymbolIndexService symbolsForFileContent:text extension:[[targetPath pathExtension] lowercaseString]]
-        };
-        return;
-    }
-
-    if ([method isEqualToString:@"symbols.activeDocument"]) {
-        NSString* targetPath = [self safeActiveFilePath];
-        NSString* text = targetPath ? [self safeTextForFileAtPath:targetPath] : nil;
-        if (!targetPath || !text) {
-            *outErrCode = @"invalid_request";
-            *outErrMsg = @"No active readable file.";
-            return;
-        }
-        *outResult = @{
-            @"path": targetPath,
-            @"symbols": [DietCodeSymbolIndexService symbolsForFileContent:text extension:[[targetPath pathExtension] lowercaseString]]
-        };
-        return;
-    }
-
-    if ([method isEqualToString:@"symbols.references"]) {
-        NSString* ws = [self safeWorkspacePath];
-        NSString* symbol = params[@"symbol"];
-        if (!ws || symbol.length == 0) {
-            *outErrCode = @"invalid_params";
-            *outErrMsg = @"symbol and workspace required.";
-            return;
-        }
-        NSArray* problems = [self safeProblemsList] ?: @[];
-        NSMutableArray* diagFiles = [NSMutableArray array];
-        for (NSDictionary* problem in problems) {
-            NSString* abs = AbsolutePathForRPCPath(problem[@"path"], ws);
-            if (abs.length > 0 && ![diagFiles containsObject:abs]) {
-                [diagFiles addObject:abs];
-            }
-        }
-        *outResult = @{
-            @"symbol": symbol,
-            @"references": [DietCodeSymbolIndexService referencesForSymbol:symbol
-                                                                inWorkspace:ws
-                                                                  openFiles:[self safeOpenFilePaths]
-                                                           diagnosticsFiles:diagFiles]
-        };
-        return;
-    }
-
-    if ([method isEqualToString:@"symbols.atCursor"]) {
-        NSDictionary* sel = [self safeActiveSelectionInfo];
-        NSString* targetPath = [self safeActiveFilePath];
-        NSString* text = targetPath ? [self safeTextForFileAtPath:targetPath] : nil;
-        if (!targetPath || !text) {
-            *outErrCode = @"invalid_request";
-            *outErrMsg = @"No active readable file.";
-            return;
-        }
-        NSInteger cursor = [sel[@"start"] integerValue];
-        NSArray* symbols = [DietCodeSymbolIndexService symbolsForFileContent:text extension:[[targetPath pathExtension] lowercaseString]];
-        __block NSDictionary* match = @{};
-        NSInteger currentLine = 1;
-        NSUInteger boundedCursor = MIN((NSUInteger)MAX(cursor, 0), text.length);
-        for (NSUInteger i = 0; i < boundedCursor; i++) {
-            if ([text characterAtIndex:i] == '\n') currentLine++;
-        }
-        for (NSDictionary* symbolInfo in symbols) {
-            NSInteger startLine = [symbolInfo[@"line"] integerValue];
-            NSInteger endLine = [symbolInfo[@"endLine"] integerValue];
-            if (currentLine >= startLine && currentLine <= endLine) {
-                match = symbolInfo;
-                break;
-            }
-        }
-        *outResult = @{ @"path": targetPath, @"symbol": match };
-        return;
-    }
-
-    // Diff commands
-    if ([method isEqualToString:@"diff.workspaceInfo"] || [method isEqualToString:@"diff.stats"]) {
-        NSString* ws = [self safeWorkspacePath];
-        if (!ws) {
-            *outErrCode = @"invalid_request";
-            *outErrMsg = @"No open workspace.";
-            return;
-        }
-        *outResult = [DietCodeDiffAnalysisService workspaceDiffInfo:ws];
-        return;
-    }
-
-    if ([method isEqualToString:@"diff.file"]) {
-        NSString* ws = [self safeWorkspacePath];
-        NSString* targetPath = AbsolutePathForRPCPath(params[@"path"] ?: @"", ws);
-        NSString* diff = [self safeGitDiffForFile:targetPath];
-        *outResult = @{
-            @"path": targetPath ?: @"",
-            @"diff": diff ?: @"",
-            @"mode": @"literal_git_diff",
-            @"sha256": StableHashForString(diff ?: @"")
-        };
-        return;
-    }
-
-    if ([method isEqualToString:@"diff.chunk"]) {
-        NSString* ws = [self safeWorkspacePath];
-        NSString* source = [params[@"source"] lowercaseString] ?: @"unstaged";
-        NSInteger offset = params[@"offset"] ? [params[@"offset"] integerValue] : 0;
-        NSInteger maxBytes = params[@"maxBytes"] ? [params[@"maxBytes"] integerValue] : 64 * 1024;
-        if (!ws) {
-            *outErrCode = @"invalid_request";
-            *outErrMsg = @"No open workspace.";
-            return;
-        }
-        NSString* diff = @"";
-        NSString* absPath = @"";
-        if ([source isEqualToString:@"staged"]) {
-            diff = RunGitOutput(ws, @[@"diff", @"--cached"]);
-        } else if ([source isEqualToString:@"unstaged"]) {
-            diff = RunGitOutput(ws, @[@"diff"]);
-        } else if ([source isEqualToString:@"file"]) {
-            absPath = AbsolutePathForRPCPath(params[@"path"] ?: @"", ws);
-            if (!absPath) {
-                *outErrCode = @"invalid_params";
-                *outErrMsg = @"path required when source=file.";
-                return;
-            }
-            diff = [self safeGitDiffForFile:absPath] ?: @"";
-        } else {
-            *outErrCode = @"invalid_params";
-            *outErrMsg = @"source must be one of unstaged, staged, or file.";
-            return;
-        }
-        NSMutableDictionary* chunk = [TextChunkResponse(diff ?: @"", offset, maxBytes) mutableCopy];
-        chunk[@"source"] = source;
-        chunk[@"path"] = absPath ?: @"";
-        chunk[@"mode"] = @"literal_git_diff_chunk";
-        chunk[@"encoding"] = @"utf-8";
-        *outResult = chunk;
-        return;
-    }
-
-    if ([method isEqualToString:@"diff.hunks"]) {
-        NSString* ws = [self safeWorkspacePath];
-        NSString* source = [params[@"source"] lowercaseString] ?: @"unstaged";
-        NSInteger maxHunks = params[@"maxHunks"] ? [params[@"maxHunks"] integerValue] : 500;
-        NSInteger hunkOffset = params[@"hunkOffset"] ? [params[@"hunkOffset"] integerValue] : 0;
-        BOOL includeLines = [params[@"includeLines"] boolValue];
-        NSInteger maxLinesPerHunk = params[@"maxLinesPerHunk"] ? [params[@"maxLinesPerHunk"] integerValue] : 200;
-        if (!ws) {
-            *outErrCode = @"invalid_request";
-            *outErrMsg = @"No open workspace.";
-            return;
-        }
-        NSString* diff = @"";
-        NSString* absPath = @"";
-        if ([source isEqualToString:@"staged"]) {
-            diff = RunGitOutput(ws, @[@"diff", @"--cached"]);
-        } else if ([source isEqualToString:@"unstaged"]) {
-            diff = RunGitOutput(ws, @[@"diff"]);
-        } else if ([source isEqualToString:@"file"]) {
-            absPath = AbsolutePathForRPCPath(params[@"path"] ?: @"", ws);
-            if (!absPath) {
-                *outErrCode = @"invalid_params";
-                *outErrMsg = @"path required when source=file.";
-                return;
-            }
-            diff = [self safeGitDiffForFile:absPath] ?: @"";
-        } else {
-            *outErrCode = @"invalid_params";
-            *outErrMsg = @"source must be one of unstaged, staged, or file.";
-            return;
-        }
-        NSMutableDictionary* response = [UnifiedDiffHunksResponse(diff ?: @"", maxHunks, hunkOffset, includeLines, maxLinesPerHunk) mutableCopy];
-        response[@"source"] = source;
-        response[@"path"] = absPath ?: @"";
-        response[@"mode"] = @"literal_unified_diff_hunks";
-        response[@"sha256"] = StableHashForString(diff ?: @"");
-        *outResult = response;
-        return;
-    }
-
-    if ([method isEqualToString:@"diff.current"]) {
-        NSString* ws = [self safeWorkspacePath] ?: @"";
-        *outResult = @{
-            @"changes": [self currentChangesInfo],
-            @"unstagedDiff": RunGitOutput(ws, @[@"diff"]),
-            @"stagedDiff": RunGitOutput(ws, @[@"diff", @"--cached"]),
-            @"unsavedBuffers": [DietCodeBufferStateService snapshotForTabs:[self safeOpenTabs] ?: @[]]
-        };
-        return;
-    }
-
-    if ([method isEqualToString:@"diff.staged"]) {
-        NSString* diff = RunGitOutput([self safeWorkspacePath] ?: @"", @[@"diff", @"--cached"]);
-        *outResult = @{ @"diff": diff, @"mode": @"literal_git_diff", @"sha256": StableHashForString(diff ?: @"") };
-        return;
-    }
-
-    if ([method isEqualToString:@"diff.unstaged"]) {
-        NSString* diff = RunGitOutput([self safeWorkspacePath] ?: @"", @[@"diff"]);
-        *outResult = @{ @"diff": diff, @"mode": @"literal_git_diff", @"sha256": StableHashForString(diff ?: @"") };
-        return;
-    }
-
-    if ([method isEqualToString:@"diff.summary"]) {
-        NSDictionary* changes = [self currentChangesInfo];
-        *outResult = @{
-            @"filesChanged": @([changes[@"modifiedFiles"] count]),
-            @"addedLines": changes[@"totalAdded"] ?: @0,
-            @"removedLines": changes[@"totalDeleted"] ?: @0,
-            @"stagedFiles": @([changes[@"stagedFiles"] count]),
-            @"unstagedFiles": @([changes[@"unstagedFiles"] count]),
-            @"untrackedFiles": @([changes[@"untrackedFiles"] count])
-        };
-        return;
-    }
-
-    if ([method isEqualToString:@"diff.validatePatch"] || [method isEqualToString:@"diff.applyPatchPreview"]) {
-        NSString* ws = [_windowBridge workspacePath];
-        NSString* targetPath = AbsolutePathForRPCPath(params[@"path"] ?: [_windowBridge activeFilePath], ws);
-        NSString* patchStr = params[@"patch"];
-        if (!targetPath || patchStr.length == 0) {
-            *outErrCode = @"invalid_params";
-            *outErrMsg = @"path and patch parameters required.";
-            return;
-        }
-        NSDictionary* validation = [_patchService validatePatchAtPath:targetPath patch:patchStr currentText:params[@"currentText"]];
-        *outResult = @{ @"validation": validation };
-        return;
-    }
-
-    if ([method isEqualToString:@"diff.previewPatch"]) {
-        NSString* ws = [_windowBridge workspacePath];
-        NSString* targetPath = AbsolutePathForRPCPath(params[@"path"] ?: [_windowBridge activeFilePath], ws);
-        NSString* patchStr = params[@"patch"];
-        if (!targetPath || patchStr.length == 0) {
-            *outErrCode = @"invalid_params";
-            *outErrMsg = @"path and patch parameters required.";
-            return;
-        }
-        NSString* currentText = params[@"currentText"] ?: [_windowBridge textForFileAtPath:targetPath];
-        if (!currentText) {
-            *outErrCode = @"invalid_request";
-            *outErrMsg = @"File is not readable.";
-            return;
-        }
-        NSArray* symbols = [DietCodeSymbolIndexService symbolsForFileContent:currentText extension:[[targetPath pathExtension] lowercaseString]];
-        *outResult = [DietCodeDiffAnalysisService previewPatchAtPath:targetPath patch:patchStr currentText:currentText symbols:symbols];
-        return;
-    }
-
-    // Patch primitives
-    if ([method isEqualToString:@"patch.chunk"]) {
-        NSString* patchStr = params[@"patch"] ?: @"";
-        NSInteger offset = params[@"offset"] ? [params[@"offset"] integerValue] : 0;
-        NSInteger maxBytes = params[@"maxBytes"] ? [params[@"maxBytes"] integerValue] : 64 * 1024;
-        if (patchStr.length == 0) {
-            *outErrCode = @"invalid_params";
-            *outErrMsg = @"patch parameter required.";
-            return;
-        }
-        NSMutableDictionary* chunk = [TextChunkResponse(patchStr, offset, maxBytes) mutableCopy];
-        chunk[@"mode"] = @"literal_patch_chunk";
-        chunk[@"encoding"] = @"utf-8";
-        *outResult = chunk;
-        return;
-    }
-
-    if ([method isEqualToString:@"patch.hunks"]) {
-        NSString* patchStr = params[@"patch"] ?: @"";
-        NSInteger maxHunks = params[@"maxHunks"] ? [params[@"maxHunks"] integerValue] : 500;
-        NSInteger hunkOffset = params[@"hunkOffset"] ? [params[@"hunkOffset"] integerValue] : 0;
-        BOOL includeLines = [params[@"includeLines"] boolValue];
-        NSInteger maxLinesPerHunk = params[@"maxLinesPerHunk"] ? [params[@"maxLinesPerHunk"] integerValue] : 200;
-        if (patchStr.length == 0) {
-            *outErrCode = @"invalid_params";
-            *outErrMsg = @"patch parameter required.";
-            return;
-        }
-        NSMutableDictionary* response = [UnifiedDiffHunksResponse(patchStr, maxHunks, hunkOffset, includeLines, maxLinesPerHunk) mutableCopy];
-        response[@"mode"] = @"literal_unified_diff_hunks";
-        response[@"sha256"] = StableHashForString(patchStr ?: @"");
-        *outResult = response;
-        return;
-    }
-
-    if ([method isEqualToString:@"patch.validate"] || [method isEqualToString:@"patch.preview"]) {
-        NSString* ws = [_windowBridge workspacePath];
-        NSString* targetPath = AbsolutePathForRPCPath(params[@"path"] ?: [_windowBridge activeFilePath], ws);
-        NSString* patchStr = params[@"patch"];
-        if (!targetPath || patchStr.length == 0) {
-            *outErrCode = @"invalid_params";
-            *outErrMsg = @"path and patch parameters required.";
-            return;
-        }
-        if ([patchStr lengthOfBytesUsingEncoding:NSUTF8StringEncoding] > kMaxPatchBytes) {
-            *outErrCode = @"patch_failed";
-            *outErrMsg = @"Patch exceeds maximum RPC patch size.";
-            return;
-        }
-        NSDictionary* validation = [_patchService validatePatchAtPath:targetPath patch:patchStr currentText:params[@"currentText"]];
-        NSDictionary* preview = PatchPreviewSummary(patchStr);
-        if ([method isEqualToString:@"patch.validate"]) {
-            *outResult = @{
-                @"path": targetPath,
-                @"applies": validation[@"patchAppliesCleanly"] ?: @NO,
-                @"changedLines": validation[@"changedLineCount"] ?: @0,
-                @"hunks": @([validation[@"affectedHunks"] count]),
-                @"requiresConfirmation": validation[@"requiresConfirmation"] ?: @NO,
-                @"validation": validation
-            };
-        } else {
-            NSMutableDictionary* result = [preview mutableCopy];
-            result[@"path"] = targetPath;
-            result[@"validation"] = validation;
-            *outResult = result;
-        }
-        return;
-    }
-
-    if ([method isEqualToString:@"patch.apply"] || [method isEqualToString:@"editor.applyPatch"]) {
-        NSString* errStr = nil;
-        NSString* errCode = nil;
-        NSDictionary* result = [_patchService applyPatch:params error:&errStr errorCode:&errCode];
-        if (!result) {
-            *outErrCode = errCode ?: @"patch_failed";
-            *outErrMsg = errStr ?: @"Patch application failed.";
-            return;
-        }
-        *outResult = result;
-        return;
-    }
-
-    if ([method isEqualToString:@"patch.applyBatch"]) {
-        NSString* errStr = nil;
-        NSString* errCode = nil;
-        NSDictionary* result = [_patchService applyPatchBatch:params error:&errStr errorCode:&errCode];
-        if (!result) {
-            *outErrCode = errCode ?: @"patch_failed";
-            *outErrMsg = errStr ?: @"Batch patch application failed.";
-            return;
-        }
-        *outResult = result;
-        return;
-    }
-
-    if ([method isEqualToString:@"patch.revertLast"]) {
-        NSString* errStr = nil;
-        NSString* errCode = nil;
-        NSDictionary* result = [_patchService revertLastPatchWithError:&errStr errorCode:&errCode];
-        if (!result) {
-            *outErrCode = errCode ?: @"rollback_failed";
-            *outErrMsg = errStr ?: @"Failed to revert last RPC patch.";
-            return;
-        }
-        *outResult = result;
-        return;
-    }
-
-    // Buffer commands
-    if ([method isEqualToString:@"buffers.snapshot"]) {
-        *outResult = @{ @"buffers": [DietCodeBufferStateService snapshotForTabs:[self safeOpenTabs] ?: @[]] };
-        return;
-    }
-
-    if ([method isEqualToString:@"buffers.dirty"]) {
-        *outResult = @{ @"files": DirtyFilePathsFromTabs([self safeOpenTabs] ?: @[]) };
-        return;
-    }
-
-    if ([method isEqualToString:@"buffers.active"]) {
-        NSString* pathValue = [self safeActiveFilePath] ?: @"";
-        NSDictionary* selection = [self safeActiveSelectionInfo] ?: @{};
-        *outResult = @{ @"path": pathValue, @"selection": selection };
-        return;
-    }
-
-    if ([method isEqualToString:@"buffers.unsavedDiff"]) {
-        NSString* ws = [self safeWorkspacePath];
-        NSString* targetPath = AbsolutePathForRPCPath(params[@"path"] ?: [self safeActiveFilePath], ws);
-        NSString* diff = @"";
-        for (id tab in [self safeOpenTabs] ?: @[]) {
-            if ([[tab valueForKey:@"path"] isEqualToString:targetPath]) {
-                diff = [DietCodeBufferStateService unsavedDiffForTab:tab];
-                break;
-            }
-        }
-        *outResult = @{ @"path": targetPath ?: @"", @"diff": diff ?: @"" };
-        return;
-    }
-
-    // Diagnostics commands
-    if ([method isEqualToString:@"diagnostics.list"]) {
-        NSArray* problems = [self safeProblemsList] ?: @[];
-        *outResult = @{ @"diagnostics": problems };
-        return;
-    }
-
-    if ([method isEqualToString:@"diagnostics.summary"]) {
-        NSArray* problems = [self safeProblemsList] ?: @[];
-        *outResult = DiagnosticsSummaryFromProblems(problems);
-        return;
-    }
-
-    if ([method isEqualToString:@"diagnostics.cluster"]) {
-        NSArray* problems = [self safeProblemsList] ?: @[];
-        *outResult = @{ @"clusters": ClusterDiagnostics(problems) };
-        return;
-    }
-
-    if ([method isEqualToString:@"diagnostics.forFile"]) {
-        NSString* ws = [self safeWorkspacePath];
-        NSString* targetPath = AbsolutePathForRPCPath(params[@"path"] ?: [self safeActiveFilePath], ws);
-        if (!targetPath) {
-            *outErrCode = @"invalid_params";
-            *outErrMsg = @"path parameter or active file required.";
-            return;
-        }
-        NSMutableArray* matches = [NSMutableArray array];
-        for (NSDictionary* problem in [self safeProblemsList] ?: @[]) {
-            NSString* problemPath = AbsolutePathForRPCPath(problem[@"path"], ws);
-            if ([problemPath isEqualToString:targetPath]) {
-                [matches addObject:problem];
-            }
-        }
-        *outResult = @{ @"path": targetPath, @"diagnostics": matches };
-        return;
-    }
-
-    // Change set commands
-    if ([method isEqualToString:@"changes.current"]) {
-        *outResult = [self currentChangesInfo];
-        return;
-    }
-
-    if ([method isEqualToString:@"changes.summary"]) {
-        NSDictionary* changes = [self currentChangesInfo];
-        *outResult = @{
-            @"summary": @{
-                @"modifiedFileCount": @([changes[@"modifiedFiles"] count]),
-                @"unsavedBufferCount": @([changes[@"unsavedBuffers"] count]),
-                @"stagedFileCount": @([changes[@"stagedFiles"] count]),
-                @"unstagedFileCount": @([changes[@"unstagedFiles"] count]),
-                @"untrackedFileCount": @([changes[@"untrackedFiles"] count]),
-                @"totalAdded": changes[@"totalAdded"] ?: @0,
-                @"totalDeleted": changes[@"totalDeleted"] ?: @0
-            },
-            @"changes": changes
-        };
-        return;
-    }
-
-    if ([method isEqualToString:@"changes.revertFile"]) {
-        NSString* ws = [self safeWorkspacePath];
-        NSString* targetPath = AbsolutePathForRPCPath(params[@"path"], ws);
-        if (!targetPath) {
-            *outErrCode = @"invalid_params";
-            *outErrMsg = @"path parameter required.";
-            return;
-        }
-        NSString* errStr = nil;
-        BOOL ok = [_windowController gitDiscardFile:targetPath errorOut:&errStr];
-        if (!ok) {
-            *outErrCode = @"git_failed";
-            *outErrMsg = errStr ?: @"Failed to revert file.";
-            return;
-        }
-        *outResult = @{ @"reverted": @YES, @"path": targetPath };
-        return;
-    }
-
-    // Session workflow commands
-    if ([method isEqualToString:@"session.info"] || [method isEqualToString:@"session.workflowState"]) {
-        __block NSString* ws = nil;
-        __block NSString* activeFile = nil;
-        __block NSArray* openFiles = nil;
-        __block NSArray* dirtyFiles = nil;
-        __block NSArray* recentCmds = nil;
-        __block NSArray* lastSearches = nil;
-        __block pid_t termPid = 0;
-        
-        dispatch_sync(dispatch_get_main_queue(), ^{
-            ws = [_windowController workspacePath];
-            activeFile = [_windowController activeFilePath];
-            openFiles = [_windowController openFilePaths];
-            dirtyFiles = DirtyFilePathsFromTabs(_windowController.openTabs ?: @[]);
-            recentCmds = [_windowController.sessionRecentCommands copy];
-            lastSearches = [_windowController.sessionLastSearches copy];
-            termPid = [_windowController terminalPid];
-        });
-        
-        NSDictionary* git = [self safeGitStatusInfo] ?: @{};
-        *outResult = @{
-            @"workspace": ws ?: @"",
-            @"activeFile": activeFile ?: @"",
-            @"openFiles": openFiles ?: @[],
-            @"dirtyFiles": dirtyFiles ?: @[],
-            @"gitBranch": git[@"branch"] ?: @"",
-            @"recentCommands": recentCmds ?: @[],
-            @"lastSearches": lastSearches ?: @[],
-            @"terminalPid": @(termPid)
-        };
-        return;
-    }
-
-    if ([method isEqualToString:@"session.recentCommands"]) {
-        NSArray* recentCmds = [self safeSessionRecentCommands];
-        *outResult = @{ @"commands": recentCmds ?: @[] };
-        return;
-    }
-
-    if ([method isEqualToString:@"session.lastSearches"]) {
-        NSArray* lastSearches = [self safeSessionLastSearches];
-        *outResult = @{ @"searches": lastSearches ?: @[] };
-        return;
-    }
-
-    if ([method isEqualToString:@"session.clearHistory"]) {
-        dispatch_async(dispatch_get_main_queue(), ^{
-            [_windowController.sessionRecentCommands removeAllObjects];
-            [_windowController.sessionLastSearches removeAllObjects];
-        });
-        *outResult = @{ @"cleared": @YES };
-        return;
-    }
-
-    // Verification commands
-    if ([method isEqualToString:@"verify.run"]) {
-        NSString* command = params[@"command"] ?: @"";
-        NSArray<NSString*>* allowed = VerifyCommandsAllowlist();
-        if (!VerifyCommandIsAllowed(command, allowed)) {
-            *outErrCode = @"invalid_params";
-            *outErrMsg = [NSString stringWithFormat:@"verify.run command must match one of the AgentVerifyCommands prefixes: %@.", [allowed componentsJoinedByString:@", "]];
-            return;
-        }
-        NSString* ws = [self safeWorkspacePath];
-        NSString* cwd = params[@"cwd"] ?: ws;
-        if (cwd.length > 0 && ws && !PathIsInsideWorkspace(cwd, ws)) {
-            *outErrCode = @"outside_workspace";
-            *outErrMsg = @"verify.run cwd must be inside workspace.";
-            return;
-        }
-        NSDictionary* result = [self runVerificationCommand:command cwd:cwd];
-        *outResult = result;
-        return;
-    }
-
-    if ([method isEqualToString:@"verify.last"] || [method isEqualToString:@"verify.status"]) {
-        NSDictionary* status = [self verificationStatus];
-        if ([method isEqualToString:@"verify.last"]) {
-            *outResult = @{
-                @"command": status[@"command"] ?: @"",
-                @"exitCode": status[@"exitCode"] ?: [NSNull null],
-                @"startedAt": status[@"startedAt"] ?: @"",
-                @"finishedAt": status[@"finishedAt"] ?: @"",
-                @"durationMs": status[@"durationMs"] ?: @0,
-                @"status": status
-            };
-        } else {
-            *outResult = @{ @"command": _lastVerifyCommand ?: @"", @"status": status };
-        }
-        return;
-    }
-
-    if ([method isEqualToString:@"verify.failures"]) {
-        *outResult = @{
-            @"failures": [self verificationFailureLines],
-            @"problems": [self safeProblemsList] ?: @[],
-            @"status": [self verificationStatus]
-        };
-        return;
-    }
-
-    // Context primitives
-    if ([method isEqualToString:@"context.snapshot"]) {
-        NSDictionary* snapshot = [self contextSnapshotPayload];
-        NSString* snapshotId = [NSString stringWithFormat:@"snapshot-%ld", (long)++_contextSnapshotCounter];
-        _contextSnapshots[snapshotId] = snapshot;
-        *outResult = @{ @"snapshotId": snapshotId, @"snapshot": snapshot };
-        return;
-    }
-
-    if ([method isEqualToString:@"context.delta"]) {
-        NSString* snapshotId = params[@"snapshotId"];
-        NSDictionary* previous = snapshotId ? _contextSnapshots[snapshotId] : nil;
-        if (!previous) {
-            *outErrCode = @"invalid_params";
-            *outErrMsg = @"Unknown snapshotId.";
-            return;
-        }
-        NSDictionary* current = [self contextSnapshotPayload];
-        NSMutableDictionary* changed = [NSMutableDictionary dictionary];
-        for (NSString* key in current) {
-            id oldValue = previous[key];
-            id newValue = current[key];
-            if (![oldValue isEqual:newValue]) {
-                changed[key] = @{ @"before": oldValue ?: [NSNull null], @"after": newValue ?: [NSNull null] };
-            }
-        }
-        *outResult = @{ @"snapshotId": snapshotId, @"changed": changed, @"current": current };
-        return;
-    }
-
-    // Bounded combo primitives
-    if ([method isEqualToString:@"task.start"]) {
-        *outResult = [_taskRuntime startTask:params outErrCode:outErrCode outErrMsg:outErrMsg];
-        return;
-    }
-
-    if ([method isEqualToString:@"task.status"] || [method isEqualToString:@"task.result"]) {
-        *outResult = [_taskRuntime taskStatus:params result:[method isEqualToString:@"task.result"] outErrCode:outErrCode outErrMsg:outErrMsg];
-        return;
-    }
-
-    if ([method isEqualToString:@"task.cancel"]) {
-        *outResult = [_taskRuntime cancelTask:params outErrCode:outErrCode outErrMsg:outErrMsg];
-        return;
-    }
-
-    if ([method isEqualToString:@"task.step"]) {
-        *outResult = [_taskRuntime taskStep:params outErrCode:outErrCode outErrMsg:outErrMsg];
-        return;
-    }
-
-    if ([method isEqualToString:@"task.runLoop"]) {
-        *outResult = [_taskRuntime taskRunLoop:params outErrCode:outErrCode outErrMsg:outErrMsg];
-        return;
-    }
-
-    if ([method isEqualToString:@"edit.plan"]) {
-        *outResult = [_taskRuntime editPlan:params outErrCode:outErrCode outErrMsg:outErrMsg];
-        return;
-    }
-
-    if ([method isEqualToString:@"edit.executePlan"]) {
-        *outResult = [_taskRuntime editExecutePlan:params outErrCode:outErrCode outErrMsg:outErrMsg];
-        return;
-    }
-
-    if ([method isEqualToString:@"repair.fromCompilerErrors"] ||
-        [method isEqualToString:@"repair.fromTestFailures"] ||
-        [method isEqualToString:@"repair.fromPatchFailure"]) {
-        NSString* failure = @"patch";
-        if ([method isEqualToString:@"repair.fromCompilerErrors"]) failure = @"compiler";
-        else if ([method isEqualToString:@"repair.fromTestFailures"]) failure = @"test";
-        *outResult = [self repairContextForFailure:failure params:params];
-        return;
-    }
-
-    // Terminal commands
-    if ([method isEqualToString:@"terminal.status"]) {
-        pid_t pid = [self safeTerminalPid];
-        *outResult = @{
-            @"pid": @(pid),
-            @"running": @(pid > 0),
-            @"outputLength": @(([self safeTerminalOutput] ?: @"").length)
-        };
-        return;
-    }
-
-    if ([method isEqualToString:@"terminal.jobs"]) {
-        pid_t pid = [self safeTerminalPid];
-        NSArray* jobs = pid > 0 ? @[@{ @"id": @"terminal", @"pid": @(pid), @"status": @"running" }] : @[];
-        *outResult = @{ @"jobs": jobs };
-        return;
-    }
-
-    if ([method isEqualToString:@"terminal.history"]) {
-        *outResult = @{ @"commands": [self safeSessionRecentCommands] ?: @[] };
-        return;
-    }
-
-    if ([method isEqualToString:@"terminal.run"]) {
-        NSString* command = params[@"command"];
-        if (!command) {
-            *outErrCode = @"invalid_params";
-            *outErrMsg = @"command string required.";
-            return;
-        }
-        NSString* cwd = params[@"cwd"];
-        BOOL show = params[@"show"] ? [params[@"show"] boolValue] : YES;
-        
-        NSString* errStr = nil;
-        BOOL ok = [_windowController runTerminalCommand:command cwd:cwd show:show errorOut:&errStr];
-        if (!ok) {
-            *outErrCode = @"terminal_failed";
-            *outErrMsg = errStr ?: @"Failed to start terminal command.";
-            return;
-        }
-        *outResult = @{ @"run": @YES, @"pid": @([self safeTerminalPid]) };
-        return;
-    }
-    
-    if ([method isEqualToString:@"terminal.stop"]) {
-        [_windowController stopTerminalCommand];
-        *outResult = @{ @"stopped": @YES };
-        return;
-    }
-    
-    if ([method isEqualToString:@"terminal.getOutput"]) {
-        NSString* output = [self safeTerminalOutput] ?: @"";
-        *outResult = @{ @"output": output };
-        return;
-    }
-    
-    if ([method isEqualToString:@"terminal.clear"]) {
-        [_windowController clearTerminalOutput];
-        *outResult = @{ @"cleared": @YES };
-        return;
-    }
-    
-    // Git commands
-    if ([method isEqualToString:@"git.status"]) {
-        NSDictionary* info = [self safeGitStatusInfo];
-        *outResult = info;
-        return;
-    }
-    
-    if ([method isEqualToString:@"git.diff"]) {
-        NSString* targetPath = params[@"path"] ?: @"";
-        NSString* diff = [self safeGitDiffForFile:targetPath];
-        *outResult = @{ @"diff": diff };
-        return;
-    }
-    
-    if ([method isEqualToString:@"git.stage"]) {
-        NSString* targetPath = params[@"path"];
-        if (!targetPath) {
-            *outErrCode = @"invalid_params";
-            *outErrMsg = @"path parameter required.";
-            return;
-        }
-        NSString* errStr = nil;
-        BOOL ok = [_windowController gitStageFile:targetPath errorOut:&errStr];
-        if (!ok) {
-            *outErrCode = @"git_failed";
-            *outErrMsg = errStr ?: @"Failed to stage file.";
-            return;
-        }
-        *outResult = @{ @"staged": @YES };
-        return;
-    }
-    
-    if ([method isEqualToString:@"git.unstage"]) {
-        NSString* targetPath = params[@"path"];
-        if (!targetPath) {
-            *outErrCode = @"invalid_params";
-            *outErrMsg = @"path parameter required.";
-            return;
-        }
-        NSString* errStr = nil;
-        BOOL ok = [_windowController gitUnstageFile:targetPath errorOut:&errStr];
-        if (!ok) {
-            *outErrCode = @"git_failed";
-            *outErrMsg = errStr ?: @"Failed to unstage file.";
-            return;
-        }
-        *outResult = @{ @"unstaged": @YES };
-        return;
-    }
-    
-    if ([method isEqualToString:@"git.discard"]) {
-        NSString* targetPath = params[@"path"];
-        if (!targetPath) {
-            *outErrCode = @"invalid_params";
-            *outErrMsg = @"path parameter required.";
-            return;
-        }
-        NSString* errStr = nil;
-        BOOL ok = [_windowController gitDiscardFile:targetPath errorOut:&errStr];
-        if (!ok) {
-            *outErrCode = @"git_failed";
-            *outErrMsg = errStr ?: @"Failed to discard file changes.";
-            return;
-        }
-        *outResult = @{ @"discarded": @YES };
-        return;
-    }
-    
-    if ([method isEqualToString:@"git.commit"]) {
-        NSString* message = params[@"message"];
-        if (!message || message.length == 0) {
-            *outErrCode = @"invalid_params";
-            *outErrMsg = @"message parameter required.";
-            return;
-        }
-        NSString* errStr = nil;
-        BOOL ok = [_windowController gitCommitWithMessage:message errorOut:&errStr];
-        if (!ok) {
-            *outErrCode = @"git_failed";
-            *outErrMsg = errStr ?: @"Failed to commit staged changes.";
-            return;
-        }
-        *outResult = @{ @"committed": @YES };
-        return;
-    }
-    
-    // Problems commands
-    if ([method isEqualToString:@"problems.list"]) {
-        NSArray* problems = [self safeProblemsList] ?: @[];
-        *outResult = @{ @"problems": problems };
-        return;
-    }
-    
-    if ([method isEqualToString:@"problems.open"]) {
-        NSString* problemId = params[@"id"];
-        if (!problemId) {
-            *outErrCode = @"invalid_params";
-            *outErrMsg = @"id parameter required.";
-            return;
-        }
-        [_windowController problemsOpen:problemId];
-        *outResult = @{ @"opened": @YES };
-        return;
-    }
-    
-    if ([method isEqualToString:@"problems.clearSource"]) {
-        NSString* source = params[@"source"];
-        if (!source) {
-            *outErrCode = @"invalid_params";
-            *outErrMsg = @"source parameter required.";
-            return;
-        }
-        [_windowController problemsClearSource:source];
-        *outResult = @{ @"cleared": @YES };
-        return;
-    }
-    
-    // Language features commands
-    if ([method isEqualToString:@"language.diagnostics"]) {
-        NSString* targetPath = params[@"path"] ?: [self safeActiveFilePath];
-        if (!targetPath) {
-            *outErrCode = @"invalid_params";
-            *outErrMsg = @"path parameter required.";
-            return;
-        }
-        NSArray* diags = [self safeLanguageDiagnosticsForPath:targetPath] ?: @[];
-        *outResult = @{ @"diagnostics": diags };
-        return;
-    }
-    
-    if ([method isEqualToString:@"language.format"]) {
-        NSString* targetPath = params[@"path"] ?: [self safeActiveFilePath];
-        if (!targetPath) {
-            *outErrCode = @"invalid_params";
-            *outErrMsg = @"path parameter required.";
-            return;
-        }
-        [_windowController formatFileAtPath:targetPath];
-        *outResult = @{ @"formatted": @YES };
-        return;
-    }
-    
-    if ([method isEqualToString:@"language.lint"]) {
-        NSString* targetPath = params[@"path"] ?: [self safeActiveFilePath];
-        if (!targetPath) {
-            *outErrCode = @"invalid_params";
-            *outErrMsg = @"path parameter required.";
-            return;
-        }
-        [_windowController lintFileAtPath:targetPath];
-        *outResult = @{ @"linted": @YES };
-        return;
-    }
-    
-    if ([method isEqualToString:@"language.gotoDefinition"]) {
-        NSDictionary* sel = [self safeActiveSelectionInfo] ?: @{};
-        NSString* targetPath = [self safeActiveFilePath];
-        NSString* text = targetPath ? [self safeTextForFileAtPath:targetPath] : nil;
-        if (!targetPath || !text) {
-            *outErrCode = @"invalid_request";
-            *outErrMsg = @"No active readable editor tab.";
-            return;
-        }
-        NSString* symbol = params[@"symbol"];
-        if (symbol.length == 0) {
-            symbol = WordAtOffset(text, [sel[@"start"] integerValue]);
-        }
-        if (symbol.length == 0) {
-            *outResult = @{ @"found": @NO, @"symbol": @"", @"definition": @{}, @"candidates": @[] };
-            return;
-        }
-        NSString* ws = [self safeWorkspacePath];
-        NSArray* problems = [self safeProblemsList] ?: @[];
-        NSMutableArray* diagFiles = [NSMutableArray array];
-        for (NSDictionary* problem in problems) {
-            NSString* abs = AbsolutePathForRPCPath(problem[@"path"], ws);
-            if (abs.length > 0 && ![diagFiles containsObject:abs]) {
-                [diagFiles addObject:abs];
-            }
-        }
-        NSArray* references = [DietCodeSymbolIndexService referencesForSymbol:symbol
-                                                                   inWorkspace:ws
-                                                                     openFiles:[self safeOpenFilePaths]
-                                                              diagnosticsFiles:diagFiles];
-        NSDictionary* best = @{};
-        for (NSDictionary* candidate in references) {
-            NSString* preview = [candidate[@"preview"] lowercaseString] ?: @"";
-            NSString* lowerSymbol = [symbol lowercaseString];
-            if ([preview containsString:[NSString stringWithFormat:@"def %@", lowerSymbol]] ||
-                [preview containsString:[NSString stringWithFormat:@"class %@", lowerSymbol]] ||
-                [preview containsString:[NSString stringWithFormat:@"function %@", lowerSymbol]] ||
-                [preview containsString:[NSString stringWithFormat:@"%@(", lowerSymbol]]) {
-                best = candidate;
-                break;
-            }
-        }
-        if (best.count == 0 && references.count > 0) {
-            best = references[0];
-        }
-        *outResult = @{ @"found": @(best.count > 0), @"symbol": symbol, @"definition": best, @"candidates": references };
-        return;
-    }
-    
-    *outErrCode = @"method_not_found";
-    *outErrMsg = [NSString stringWithFormat:@"The method '%@' is not defined.", method];
 }
 
 - (void)sendSuccess:(NSString*)reqId result:(NSDictionary*)result clientFd:(int)clientFd {
@@ -2792,7 +1124,7 @@
 }
 
 - (void)sendError:(NSString*)reqId code:(id)code message:(NSString*)message clientFd:(int)clientFd {
-    NSNumber* numericCode = @(-32603); // default internal error
+    NSNumber* numericCode = @(-32603);
     NSString* stringCode = @"internal_error";
     if ([code isKindOfClass:[NSNumber class]]) {
         numericCode = code;
@@ -2867,7 +1199,7 @@
             permission:(NSString*)permission 
               duration:(long long)duration 
                 result:(NSString*)result 
-                 paths:(NSString*)paths {
+                  paths:(NSString*)paths {
     @synchronized (self) {
         NSString* homeDir = NSHomeDirectory();
         NSString* dietcodeDir = [homeDir stringByAppendingPathComponent:@".dietcode"];
@@ -2877,7 +1209,6 @@
         NSString* logPath2 = [dietcodeDir stringByAppendingPathComponent:@"control_audit.log.2"];
         NSString* logPath1 = [dietcodeDir stringByAppendingPathComponent:@"control_audit.log.1"];
         
-        // Hardening: verify log paths are not symlinks and belong to current user
         NSArray* pathsToCheck = @[logPath, logPath1, logPath2, logPath3];
         for (NSString* p in pathsToCheck) {
             struct stat st;
@@ -2943,9 +1274,22 @@
     [frame appendBytes:"\n" length:1];
     
     @synchronized(self) {
+        NSMutableArray* deadConns = [NSMutableArray array];
         for (DietCodeClientConnection* conn in [_activeConnections allValues]) {
             if ([conn.subscriptions containsObject:type] || [conn.subscriptions containsObject:@"*"]) {
-                write(conn.fd, frame.bytes, frame.length);
+                ssize_t written = write(conn.fd, frame.bytes, frame.length);
+                if (written < 0) {
+                    if (errno == EPIPE || errno == EBADF) {
+                        [deadConns addObject:@(conn.fd)];
+                    }
+                }
+            }
+        }
+        for (NSNumber* fdNum in deadConns) {
+            DietCodeClientConnection* conn = _activeConnections[fdNum];
+            if (conn) {
+                close(conn.fd);
+                [_activeConnections removeObjectForKey:fdNum];
             }
         }
     }

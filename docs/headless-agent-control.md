@@ -171,7 +171,7 @@ with DietCodeAgentClient() as client:
     response = client.raw_call("rpc.ping", request_id="healthcheck-1")
 ```
 
-The SDK automatically reloads the session token once if the server reports an invalid token. Transport retries are opt-in with `retries=N` because replaying mutation calls can duplicate work if the server processed the first request before the connection failed.
+The SDK automatically reloads the session token once if the server reports an invalid token. Read-only methods (e.g. `rpc.ping`, `workspace.grep`, `search.text`, etc.) are automatically retried at least once on transient socket/connection errors. Transport retries for mutations are opt-in with `retries=N` to prevent duplication of side-effects.
 
 Readiness levels
 ----------------
@@ -304,6 +304,30 @@ Patch text can also be chunked for stream consumers:
 python3 scripts/dietcode_agent_client.py patch.chunk --patch-file /tmp/change.diff
 python3 scripts/dietcode_agent_client.py patch.chunk --patch-file /tmp/change.diff --offset 65536 --max-bytes 65536
 ```
+
+Event Notifications and Subscriptions
+-------------------------------------
+
+DietCode supports a duplex observer protocol to eliminate the need for polling. Agents can subscribe to events to receive asynchronous notifications pushed by the server.
+
+Use the `event.subscribe` and `event.unsubscribe` methods:
+
+```sh
+# Subscribe to specific events:
+python3 scripts/dietcode_agent_client.py event.subscribe '{"types":["DocumentSaved","ActivityChanged"]}'
+```
+
+To stream notifications to stdout in real-time, use the `--listen` CLI flag (which auto-subscribes to all events via the `*` wildcard):
+
+```sh
+python3 scripts/dietcode_agent_client.py --listen
+```
+
+Supported event types:
+- `DocumentOpened`: Emitted when a document tab is opened. The event detail contains the file path.
+- `DocumentSaved`: Emitted when a document tab is saved. The event detail contains the file path.
+- `DocumentClosed`: Emitted when a document tab is closed. The event detail contains the file path.
+- `ActivityChanged`: Emitted when the user switches focus to a different tab or document. The event detail contains the active file path.
 
 Limits
 ------

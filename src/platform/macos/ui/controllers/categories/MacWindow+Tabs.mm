@@ -173,6 +173,9 @@ using namespace dietcode::platform::macos;
     [self updateTabHeaderLayout];
     [self updateWindowTitleAndStatus];
     [self checkExternalStatusForTab:tab];
+    if (tab.path) {
+        [self notifyAgentEvent:@"ActivityChanged" detail:tab.path];
+    }
 }
 
 - (void)closeTab:(DietCodeTabState*)tab {
