@@ -1,6 +1,19 @@
 CXX := clang++
-CXXFLAGS := -std=c++20 -Wall -Wextra -Wpedantic -I./src -I./src/platform/macos/control -I./src/platform/macos/ui -I./src/platform/macos/services
-OBJCXXFLAGS := -std=c++20 -Wall -Wextra -I./src -I./src/platform/macos/control -I./src/platform/macos/ui -I./src/platform/macos/services -fobjc-arc
+
+# Header search paths
+INC_FLAGS := -I./src \
+             -I./src/platform/macos/control \
+             -I./src/platform/macos/ui \
+             -I./src/platform/macos/ui/app \
+             -I./src/platform/macos/ui/controllers \
+             -I./src/platform/macos/ui/controllers/categories \
+             -I./src/platform/macos/ui/views \
+             -I./src/platform/macos/ui/utils \
+             -I./src/platform/macos/services
+
+CXXFLAGS := -std=c++20 -Wall -Wextra -Wpedantic $(INC_FLAGS)
+OBJCXXFLAGS := -std=c++20 -Wall -Wextra $(INC_FLAGS) -fobjc-arc
+
 BUILD_DIR := build
 APP_NAME := DietCode
 APP_BUNDLE := $(BUILD_DIR)/$(APP_NAME).app
@@ -18,26 +31,26 @@ CORE_CPP := \
 
 MACOS_MM := \
 	src/platform/macos/main.mm \
-	src/platform/macos/ui/MacAppDelegate.mm \
-	src/platform/macos/ui/MacWindow.mm \
-	src/platform/macos/ui/MacWindow+Layout.mm \
-	src/platform/macos/ui/MacWindow+Tabs.mm \
-	src/platform/macos/ui/MacWindow+Files.mm \
-	src/platform/macos/ui/MacWindow+Search.mm \
-	src/platform/macos/ui/MacWindow+Git.mm \
-	src/platform/macos/ui/MacWindow+Language.mm \
-	src/platform/macos/ui/MacWindow+Diagnostics.mm \
-	src/platform/macos/ui/MacWindow+RunTerminal.mm \
-	src/platform/macos/ui/MacWindow+Settings.mm \
-	src/platform/macos/ui/MacWindow+Recovery.mm \
-	src/platform/macos/ui/MacWindow+AgentAPI.mm \
-	src/platform/macos/ui/MacWindow+CommandPalette.mm \
-	src/platform/macos/ui/MacWindowUtilities.mm \
-	src/platform/macos/ui/MacEditorComponents.mm \
-	src/platform/macos/ui/MacMenu.mm \
-	src/platform/macos/ui/MacFileDialog.mm \
-	src/platform/macos/ui/MacClipboard.mm \
-	src/platform/macos/ui/MacTextRendering.mm \
+	src/platform/macos/ui/app/MacAppDelegate.mm \
+	src/platform/macos/ui/controllers/MacWindow.mm \
+	src/platform/macos/ui/controllers/categories/MacWindow+Layout.mm \
+	src/platform/macos/ui/controllers/categories/MacWindow+Tabs.mm \
+	src/platform/macos/ui/controllers/categories/MacWindow+Files.mm \
+	src/platform/macos/ui/controllers/categories/MacWindow+Search.mm \
+	src/platform/macos/ui/controllers/categories/MacWindow+Git.mm \
+	src/platform/macos/ui/controllers/categories/MacWindow+Language.mm \
+	src/platform/macos/ui/controllers/categories/MacWindow+Diagnostics.mm \
+	src/platform/macos/ui/controllers/categories/MacWindow+RunTerminal.mm \
+	src/platform/macos/ui/controllers/categories/MacWindow+Settings.mm \
+	src/platform/macos/ui/controllers/categories/MacWindow+Recovery.mm \
+	src/platform/macos/ui/controllers/categories/MacWindow+AgentAPI.mm \
+	src/platform/macos/ui/controllers/categories/MacWindow+CommandPalette.mm \
+	src/platform/macos/ui/utils/MacWindowUtilities.mm \
+	src/platform/macos/ui/views/MacEditorComponents.mm \
+	src/platform/macos/ui/app/MacMenu.mm \
+	src/platform/macos/ui/app/MacFileDialog.mm \
+	src/platform/macos/ui/app/MacClipboard.mm \
+	src/platform/macos/ui/views/MacTextRendering.mm \
 	src/platform/macos/control/MacControlServer.mm \
 	src/platform/macos/control/MacControlSupport.mm \
 	src/platform/macos/control/MacControlPathSecurity.mm \
