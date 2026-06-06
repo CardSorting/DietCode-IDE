@@ -319,10 +319,17 @@ static NSSet* _terminalComboStatuses(void) {
     }
     combo[@"status"] = @"cancelled";
     combo[@"cancelledAt"] = ISODateString([NSDate date]);
-    // Release any path locks this combo held.
-    [self releaseMutationLocks:[combo[@"lockedPaths"] isKindOfClass:[NSArray class]]
-                               ? combo[@"lockedPaths"] : @[]
-                       comboId:comboId];
+    // Running combos release locks in their normal cleanup path after rollback/exit.
+    // Releasing here would allow another mutation to start while this combo may
+    // still be executing or restoring its checkpoint.
+    if (![status isEqualToString:@"running"]) {
+        [self releaseMutationLocks:[combo[@"lockedPaths"] isKindOfClass:[NSArray class]]
+                                   ? combo[@"lockedPaths"] : @[]
+                           comboId:comboId];
+        if ([combo[@"containsMutation"] boolValue]) {
+            _globalMutationLock = NO;
+        }
+    }
     return YES;
 }
 
@@ -446,6 +453,7 @@ static NSSet* _terminalComboStatuses(void) {
             return [self serializableCombo:combo];
         }
         _globalMutationLock = YES;
+        combo[@"containsMutation"] = @YES;
     }
 
     // 3. Acquire locks for ALL paths
@@ -457,6 +465,7 @@ static NSSet* _terminalComboStatuses(void) {
         combo[@"finishedAt"] = ISODateString([NSDate date]);
         return [self serializableCombo:combo];
     }
+    combo[@"lockedPaths"] = [allMutationPaths copy];
 
     // 4. Create Preimage Backup Checkpoint directory and records
     __block NSDictionary* manifest = nil;
@@ -486,6 +495,11 @@ static NSSet* _terminalComboStatuses(void) {
     BOOL executionFailed = NO;
 
     for (NSDictionary* step in plan[@"steps"] ?: @[]) {
+        if ([combo[@"status"] isEqualToString:@"cancelled"]) {
+            executionFailed = YES;
+            break;
+        }
+
         NSTimeInterval elapsed = [[NSDate date] timeIntervalSinceDate:started] * 1000.0;
         if (elapsed > maxDurationMs) {
             combo[@"status"] = @"expired";
@@ -531,7 +545,11 @@ static NSSet* _terminalComboStatuses(void) {
         }
         budgetUsed[@"durationMs"] = @((NSInteger)([[NSDate date] timeIntervalSinceDate:started] * 1000.0));
         if (![trace[@"state"] isEqualToString:@"complete"]) {
-            combo[@"status"] = @"failed";
+            if ([trace[@"state"] isEqualToString:@"cancelled"] || [combo[@"status"] isEqualToString:@"cancelled"]) {
+                combo[@"status"] = @"cancelled";
+            } else {
+                combo[@"status"] = @"failed";
+            }
             if (trace[@"error"]) [combo[@"errors"] addObject:trace[@"error"]];
             executionFailed = YES;
             break;

@@ -492,6 +492,10 @@
             NSMutableDictionary* result = [preview mutableCopy];
             result[@"path"] = targetPath;
             result[@"validation"] = validation;
+            result[@"syntaxDanger"] = validation[@"syntaxDanger"] ?: @NO;
+            if (validation[@"syntaxWarning"]) {
+                result[@"syntaxWarning"] = validation[@"syntaxWarning"];
+            }
             *outResult = result;
         }
         return;

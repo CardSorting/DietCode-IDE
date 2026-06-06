@@ -54,6 +54,7 @@
         @"affectedHunks": hunks,
         @"affectedSymbols": @[],
         @"requiresConfirmation": @(requiresConfirmation),
+        @"syntaxDanger": @NO,
         @"rejectedReason": @""
     } mutableCopy];
 
@@ -105,8 +106,6 @@
             result[@"rejectedReason"] = preview[@"syntaxErrors"] ?: @"Patch introduces syntax risk.";
             return result;
         }
-    } else {
-        result[@"syntaxDanger"] = @NO;
     }
 
     result[@"ok"] = @YES;

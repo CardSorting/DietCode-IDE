@@ -15,6 +15,8 @@
 
 using namespace dietcode::platform::macos;
 
+static const NSInteger kMaxSearchContextLines = 20;
+
 @implementation MacControlSearchService {
     DietCodeControlWindowBridge* _windowBridge;
 }
@@ -180,6 +182,11 @@ using namespace dietcode::platform::macos;
         return nil;
     }
     NSInteger maxResults = params[@"maxResults"] ? [params[@"maxResults"] integerValue] : 100;
+    if (maxResults <= 0) {
+        *outErrCode = @"invalid_params";
+        *outErrMsg = @"maxResults must be greater than zero.";
+        return nil;
+    }
     if (maxResults > kMaxGrepResults) {
         *outErrCode = @"too_many_results";
         *outErrMsg = [NSString stringWithFormat:@"maxResults exceeds limit of %ld.", (long)kMaxGrepResults];
@@ -242,6 +249,16 @@ using namespace dietcode::platform::macos;
     }
     NSInteger before = params[@"before"] ? [params[@"before"] integerValue] : 2;
     NSInteger after = params[@"after"] ? [params[@"after"] integerValue] : 2;
+    if (before < 0 || after < 0) {
+        *outErrCode = @"invalid_params";
+        *outErrMsg = @"before and after must be non-negative integers.";
+        return nil;
+    }
+    if (before > kMaxSearchContextLines || after > kMaxSearchContextLines) {
+        *outErrCode = @"response_too_large";
+        *outErrMsg = [NSString stringWithFormat:@"before and after must be <= %ld.", (long)kMaxSearchContextLines];
+        return nil;
+    }
     NSInteger resultOffset = params[@"resultOffset"] ? MAX([params[@"resultOffset"] integerValue], 0) : 0;
     BOOL caseSensitive = [params[@"caseSensitive"] boolValue];
     NSArray* includes = params[@"include"] ?: @[];
@@ -336,14 +353,24 @@ using namespace dietcode::platform::macos;
     todoParams[@"query"] = @"TODO";
     NSArray* markers = @[@"TODO", @"FIXME", @"HACK", @"NOTE"];
     NSMutableArray* all = [NSMutableArray array];
+    NSInteger requestedMax = params[@"maxResults"] ? [params[@"maxResults"] integerValue] : 100;
+    if (requestedMax <= 0) {
+        *outErrCode = @"invalid_params";
+        *outErrMsg = @"maxResults must be greater than zero.";
+        return nil;
+    }
+    if (requestedMax > kMaxGrepResults) {
+        *outErrCode = @"too_many_results";
+        *outErrMsg = [NSString stringWithFormat:@"maxResults exceeds limit of %ld.", (long)kMaxGrepResults];
+        return nil;
+    }
     for (NSString* marker in markers) {
         NSMutableDictionary* markerParams = [todoParams mutableCopy];
         markerParams[@"query"] = marker;
-        markerParams[@"maxResults"] = params[@"maxResults"] ?: @100;
+        markerParams[@"maxResults"] = @(requestedMax);
         NSDictionary* subParams = markerParams;
         NSString* ws = workspace;
         NSInteger maxResults = [subParams[@"maxResults"] integerValue];
-        if (maxResults > kMaxGrepResults) maxResults = kMaxGrepResults;
         std::string folder = StdStringFromNSString(ws);
         NSArray* includes = subParams[@"include"] ?: @[];
         NSArray* excludes = subParams[@"exclude"] ?: @[];

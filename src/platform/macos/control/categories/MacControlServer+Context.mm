@@ -312,6 +312,11 @@
         });
 
         NSInteger requestedMax = params[@"maxResults"] ? [params[@"maxResults"] integerValue] : kMaxGrepResults;
+        if (requestedMax <= 0) {
+            *outErrCode = @"invalid_params";
+            *outErrMsg = @"maxResults must be greater than zero.";
+            return;
+        }
         if (requestedMax > kMaxGrepResults) {
             *outErrCode = @"response_too_large";
             *outErrMsg = [NSString stringWithFormat:@"maxResults exceeds limit of %ld.", (long)kMaxGrepResults];

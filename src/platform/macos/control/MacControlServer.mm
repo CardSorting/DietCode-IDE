@@ -1144,6 +1144,7 @@
         else if ([stringCode isEqualToString:@"verification_failed"] || [stringCode isEqualToString:@"verify_failed"] || [stringCode isEqualToString:@"patch_failed"]) numericCode = @(4004);
         else if ([stringCode isEqualToString:@"rollback_conflict"] || [stringCode isEqualToString:@"rollback_failed"]) numericCode = @(4005);
         else if ([stringCode isEqualToString:@"permission_denied"]) numericCode = @(4006);
+        else if ([stringCode isEqualToString:@"task_not_active"]) numericCode = @(4007);
     }
     
     NSDictionary* resp = @{

@@ -164,9 +164,164 @@ def main():
                 os.remove(py_err_path)
 
         # ---------------------------------------------------------------
-        # Test 4: combo.cancel returns correct shape
+        # Test 4: validation failures still expose root syntaxDanger=False
         # ---------------------------------------------------------------
-        print("\nTest 4: combo.cancel returns cancelled=True and comboId echo")
+        print("\nTest 4: validation failure shape includes syntaxDanger=False")
+        res_missing = call(sock, token, "patch.validate", {
+            "path": "missing_ergonomics_target.py",
+            "patch": (
+                "--- missing_ergonomics_target.py\n"
+                "+++ missing_ergonomics_target.py\n"
+                "@@ -1 +1 @@\n"
+                "-old\n"
+                "+new\n"
+            )
+        })
+        print(f"Missing target validation result: {json.dumps(res_missing, indent=2)}")
+        assert res_missing.get("ok"), "patch.validate RPC should return validation object for missing target"
+        missing_validation = res_missing.get("result", {}).get("validation", {})
+        assert missing_validation.get("ok") == False, "Missing target should fail validation"
+        assert missing_validation.get("syntaxDanger") == False, \
+            "Validation failure should still report syntaxDanger=False at root"
+        print("Test 4: PASSED")
+
+        # ---------------------------------------------------------------
+        # Test 5: patch.preview mirrors syntaxDanger at the response root
+        # ---------------------------------------------------------------
+        print("\nTest 5: patch.preview reports root syntaxDanger")
+        py_preview_path = os.path.join(workspace_root, "test_preview_py.py")
+        with open(py_preview_path, "w") as f:
+            f.write("def preview_ok():\n    return 42\n")
+
+        try:
+            patch_preview = (
+                "--- test_preview_py.py\n"
+                "+++ test_preview_py.py\n"
+                "@@ -1,2 +1,2 @@\n"
+                "-def preview_ok():\n"
+                "+def preview_ok(:\n"
+                "     return 42\n"
+            )
+            res_preview = call(sock, token, "patch.preview", {
+                "path": "test_preview_py.py",
+                "patch": patch_preview
+            })
+            print(f"patch.preview syntax result: {json.dumps(res_preview, indent=2)}")
+            assert res_preview.get("ok"), "patch.preview RPC failed"
+            preview_result = res_preview.get("result", {})
+            assert preview_result.get("syntaxDanger") == True, \
+                "patch.preview should mirror syntaxDanger=True at response root"
+            assert preview_result.get("syntaxWarning"), \
+                "patch.preview should mirror syntaxWarning at response root"
+            print("Test 5: PASSED")
+        finally:
+            if os.path.exists(py_preview_path):
+                os.remove(py_preview_path)
+
+        # ---------------------------------------------------------------
+        # Test 6: terminal task state is preserved on rejected follow-up
+        # ---------------------------------------------------------------
+        print("\nTest 6: task terminal state is not overwritten by rejected follow-up")
+        res_task = call(sock, token, "task.start", {
+            "goal": "ergonomics terminal state regression"
+        })
+        print(f"task.start result: {json.dumps(res_task, indent=2)}")
+        assert res_task.get("ok"), "task.start RPC failed"
+        task_id = res_task.get("result", {}).get("taskId")
+        assert task_id, "task.start did not return taskId"
+
+        res_complete = call(sock, token, "task.runLoop", {
+            "taskId": task_id,
+            "steps": []
+        })
+        print(f"task.runLoop completion result: {json.dumps(res_complete, indent=2)}")
+        assert res_complete.get("ok"), "task.runLoop empty completion RPC failed"
+        assert res_complete.get("result", {}).get("task", {}).get("status") == "complete", \
+            "Empty runLoop should complete the task"
+
+        res_step_after_complete = call(sock, token, "task.step", {
+            "taskId": task_id,
+            "step": {"type": "contextSnapshot"}
+        })
+        print(f"task.step after complete result: {json.dumps(res_step_after_complete, indent=2)}")
+        assert res_step_after_complete.get("ok"), "task.step rejection should be returned in stepResult"
+        step_result = res_step_after_complete.get("result", {}).get("stepResult", {})
+        assert step_result.get("ok") == False, "task.step after complete should be rejected"
+        assert step_result.get("error", {}).get("code") == "task_not_active", \
+            "task.step after complete should use task_not_active, not budget_exceeded"
+        assert res_step_after_complete.get("result", {}).get("task", {}).get("status") == "complete", \
+            "Rejected follow-up must not overwrite complete status"
+
+        res_cancel_complete = call(sock, token, "task.cancel", {"taskId": task_id})
+        print(f"task.cancel after complete result: {json.dumps(res_cancel_complete, indent=2)}")
+        assert not res_cancel_complete.get("ok"), "task.cancel on complete task should return an error"
+        assert res_cancel_complete.get("error", {}).get("string_code") == "task_not_active", \
+            "task.cancel on complete task should use task_not_active"
+        print("Test 6: PASSED")
+
+        # ---------------------------------------------------------------
+        # Test 7: read/search invalid params fail explicitly
+        # ---------------------------------------------------------------
+        print("\nTest 7: read/search invalid params fail explicitly")
+        contract_path = os.path.join(workspace_root, "test_contracts.txt")
+        with open(contract_path, "w") as f:
+            f.write("alpha\nbeta\ngamma\n")
+
+        try:
+            invalid_cases = [
+                (
+                    "file.readRange missing startLine",
+                    "file.readRange",
+                    {"path": "test_contracts.txt", "endLine": 1},
+                    "invalid_params",
+                ),
+                (
+                    "file.readAround negative context",
+                    "file.readAround",
+                    {"path": "test_contracts.txt", "line": 1, "before": -1},
+                    "invalid_params",
+                ),
+                (
+                    "search.files zero maxResults",
+                    "search.files",
+                    {"query": "test", "maxResults": 0},
+                    "invalid_params",
+                ),
+                (
+                    "search.text excessive context",
+                    "search.text",
+                    {"query": "alpha", "before": 21},
+                    "response_too_large",
+                ),
+                (
+                    "search.todo negative maxResults",
+                    "search.todo",
+                    {"maxResults": -1},
+                    "invalid_params",
+                ),
+                (
+                    "analysis.searchRanked negative maxResults",
+                    "analysis.searchRanked",
+                    {"query": "alpha", "maxResults": -1},
+                    "invalid_params",
+                ),
+            ]
+
+            for label, method, params, expected_code in invalid_cases:
+                res_invalid = call(sock, token, method, params)
+                print(f"{label}: {json.dumps(res_invalid, indent=2)}")
+                assert not res_invalid.get("ok"), f"{label} should fail"
+                assert res_invalid.get("error", {}).get("string_code") == expected_code, \
+                    f"{label} should use {expected_code}"
+            print("Test 7: PASSED")
+        finally:
+            if os.path.exists(contract_path):
+                os.remove(contract_path)
+
+        # ---------------------------------------------------------------
+        # Test 8: combo.cancel returns correct shape
+        # ---------------------------------------------------------------
+        print("\nTest 8: combo.cancel returns cancelled=True and comboId echo")
         # We can't start a real combo without a full schemaVersion 1.6.2 plan, so
         # just verify that an unknown comboId returns a proper error (not a silent no-op).
         res_cancel = call(sock, token, "combo.cancel", {"comboId": "nonexistent-test-id"})
@@ -176,7 +331,7 @@ def main():
             "combo.cancel with unknown comboId should return ok=False (error), not a silent no-op"
         assert res_cancel.get("error"), \
             "combo.cancel error response must include an error object"
-        print("Test 4: PASSED")
+        print("Test 8: PASSED")
 
     print("\n=== All Ergonomics & Patch Validation Verification Cases Passed Successfully ===")
     return 0

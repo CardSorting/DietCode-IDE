@@ -8,6 +8,8 @@
 #include <vector>
 #include <string>
 
+static const NSInteger kMaxReadAroundContextLines = 500;
+
 @implementation DietCodeControlServer (File)
 
 - (void)executeFileMethod:(NSString*)method 
@@ -181,8 +183,18 @@
             return;
         }
         if ([method isEqualToString:@"file.readRange"]) {
+            if (params[@"startLine"] == nil || params[@"endLine"] == nil) {
+                *outErrCode = @"invalid_params";
+                *outErrMsg = @"startLine and endLine parameters required.";
+                return;
+            }
             NSInteger startLine = [params[@"startLine"] integerValue];
             NSInteger endLine = [params[@"endLine"] integerValue];
+            if (startLine <= 0 || endLine <= 0) {
+                *outErrCode = @"invalid_params";
+                *outErrMsg = @"startLine and endLine must be positive integers (1-indexed).";
+                return;
+            }
             NSString* rangeText = TextForLineRange(lines, startLine, endLine);
             if (!rangeText) {
                 *outErrCode = @"invalid_range";
@@ -206,6 +218,16 @@
             }
             NSInteger before = params[@"before"] ? [params[@"before"] integerValue] : 40;
             NSInteger after = params[@"after"] ? [params[@"after"] integerValue] : 80;
+            if (before < 0 || after < 0) {
+                *outErrCode = @"invalid_params";
+                *outErrMsg = @"before and after must be non-negative integers.";
+                return;
+            }
+            if (before > kMaxReadAroundContextLines || after > kMaxReadAroundContextLines) {
+                *outErrCode = @"response_too_large";
+                *outErrMsg = [NSString stringWithFormat:@"before and after must be <= %ld.", (long)kMaxReadAroundContextLines];
+                return;
+            }
             NSInteger startLine = MAX(1, line - before);
             NSInteger endLine = MIN((NSInteger)lines.count, line + after);
             NSString* rangeText = TextForLineRange(lines, startLine, endLine);

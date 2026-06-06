@@ -45,7 +45,7 @@ typedef void (^MacControlMethodExecutor)(NSString* method, NSDictionary* params,
                        outErrMsg:(NSString**)outErrMsg;
 
 // Helpers that might be useful externally if needed, but primarily internal
-- (BOOL)task:(NSMutableDictionary*)task canConsumeStep:(NSDictionary*)step error:(NSString**)errorOut;
+- (BOOL)task:(NSMutableDictionary*)task canConsumeStep:(NSDictionary*)step error:(NSString**)errorOut errorCode:(NSString**)errorCodeOut;
 - (NSDictionary*)serializableTask:(NSMutableDictionary*)task;
 - (NSDictionary*)executeWorkbenchStep:(NSDictionary*)step task:(NSMutableDictionary*)task;
 - (NSDictionary*)primitiveForWorkbenchStep:(NSDictionary*)step;

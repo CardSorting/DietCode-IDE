@@ -105,6 +105,12 @@
         *outErrMsg = @"Unknown taskId.";
         return nil;
     }
+    NSString* status = task[@"status"] ?: @"";
+    if (![status isEqualToString:@"active"]) {
+        *outErrCode = @"task_not_active";
+        *outErrMsg = [NSString stringWithFormat:@"Task is not active (status: %@).", status];
+        return nil;
+    }
     task[@"status"] = @"cancelled";
     task[@"cancelledAt"] = ISODateString([NSDate date]);
     return @{ @"cancelled": @YES, @"task": [self serializableTask:task] };
@@ -124,7 +130,7 @@
     NSDictionary* stepResult = [self executeWorkbenchStep:step task:task];
     [task[@"steps"] addObject:step];
     [task[@"results"] addObject:stepResult];
-    if (![stepResult[@"ok"] boolValue]) {
+    if (![stepResult[@"ok"] boolValue] && [task[@"status"] isEqualToString:@"active"]) {
         task[@"status"] = @"blocked";
     }
     return @{ @"stepResult": stepResult, @"task": [self serializableTask:task] };
@@ -153,7 +159,9 @@
         [task[@"results"] addObject:stepResult];
         [results addObject:stepResult];
         if (![stepResult[@"ok"] boolValue]) {
-            task[@"status"] = @"blocked";
+            if ([task[@"status"] isEqualToString:@"active"]) {
+                task[@"status"] = @"blocked";
+            }
             break;
         }
         if ([step[@"type"] isEqualToString:@"verify"]) {
@@ -241,13 +249,10 @@
     };
 }
 
-- (BOOL)task:(NSMutableDictionary*)task canConsumeStep:(NSDictionary*)step error:(NSString**)errorOut {
+- (BOOL)task:(NSMutableDictionary*)task canConsumeStep:(NSDictionary*)step error:(NSString**)errorOut errorCode:(NSString**)errorCodeOut {
     NSString* taskStatus = task[@"status"] ?: @"";
-    // Terminal states — no further steps can be consumed once a task reaches these.
-    if ([taskStatus isEqualToString:@"cancelled"] ||
-        [taskStatus isEqualToString:@"complete"] ||
-        [taskStatus isEqualToString:@"verify_failed"] ||
-        [taskStatus isEqualToString:@"budget_exceeded"]) {
+    if (![taskStatus isEqualToString:@"active"]) {
+        if (errorCodeOut) *errorCodeOut = @"task_not_active";
         if (errorOut) *errorOut = [NSString stringWithFormat:@"Task is not active (status: %@).", taskStatus];
         return NO;
     }
@@ -256,6 +261,7 @@
     NSInteger maxDuration = budget[@"maxDurationMs"] ? [budget[@"maxDurationMs"] integerValue] : 300000;
     if (startedAt && [[NSDate date] timeIntervalSinceDate:startedAt] * 1000.0 > maxDuration) {
         task[@"status"] = @"budget_exceeded";
+        if (errorCodeOut) *errorCodeOut = @"budget_exceeded";
         if (errorOut) *errorOut = @"Task exceeded maxDurationMs.";
         return NO;
     }
@@ -263,6 +269,7 @@
     if ([type isEqualToString:@"patch"] || [type isEqualToString:@"patchBatch"]) {
         NSInteger maxPatchBatches = budget[@"maxPatchBatches"] ? [budget[@"maxPatchBatches"] integerValue] : 3;
         if ([task[@"patchBatchesUsed"] integerValue] >= maxPatchBatches) {
+            if (errorCodeOut) *errorCodeOut = @"budget_exceeded";
             if (errorOut) *errorOut = @"Task exceeded maxPatchBatches.";
             return NO;
         }
@@ -270,6 +277,7 @@
     if ([type isEqualToString:@"verify"]) {
         NSInteger maxVerifyRuns = budget[@"maxVerifyRuns"] ? [budget[@"maxVerifyRuns"] integerValue] : 3;
         if ([task[@"verifyRunsUsed"] integerValue] >= maxVerifyRuns) {
+            if (errorCodeOut) *errorCodeOut = @"budget_exceeded";
             if (errorOut) *errorOut = @"Task exceeded maxVerifyRuns.";
             return NO;
         }
@@ -284,6 +292,7 @@
     }
     for (NSString* candidate in candidatePaths) {
         if (![self path:candidate isAllowedByScope:scope]) {
+            if (errorCodeOut) *errorCodeOut = @"outside_scope";
             if (errorOut) *errorOut = [NSString stringWithFormat:@"Path is outside task scope: %@", candidate];
             return NO;
         }
@@ -295,6 +304,7 @@
         [projectedTouched addObject:candidateAbs];
     }
     if (projectedTouched.count > (NSUInteger)maxFilesTouched) {
+        if (errorCodeOut) *errorCodeOut = @"budget_exceeded";
         if (errorOut) *errorOut = @"Task exceeded maxFilesTouched.";
         return NO;
     }
@@ -336,8 +346,9 @@
         return @{ @"ok": @NO, @"error": @{ @"code": @"confirmation_required", @"message": @"Combo steps cannot perform confirmed destructive operations." } };
     }
     NSString* err = nil;
-    if (task && ![self task:task canConsumeStep:step error:&err]) {
-        return @{ @"ok": @NO, @"error": @{ @"code": @"budget_exceeded", @"message": err ?: @"Task budget rejected step." } };
+    NSString* rejectCode = nil;
+    if (task && ![self task:task canConsumeStep:step error:&err errorCode:&rejectCode]) {
+        return @{ @"ok": @NO, @"error": @{ @"code": rejectCode ?: @"task_rejected", @"message": err ?: @"Task rejected step." } };
     }
     NSDictionary* primitive = [self primitiveForWorkbenchStep:step];
     NSString* method = primitive[@"method"];
