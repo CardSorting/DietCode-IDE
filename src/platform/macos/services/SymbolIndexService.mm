@@ -1,5 +1,5 @@
 #import "SymbolIndexService.hpp"
-#include "../../filesystem/PathUtils.hpp"
+#include "filesystem/PathUtils.hpp"
 #include <vector>
 #include <string>
 #include <algorithm>

@@ -1,11 +1,11 @@
 #include "MacWindow.hpp"
 #import "MacControlServer.hpp"
 
-#include "../../filesystem/FileService.hpp"
+#include "filesystem/FileService.hpp"
 #include "MacFileDialog.hpp"
-#include "../../search/FindInFile.hpp"
-#include "../../filesystem/GitService.hpp"
-#include "../../core/LSPClient.hpp"
+#include "search/FindInFile.hpp"
+#include "filesystem/GitService.hpp"
+#include "core/LSPClient.hpp"
 
 #import <Cocoa/Cocoa.h>
 

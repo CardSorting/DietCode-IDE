@@ -1,5 +1,5 @@
 #import "WorkspaceAnalysisService.hpp"
-#include "../../filesystem/PathUtils.hpp"
+#include "filesystem/PathUtils.hpp"
 #include <filesystem>
 #include <fstream>
 #include <vector>

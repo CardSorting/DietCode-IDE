@@ -1,6 +1,6 @@
 CXX := clang++
-CXXFLAGS := -std=c++20 -Wall -Wextra -Wpedantic -I./src
-OBJCXXFLAGS := -std=c++20 -Wall -Wextra -I./src -fobjc-arc
+CXXFLAGS := -std=c++20 -Wall -Wextra -Wpedantic -I./src -I./src/platform/macos/control -I./src/platform/macos/ui -I./src/platform/macos/services
+OBJCXXFLAGS := -std=c++20 -Wall -Wextra -I./src -I./src/platform/macos/control -I./src/platform/macos/ui -I./src/platform/macos/services -fobjc-arc
 BUILD_DIR := build
 APP_NAME := DietCode
 APP_BUNDLE := $(BUILD_DIR)/$(APP_NAME).app
@@ -18,30 +18,30 @@ CORE_CPP := \
 
 MACOS_MM := \
 	src/platform/macos/main.mm \
-	src/platform/macos/MacAppDelegate.mm \
-	src/platform/macos/MacWindow.mm \
-	src/platform/macos/MacMenu.mm \
-	src/platform/macos/MacFileDialog.mm \
-	src/platform/macos/MacClipboard.mm \
-	src/platform/macos/MacTextRendering.mm \
-	src/platform/macos/MacControlServer.mm \
-	src/platform/macos/MacControlSupport.mm \
-	src/platform/macos/MacControlPathSecurity.mm \
-	src/platform/macos/MacControlSerialization.mm \
-	src/platform/macos/MacControlDiffParsing.mm \
-	src/platform/macos/MacControlRecoveryStore.mm \
-	src/platform/macos/MacControlSearchService.mm \
-	src/platform/macos/MacControlPatchService.mm \
-	src/platform/macos/MacControlTaskRuntime.mm \
-	src/platform/macos/MacControlComboRuntime.mm \
-	src/platform/macos/MacControlRoutingPolicy.mm \
-	src/platform/macos/MacControlMethodCatalog.mm \
-	src/platform/macos/MacControlWindowBridge.mm \
-	src/platform/macos/SymbolIndexService.mm \
-	src/platform/macos/DiffAnalysisService.mm \
-	src/platform/macos/WorkspaceAnalysisService.mm \
-	src/platform/macos/BufferStateService.mm \
-	src/platform/macos/SubprocessRunner.mm \
+	src/platform/macos/ui/MacAppDelegate.mm \
+	src/platform/macos/ui/MacWindow.mm \
+	src/platform/macos/ui/MacMenu.mm \
+	src/platform/macos/ui/MacFileDialog.mm \
+	src/platform/macos/ui/MacClipboard.mm \
+	src/platform/macos/ui/MacTextRendering.mm \
+	src/platform/macos/control/MacControlServer.mm \
+	src/platform/macos/control/MacControlSupport.mm \
+	src/platform/macos/control/MacControlPathSecurity.mm \
+	src/platform/macos/control/MacControlSerialization.mm \
+	src/platform/macos/control/MacControlDiffParsing.mm \
+	src/platform/macos/control/MacControlRecoveryStore.mm \
+	src/platform/macos/control/MacControlSearchService.mm \
+	src/platform/macos/control/MacControlPatchService.mm \
+	src/platform/macos/control/MacControlTaskRuntime.mm \
+	src/platform/macos/control/MacControlComboRuntime.mm \
+	src/platform/macos/control/MacControlRoutingPolicy.mm \
+	src/platform/macos/control/MacControlMethodCatalog.mm \
+	src/platform/macos/control/MacControlWindowBridge.mm \
+	src/platform/macos/services/SymbolIndexService.mm \
+	src/platform/macos/services/DiffAnalysisService.mm \
+	src/platform/macos/services/WorkspaceAnalysisService.mm \
+	src/platform/macos/services/BufferStateService.mm \
+	src/platform/macos/services/SubprocessRunner.mm \
 	src/filesystem/GitService.mm \
 	src/filesystem/FileWatcher.mm \
 	src/core/LSPClient.mm

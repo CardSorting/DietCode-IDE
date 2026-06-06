@@ -1,6 +1,6 @@
 #import <Foundation/Foundation.h>
 #include "GitService.hpp"
-#include "../platform/macos/SubprocessRunner.hpp"
+#include "platform/macos/services/SubprocessRunner.hpp"
 #include <sstream>
 #include <filesystem>
 #include <iostream>

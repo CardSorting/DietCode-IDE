@@ -68,19 +68,21 @@ Files:
 - `src/platform/Clipboard.hpp`
 - `src/platform/Font.hpp`
 - `src/platform/Accessibility.hpp`
-- `src/platform/macos/MacControlSupport.hpp`
-- `src/platform/macos/MacControlPathSecurity.hpp`
-- `src/platform/macos/MacControlSerialization.hpp`
-- `src/platform/macos/MacControlDiffParsing.hpp`
-- `src/platform/macos/MacControlRecoveryStore.hpp`
-- `src/platform/macos/MacControlSearchService.hpp`
-- `src/platform/macos/MacControlPatchService.hpp`
-- `src/platform/macos/MacControlTaskRuntime.hpp`
-- `src/platform/macos/MacControlComboRuntime.hpp`
-- `src/platform/macos/MacControlRoutingPolicy.hpp`
-- `src/platform/macos/MacControlMethodCatalog.hpp`
-- `src/platform/macos/MacControlWindowBridge.hpp`
-- `src/platform/macos/*.mm`
+- `src/platform/macos/control/MacControlSupport.hpp`
+- `src/platform/macos/control/MacControlPathSecurity.hpp`
+- `src/platform/macos/control/MacControlSerialization.hpp`
+- `src/platform/macos/control/MacControlDiffParsing.hpp`
+- `src/platform/macos/control/MacControlRecoveryStore.hpp`
+- `src/platform/macos/control/MacControlSearchService.hpp`
+- `src/platform/macos/control/MacControlPatchService.hpp`
+- `src/platform/macos/control/MacControlTaskRuntime.hpp`
+- `src/platform/macos/control/MacControlComboRuntime.hpp`
+- `src/platform/macos/control/MacControlRoutingPolicy.hpp`
+- `src/platform/macos/control/MacControlMethodCatalog.hpp`
+- `src/platform/macos/control/MacControlWindowBridge.hpp`
+- `src/platform/macos/ui/*.hpp`
+- `src/platform/macos/services/*.hpp`
+- `src/platform/macos/**/*.mm`
 
 Verified boundary:
 

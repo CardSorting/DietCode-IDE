@@ -1,6 +1,6 @@
 #pragma once
 
-#include "../FileDialog.hpp"
+#include "platform/FileDialog.hpp"
 
 namespace dietcode::platform::macos {
 

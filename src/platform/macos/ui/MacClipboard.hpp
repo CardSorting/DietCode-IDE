@@ -1,6 +1,6 @@
 #pragma once
 
-#include "../Clipboard.hpp"
+#include "platform/Clipboard.hpp"
 
 namespace dietcode::platform::macos {
 
