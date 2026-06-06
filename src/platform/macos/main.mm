@@ -1,4 +1,5 @@
 #include "MacAppDelegate.hpp"
+#include "MacWindow.hpp"
 
 #import <Cocoa/Cocoa.h>
 #include <errno.h>
@@ -14,6 +15,7 @@
 static char g_sockPath[1024] = {0};
 static char g_tokenPath[1024] = {0};
 static volatile sig_atomic_t g_shouldTerminate = 0;
+static CFRunLoopRef g_headlessRunLoop = NULL;
 
 void handle_termination_signal(int sig) {
     (void)sig;
@@ -28,7 +30,11 @@ void handle_termination_signal(int sig) {
         if (g_tokenPath[0] != '\0') {
             unlink(g_tokenPath);
         }
-        [NSApp terminate:nil];
+        if (g_headlessRunLoop != NULL) {
+            CFRunLoopStop(g_headlessRunLoop);
+        } else {
+            [NSApp terminate:nil];
+        }
     });
 }
 
@@ -166,6 +172,24 @@ int main(int argc, const char * argv[]) {
     DietCodeAppDelegate *delegate = [[DietCodeAppDelegate alloc] init];
     delegate.isHeadless = headless;
     [app setDelegate:delegate];
+
+    if (headless) {
+      NSString* cwd = [[NSFileManager defaultManager] currentDirectoryPath];
+      BOOL isDirectory = NO;
+      if ([[NSFileManager defaultManager] fileExistsAtPath:cwd isDirectory:&isDirectory] && isDirectory) {
+        [delegate.windowController openWorkspaceFolder:cwd];
+      }
+      g_headlessRunLoop = CFRunLoopGetMain();
+      while (!g_shouldTerminate) {
+        @autoreleasepool {
+          CFRunLoopRunInMode(kCFRunLoopDefaultMode, 1.0, true);
+        }
+      }
+      [delegate.windowController cleanupProcesses];
+      g_headlessRunLoop = NULL;
+      return 0;
+    }
+
     [app run];
   }
 

@@ -319,9 +319,70 @@ def main():
                 os.remove(contract_path)
 
         # ---------------------------------------------------------------
-        # Test 8: combo.cancel returns correct shape
+        # Test 8: terminal/verify/repair invalid params fail before side effects
         # ---------------------------------------------------------------
-        print("\nTest 8: combo.cancel returns cancelled=True and comboId echo")
+        print("\nTest 8: terminal/verify/repair invalid params fail before side effects")
+        side_effect_free_cases = [
+            (
+                "terminal.run empty command",
+                "terminal.run",
+                {"command": ""},
+                "invalid_params",
+            ),
+            (
+                "verify.run empty command",
+                "verify.run",
+                {"command": ""},
+                "invalid_params",
+            ),
+            (
+                "repair context outside workspace",
+                "repair.fromPatchFailure",
+                {
+                    "files": [
+                        {
+                            "path": "/tmp/outside_repair_context.txt",
+                            "ranges": [{"startLine": 1, "endLine": 1}],
+                        }
+                    ]
+                },
+                "outside_workspace",
+            ),
+            (
+                "repair context invalid range",
+                "repair.fromPatchFailure",
+                {
+                    "files": [
+                        {
+                            "path": "test_contracts.txt",
+                            "ranges": [{"startLine": 0, "endLine": 1}],
+                        }
+                    ]
+                },
+                "invalid_params",
+            ),
+        ]
+
+        contract_path = os.path.join(workspace_root, "test_contracts.txt")
+        with open(contract_path, "w") as f:
+            f.write("alpha\nbeta\ngamma\n")
+
+        try:
+            for label, method, params, expected_code in side_effect_free_cases:
+                res_invalid = call(sock, token, method, params)
+                print(f"{label}: {json.dumps(res_invalid, indent=2)}")
+                assert not res_invalid.get("ok"), f"{label} should fail"
+                assert res_invalid.get("error", {}).get("string_code") == expected_code, \
+                    f"{label} should use {expected_code}"
+            print("Test 8: PASSED")
+        finally:
+            if os.path.exists(contract_path):
+                os.remove(contract_path)
+
+        # ---------------------------------------------------------------
+        # Test 9: combo.cancel returns correct shape
+        # ---------------------------------------------------------------
+        print("\nTest 9: combo.cancel returns cancelled=True and comboId echo")
         # We can't start a real combo without a full schemaVersion 1.6.2 plan, so
         # just verify that an unknown comboId returns a proper error (not a silent no-op).
         res_cancel = call(sock, token, "combo.cancel", {"comboId": "nonexistent-test-id"})
@@ -331,7 +392,7 @@ def main():
             "combo.cancel with unknown comboId should return ok=False (error), not a silent no-op"
         assert res_cancel.get("error"), \
             "combo.cancel error response must include an error object"
-        print("Test 8: PASSED")
+        print("Test 9: PASSED")
 
     print("\n=== All Ergonomics & Patch Validation Verification Cases Passed Successfully ===")
     return 0

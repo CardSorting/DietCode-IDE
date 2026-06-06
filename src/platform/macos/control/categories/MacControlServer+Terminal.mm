@@ -42,12 +42,22 @@
 
     if ([method isEqualToString:@"terminal.run"]) {
         NSString* command = params[@"command"];
-        if (!command) {
+        if (![command isKindOfClass:[NSString class]] || command.length == 0) {
             *outErrCode = @"invalid_params";
-            *outErrMsg = @"command string required.";
+            *outErrMsg = @"command string required and must be non-empty.";
             return;
         }
-        NSString* cwd = params[@"cwd"];
+        NSString* ws = [self safeWorkspacePath];
+        id cwdParam = params[@"cwd"];
+        if (cwdParam != nil && ![cwdParam isKindOfClass:[NSString class]]) {
+            *outErrCode = @"invalid_params";
+            *outErrMsg = @"cwd must be a string when provided.";
+            return;
+        }
+        NSString* cwd = cwdParam;
+        if (cwd.length > 0 && ws.length > 0) {
+            cwd = AbsolutePathForRPCPath(cwd, ws);
+        }
         BOOL show = params[@"show"] ? [params[@"show"] boolValue] : YES;
         
         NSString* errStr = nil;
@@ -82,6 +92,11 @@
     // Verification commands
     if ([method isEqualToString:@"verify.run"]) {
         NSString* command = params[@"command"] ?: @"";
+        if (![command isKindOfClass:[NSString class]] || command.length == 0) {
+            *outErrCode = @"invalid_params";
+            *outErrMsg = @"command string required and must be non-empty.";
+            return;
+        }
         NSArray<NSString*>* allowed = VerifyCommandsAllowlist();
         if (!VerifyCommandIsAllowed(command, allowed)) {
             *outErrCode = @"invalid_params";
@@ -89,8 +104,19 @@
             return;
         }
         NSString* ws = [self safeWorkspacePath];
-        NSString* cwd = params[@"cwd"] ?: ws;
-        if (cwd.length > 0 && ws && !PathIsInsideWorkspace(cwd, ws)) {
+        if (ws.length == 0) {
+            *outErrCode = @"invalid_request";
+            *outErrMsg = @"No open workspace.";
+            return;
+        }
+        id cwdParam = params[@"cwd"];
+        if (cwdParam != nil && ![cwdParam isKindOfClass:[NSString class]]) {
+            *outErrCode = @"invalid_params";
+            *outErrMsg = @"cwd must be a string when provided.";
+            return;
+        }
+        NSString* cwd = AbsolutePathForRPCPath(cwdParam ?: ws, ws);
+        if (cwd.length > 0 && !PathIsInsideWorkspace(cwd, ws)) {
             *outErrCode = @"outside_workspace";
             *outErrMsg = @"verify.run cwd must be inside workspace.";
             return;

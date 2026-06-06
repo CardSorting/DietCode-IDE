@@ -29,6 +29,7 @@ using namespace dietcode::platform::macos;
         self.unifiedDiagnostics = [NSMutableArray array];
         self.sessionLastSearches = [NSMutableArray array];
         self.sessionRecentCommands = [NSMutableArray array];
+        self.controlServer = [[DietCodeControlServer alloc] initWithWindowController:self];
         
         self.currentFontSize = 13;
         self.currentWordWrap = YES;
@@ -55,6 +56,7 @@ using namespace dietcode::platform::macos;
 
         terminalPid_ = -1;
         terminalMasterFd_ = -1;
+        [self.controlServer start];
     }
     return self;
 }

@@ -18,10 +18,6 @@ using namespace dietcode::platform::macos;
     }
 }
 
-- (void)setIsHeadless:(BOOL)isHeadless {
-    self.isHeadless = isHeadless;
-}
-
 - (NSString*)workspacePath {
     return self.openedFolderPath;
 }
@@ -506,7 +502,11 @@ using namespace dietcode::platform::macos;
     if (self.isHeadless) {
         NSLog(@"%@", line);
     }
+    if (!self.controlLogTextView) {
+        return;
+    }
     dispatch_async(dispatch_get_main_queue(), ^{
+        if (!self.controlLogTextView) return;
         NSTextStorage* storage = self.controlLogTextView.textStorage;
         [storage beginEditing];
         [storage appendAttributedString:[[NSAttributedString alloc] initWithString:[line stringByAppendingString:@"\n"] attributes:@{
@@ -519,7 +519,11 @@ using namespace dietcode::platform::macos;
 }
 
 - (void)setControlActiveCommand:(NSString*)method caller:(NSString*)caller {
+    if (!self.controlActiveLabel) {
+        return;
+    }
     dispatch_async(dispatch_get_main_queue(), ^{
+        if (!self.controlActiveLabel) return;
         if (method) {
             [self.controlActiveLabel setStringValue:[NSString stringWithFormat:@"Active Command: %@ (Caller: %@)", method, caller]];
         } else {
@@ -529,11 +533,17 @@ using namespace dietcode::platform::macos;
 }
 
 - (void)showBottomPanelTab:(NSString*)identifier {
+    if (!self.bottomPanel || !self.bottomTabView) {
+        return;
+    }
     self.bottomPanel.hidden = NO;
     [self.bottomTabView selectTabViewItemWithIdentifier:identifier];
 }
 
 - (void)updateControlStatusIndicator {
+    if (!self.controlStatusLabel) {
+        return;
+    }
     if (self.externalControlEnabled) {
         [self.controlStatusLabel setStringValue:@"● Control: Active"];
         [self.controlStatusLabel setTextColor:[NSColor systemGreenColor]];

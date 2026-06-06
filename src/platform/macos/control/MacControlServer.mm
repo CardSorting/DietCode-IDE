@@ -40,6 +40,13 @@
 #import "MacControlComboRuntime.hpp"
 #import "MacControlServer+Private.hpp"
 
+static NSString* DietCodeReadTextFileForControlServer(NSString* path) {
+    if (path.length == 0) return nil;
+    NSStringEncoding encoding = NSUTF8StringEncoding;
+    NSError* error = nil;
+    return [NSString stringWithContentsOfFile:path usedEncoding:&encoding error:&error];
+}
+
 @interface DietCodeClientConnection : NSObject
 @property (nonatomic, assign) int fd;
 @property (nonatomic, assign) BOOL readEOF;
@@ -129,7 +136,9 @@
 }
 
 - (NSString*)safeTextForFileAtPath:(NSString*)path {
-    return [_windowBridge textForFileAtPath:path];
+    NSString* text = [_windowBridge textForFileAtPath:path];
+    if (text) return text;
+    return DietCodeReadTextFileForControlServer(path);
 }
 
 - (BOOL)safeReplaceTextInRange:(NSRange)range withText:(NSString*)text forFileAtPath:(NSString*)path {
@@ -899,20 +908,84 @@
     return NO;
 }
 
-- (NSDictionary*)repairContextForFailure:(NSString*)failure params:(NSDictionary*)params {
+- (NSDictionary*)repairContextForFailure:(NSString*)failure params:(NSDictionary*)params outErrCode:(NSString**)outErrCode outErrMsg:(NSString**)outErrMsg {
     NSString* ws = [self safeWorkspacePath];
+    if (ws.length == 0) {
+        if (outErrCode) *outErrCode = @"invalid_request";
+        if (outErrMsg) *outErrMsg = @"No open workspace.";
+        return nil;
+    }
+
     NSMutableArray* files = [NSMutableArray array];
-    for (NSDictionary* file in params[@"files"] ?: @[]) {
+    NSArray* requestedFiles = params[@"files"] ?: @[];
+    if (![requestedFiles isKindOfClass:[NSArray class]]) {
+        if (outErrCode) *outErrCode = @"invalid_params";
+        if (outErrMsg) *outErrMsg = @"files must be an array.";
+        return nil;
+    }
+
+    for (NSDictionary* file in requestedFiles) {
+        if (![file isKindOfClass:[NSDictionary class]]) {
+            if (outErrCode) *outErrCode = @"invalid_params";
+            if (outErrMsg) *outErrMsg = @"Every files entry must be an object.";
+            return nil;
+        }
         NSString* path = file[@"path"];
+        if (![path isKindOfClass:[NSString class]]) {
+            if (outErrCode) *outErrCode = @"invalid_params";
+            if (outErrMsg) *outErrMsg = @"Every files entry requires string path.";
+            return nil;
+        }
+        NSString* absPath = AbsolutePathForRPCPath(path, ws);
+        if (absPath.length == 0) {
+            if (outErrCode) *outErrCode = @"invalid_params";
+            if (outErrMsg) *outErrMsg = @"Every files entry requires path.";
+            return nil;
+        }
+        if (!PathIsInsideWorkspace(absPath, ws)) {
+            if (outErrCode) *outErrCode = @"outside_workspace";
+            if (outErrMsg) *outErrMsg = @"Repair context file path is outside workspace.";
+            return nil;
+        }
+        NSString* full = [self safeTextForFileAtPath:absPath];
+        if (!full) {
+            if (outErrCode) *outErrCode = @"invalid_request";
+            if (outErrMsg) *outErrMsg = [NSString stringWithFormat:@"Repair context file is not readable: %@", path];
+            return nil;
+        }
+        NSArray<NSString*>* lines = LinesFromText(full);
         NSMutableArray* ranges = [NSMutableArray array];
-        for (NSDictionary* range in file[@"ranges"] ?: @[]) {
+        NSArray* requestedRanges = file[@"ranges"] ?: @[];
+        if (![requestedRanges isKindOfClass:[NSArray class]]) {
+            if (outErrCode) *outErrCode = @"invalid_params";
+            if (outErrMsg) *outErrMsg = @"ranges must be an array.";
+            return nil;
+        }
+        for (NSDictionary* range in requestedRanges) {
+            if (![range isKindOfClass:[NSDictionary class]]) {
+                if (outErrCode) *outErrCode = @"invalid_params";
+                if (outErrMsg) *outErrMsg = @"Every ranges entry must be an object.";
+                return nil;
+            }
+            if (range[@"startLine"] == nil || range[@"endLine"] == nil) {
+                if (outErrCode) *outErrCode = @"invalid_params";
+                if (outErrMsg) *outErrMsg = @"Repair context ranges require startLine and endLine.";
+                return nil;
+            }
             NSInteger start = [range[@"startLine"] integerValue];
             NSInteger end = [range[@"endLine"] integerValue];
-            NSString* text = nil;
-            NSString* absPath = AbsolutePathForRPCPath(path, ws);
-            NSString* full = [self safeTextForFileAtPath:absPath];
-            if (full) text = TextForLineRange(LinesFromText(full), start, end);
-            [ranges addObject:@{ @"startLine": @(start), @"endLine": @(end), @"text": text ?: @"" }];
+            if (start <= 0 || end <= 0) {
+                if (outErrCode) *outErrCode = @"invalid_params";
+                if (outErrMsg) *outErrMsg = @"Repair context range lines must be positive integers.";
+                return nil;
+            }
+            NSString* text = TextForLineRange(lines, start, end);
+            if (!text) {
+                if (outErrCode) *outErrCode = @"invalid_range";
+                if (outErrMsg) *outErrMsg = @"Repair context range is outside the file.";
+                return nil;
+            }
+            [ranges addObject:@{ @"startLine": @(start), @"endLine": @(end), @"text": text }];
         }
         [files addObject:@{ @"path": path ?: @"", @"ranges": ranges }];
     }
@@ -962,7 +1035,8 @@
         NSString* ws = [self safeWorkspacePath];
         if (cwd && ws) {
             std::error_code ec;
-            std::filesystem::path cwdPath(StdStringFromNSString(cwd));
+            NSString* checkedCwd = AbsolutePathForRPCPath(cwd, ws);
+            std::filesystem::path cwdPath(StdStringFromNSString(checkedCwd));
             std::filesystem::path wsPath(StdStringFromNSString(ws));
             auto cwdAbs = std::filesystem::weakly_canonical(cwdPath, ec);
             if (ec) return @"Destructive";
@@ -1134,7 +1208,7 @@
         stringCode = code;
         if ([stringCode isEqualToString:@"invalid_request"]) numericCode = @(-32600);
         else if ([stringCode isEqualToString:@"method_not_found"]) numericCode = @(-32601);
-        else if ([stringCode isEqualToString:@"invalid_params"]) numericCode = @(-32602);
+        else if ([stringCode isEqualToString:@"invalid_params"] || [stringCode isEqualToString:@"invalid_range"]) numericCode = @(-32602);
         else if ([stringCode isEqualToString:@"request_too_large"] || [stringCode isEqualToString:@"response_too_large"] || [stringCode isEqualToString:@"too_many_results"] || [stringCode isEqualToString:@"file_too_large"]) numericCode = @(413);
         else if ([stringCode isEqualToString:@"not_found"]) numericCode = @(404);
         else if ([stringCode isEqualToString:@"already_exists"]) numericCode = @(409);

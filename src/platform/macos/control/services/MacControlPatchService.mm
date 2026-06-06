@@ -11,6 +11,14 @@
 #include <string>
 #include <vector>
 
+static NSString* DietCodeReadTextFileForPatchService(NSString* path) {
+    if (path.length == 0) return nil;
+    NSStringEncoding encoding = NSUTF8StringEncoding;
+    NSError* error = nil;
+    NSString* text = [NSString stringWithContentsOfFile:path usedEncoding:&encoding error:&error];
+    return text;
+}
+
 @implementation MacControlPatchService {
     DietCodeControlWindowBridge* _windowBridge;
     NSMutableArray<NSDictionary*>* _lastPatchRecords;
@@ -72,6 +80,9 @@
     }
 
     NSString* currentText = currentTextOverride ?: [_windowBridge textForFileAtPath:targetPath];
+    if (!currentText) {
+        currentText = DietCodeReadTextFileForPatchService(targetPath);
+    }
     if (!currentText) {
         result[@"rejectedReason"] = @"Target file is not readable.";
         return result;
@@ -140,6 +151,7 @@
     NSString* ws = [_windowBridge workspacePath];
     NSString* absPath = AbsolutePathForRPCPath(targetPath, ws);
     NSString* beforeText = [_windowBridge textForFileAtPath:absPath];
+    if (!beforeText) beforeText = DietCodeReadTextFileForPatchService(absPath);
     
     NSString* errStr = nil;
     BOOL ok = [_windowBridge applyPatchAtPath:absPath patchString:patchStr errorOut:&errStr];
@@ -149,7 +161,9 @@
         return nil;
     }
     
-    NSString* afterText = [_windowBridge textForFileAtPath:absPath] ?: @"";
+    NSString* afterText = [_windowBridge textForFileAtPath:absPath];
+    if (!afterText) afterText = DietCodeReadTextFileForPatchService(absPath);
+    if (!afterText) afterText = @"";
     [_lastPatchRecords removeAllObjects];
     [_lastPatchRecords addObject:@{
         @"path": absPath,
@@ -206,6 +220,7 @@
             return @{ @"dryRun": @(dryRun), @"applied": @NO, @"results": results };
         }
         NSString* beforeText = [_windowBridge textForFileAtPath:absPath];
+        if (!beforeText) beforeText = DietCodeReadTextFileForPatchService(absPath);
         [records addObject:@{ @"path": absPath ?: @"", @"beforeText": beforeText ?: @"", @"beforeHash": StableHashForString(beforeText ?: @""), @"patch": patchStr ?: @"" }];
     }
     
@@ -231,7 +246,9 @@
             return nil;
         }
         NSMutableDictionary* appliedRecord = [record mutableCopy];
-        NSString* afterText = [_windowBridge textForFileAtPath:record[@"path"]] ?: @"";
+        NSString* afterText = [_windowBridge textForFileAtPath:record[@"path"]];
+        if (!afterText) afterText = DietCodeReadTextFileForPatchService(record[@"path"]);
+        if (!afterText) afterText = @"";
         appliedRecord[@"postHash"] = StableHashForString(afterText);
         [applied addObject:appliedRecord];
     }

@@ -151,6 +151,40 @@ static const NSInteger kMaxReadAroundContextLines = 500;
             *outErrMsg = @"path parameter required.";
             return;
         }
+        if ([method isEqualToString:@"file.readRange"]) {
+            if (params[@"startLine"] == nil || params[@"endLine"] == nil) {
+                *outErrCode = @"invalid_params";
+                *outErrMsg = @"startLine and endLine parameters required.";
+                return;
+            }
+            NSInteger startLine = [params[@"startLine"] integerValue];
+            NSInteger endLine = [params[@"endLine"] integerValue];
+            if (startLine <= 0 || endLine <= 0) {
+                *outErrCode = @"invalid_params";
+                *outErrMsg = @"startLine and endLine must be positive integers (1-indexed).";
+                return;
+            }
+        }
+        if ([method isEqualToString:@"file.readAround"]) {
+            NSInteger line = [params[@"line"] integerValue];
+            if (line <= 0) {
+                *outErrCode = @"invalid_params";
+                *outErrMsg = @"line parameter must be a positive integer (1-indexed).";
+                return;
+            }
+            NSInteger before = params[@"before"] ? [params[@"before"] integerValue] : 40;
+            NSInteger after = params[@"after"] ? [params[@"after"] integerValue] : 80;
+            if (before < 0 || after < 0) {
+                *outErrCode = @"invalid_params";
+                *outErrMsg = @"before and after must be non-negative integers.";
+                return;
+            }
+            if (before > kMaxReadAroundContextLines || after > kMaxReadAroundContextLines) {
+                *outErrCode = @"response_too_large";
+                *outErrMsg = [NSString stringWithFormat:@"before and after must be <= %ld.", (long)kMaxReadAroundContextLines];
+                return;
+            }
+        }
         NSString* text = [self safeTextForFileAtPath:targetPath];
         if (!text) {
             *outErrCode = @"invalid_request";
@@ -183,18 +217,8 @@ static const NSInteger kMaxReadAroundContextLines = 500;
             return;
         }
         if ([method isEqualToString:@"file.readRange"]) {
-            if (params[@"startLine"] == nil || params[@"endLine"] == nil) {
-                *outErrCode = @"invalid_params";
-                *outErrMsg = @"startLine and endLine parameters required.";
-                return;
-            }
             NSInteger startLine = [params[@"startLine"] integerValue];
             NSInteger endLine = [params[@"endLine"] integerValue];
-            if (startLine <= 0 || endLine <= 0) {
-                *outErrCode = @"invalid_params";
-                *outErrMsg = @"startLine and endLine must be positive integers (1-indexed).";
-                return;
-            }
             NSString* rangeText = TextForLineRange(lines, startLine, endLine);
             if (!rangeText) {
                 *outErrCode = @"invalid_range";
@@ -211,23 +235,8 @@ static const NSInteger kMaxReadAroundContextLines = 500;
         }
         if ([method isEqualToString:@"file.readAround"]) {
             NSInteger line = [params[@"line"] integerValue];
-            if (line <= 0) {
-                *outErrCode = @"invalid_params";
-                *outErrMsg = @"line parameter must be a positive integer (1-indexed).";
-                return;
-            }
             NSInteger before = params[@"before"] ? [params[@"before"] integerValue] : 40;
             NSInteger after = params[@"after"] ? [params[@"after"] integerValue] : 80;
-            if (before < 0 || after < 0) {
-                *outErrCode = @"invalid_params";
-                *outErrMsg = @"before and after must be non-negative integers.";
-                return;
-            }
-            if (before > kMaxReadAroundContextLines || after > kMaxReadAroundContextLines) {
-                *outErrCode = @"response_too_large";
-                *outErrMsg = [NSString stringWithFormat:@"before and after must be <= %ld.", (long)kMaxReadAroundContextLines];
-                return;
-            }
             NSInteger startLine = MAX(1, line - before);
             NSInteger endLine = MIN((NSInteger)lines.count, line + after);
             NSString* rangeText = TextForLineRange(lines, startLine, endLine);

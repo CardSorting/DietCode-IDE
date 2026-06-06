@@ -582,7 +582,7 @@
         NSString* failure = @"patch";
         if ([method isEqualToString:@"repair.fromCompilerErrors"]) failure = @"compiler";
         else if ([method isEqualToString:@"repair.fromTestFailures"]) failure = @"test";
-        *outResult = [self repairContextForFailure:failure params:params];
+        *outResult = [self repairContextForFailure:failure params:params outErrCode:outErrCode outErrMsg:outErrMsg];
         return;
     }
 
