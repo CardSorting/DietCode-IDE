@@ -80,7 +80,24 @@ Files:
 - `src/platform/macos/control/MacControlRoutingPolicy.hpp`
 - `src/platform/macos/control/MacControlMethodCatalog.hpp`
 - `src/platform/macos/control/MacControlWindowBridge.hpp`
-- `src/platform/macos/ui/*.hpp`
+- `src/platform/macos/ui/MacWindow.hpp`
+- `src/platform/macos/ui/MacWindow.mm`
+- `src/platform/macos/ui/MacWindow+Layout.mm`
+- `src/platform/macos/ui/MacWindow+Tabs.mm`
+- `src/platform/macos/ui/MacWindow+Files.mm`
+- `src/platform/macos/ui/MacWindow+Search.mm`
+- `src/platform/macos/ui/MacWindow+Git.mm`
+- `src/platform/macos/ui/MacWindow+Language.mm`
+- `src/platform/macos/ui/MacWindow+Diagnostics.mm`
+- `src/platform/macos/ui/MacWindow+RunTerminal.mm`
+- `src/platform/macos/ui/MacWindow+Settings.mm`
+- `src/platform/macos/ui/MacWindow+Recovery.mm`
+- `src/platform/macos/ui/MacWindow+AgentAPI.mm`
+- `src/platform/macos/ui/MacWindow+CommandPalette.mm`
+- `src/platform/macos/ui/MacWindowUtilities.hpp`
+- `src/platform/macos/ui/MacWindowUtilities.mm`
+- `src/platform/macos/ui/MacEditorComponents.hpp`
+- `src/platform/macos/ui/MacEditorComponents.mm`
 - `src/platform/macos/services/*.hpp`
 - `src/platform/macos/**/*.mm`
 
