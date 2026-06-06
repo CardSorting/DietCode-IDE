@@ -199,12 +199,17 @@
         }
         if ([method isEqualToString:@"file.readAround"]) {
             NSInteger line = [params[@"line"] integerValue];
+            if (line <= 0) {
+                *outErrCode = @"invalid_params";
+                *outErrMsg = @"line parameter must be a positive integer (1-indexed).";
+                return;
+            }
             NSInteger before = params[@"before"] ? [params[@"before"] integerValue] : 40;
             NSInteger after = params[@"after"] ? [params[@"after"] integerValue] : 80;
             NSInteger startLine = MAX(1, line - before);
             NSInteger endLine = MIN((NSInteger)lines.count, line + after);
             NSString* rangeText = TextForLineRange(lines, startLine, endLine);
-            if (!rangeText || line < 1 || line > (NSInteger)lines.count) {
+            if (!rangeText || line > (NSInteger)lines.count) {
                 *outErrCode = @"invalid_range";
                 *outErrMsg = @"Invalid line.";
                 return;

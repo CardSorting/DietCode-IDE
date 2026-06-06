@@ -25,6 +25,11 @@
                                patch:(NSString*)patch 
                          currentText:(NSString*)currentTextOverride;
 
+- (NSDictionary*)validatePatchAtPath:(NSString*)path 
+                               patch:(NSString*)patch 
+                         currentText:(NSString*)currentTextOverride
+                             options:(NSDictionary*)options;
+
 - (BOOL)restorePatchRecords:(NSArray<NSDictionary*>*)records error:(NSString**)errorOut;
 
 @property (nonatomic, readonly) NSArray<NSDictionary*>* lastPatchRecords;

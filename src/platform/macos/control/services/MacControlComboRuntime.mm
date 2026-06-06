@@ -221,7 +221,7 @@
                 if (dirty && ![params[@"allowDirtyBuffer"] boolValue]) {
                     [errors addObject:RuntimeError(@"dirty_buffer_conflict", @"Mutation targets a dirty editor buffer; set allowDirtyBuffer explicitly for buffer-domain patching.", stepId, chip, @"validate", YES)];
                 }
-                NSDictionary* validation = [_patchService validatePatchAtPath:item[@"path"] patch:item[@"patch"] currentText:nil];
+                NSDictionary* validation = [_patchService validatePatchAtPath:item[@"path"] patch:item[@"patch"] currentText:nil options:params];
                 if (![validation[@"ok"] boolValue]) {
                     [errors addObject:RuntimeError(@"patch_failed", validation[@"rejectedReason"] ?: @"Patch validation failed.", stepId, chip, @"validate", YES)];
                 }
@@ -293,6 +293,37 @@
             [_pathLocks removeObjectForKey:path];
         }
     }
+}
+
+// Terminal combo states that should not be overwritten by a cancel request.
+static NSSet* _terminalComboStatuses(void) {
+    static NSSet* s = nil;
+    static dispatch_once_t tok;
+    dispatch_once(&tok, ^{
+        s = [NSSet setWithObjects:@"complete", @"cancelled", @"failed",
+             @"rollback_complete", @"rollback_failed", nil];
+    });
+    return s;
+}
+
+- (BOOL)cancelComboWithId:(NSString*)comboId error:(NSString**)errorOut {
+    NSMutableDictionary* combo = _combos[comboId];
+    if (!combo) {
+        if (errorOut) *errorOut = [NSString stringWithFormat:@"Unknown comboId: %@", comboId];
+        return NO;
+    }
+    NSString* status = combo[@"status"] ?: @"";
+    if ([_terminalComboStatuses() containsObject:status]) {
+        if (errorOut) *errorOut = [NSString stringWithFormat:@"Combo '%@' is already in terminal state '%@'.", comboId, status];
+        return NO;
+    }
+    combo[@"status"] = @"cancelled";
+    combo[@"cancelledAt"] = ISODateString([NSDate date]);
+    // Release any path locks this combo held.
+    [self releaseMutationLocks:[combo[@"lockedPaths"] isKindOfClass:[NSArray class]]
+                               ? combo[@"lockedPaths"] : @[]
+                       comboId:comboId];
+    return YES;
 }
 
 - (NSDictionary*)executeComboStep:(NSDictionary*)step combo:(NSMutableDictionary*)combo sequence:(NSInteger)sequence {

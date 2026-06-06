@@ -32,6 +32,11 @@ typedef void (^MacControlMethodExecutor)(NSString* method, NSDictionary* params,
 - (BOOL)acquireMutationLocks:(NSArray<NSString*>*)paths comboId:(NSString*)comboId error:(NSString**)errorOut;
 - (void)releaseMutationLocks:(NSArray<NSString*>*)paths comboId:(NSString*)comboId;
 
+// Cancels an active combo by ID. Returns NO if the comboId is unknown or the combo
+// is already in a terminal state (complete, cancelled, failed). Thread-safe: must be
+// called on the main queue.
+- (BOOL)cancelComboWithId:(NSString*)comboId error:(NSString**)errorOut;
+
 @property (nonatomic, readonly) NSDictionary<NSString*, NSDictionary*>* combos;
 @property (nonatomic, readonly) NSString* lastComboId;
 @property (nonatomic, assign) BOOL globalMutationLock;

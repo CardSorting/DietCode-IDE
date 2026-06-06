@@ -403,7 +403,7 @@
             *outErrMsg = @"path and patch parameters required.";
             return;
         }
-        NSDictionary* validation = [_patchService validatePatchAtPath:targetPath patch:patchStr currentText:params[@"currentText"]];
+        NSDictionary* validation = [_patchService validatePatchAtPath:targetPath patch:patchStr currentText:params[@"currentText"] options:params];
         *outResult = @{ @"validation": validation };
         return;
     }
@@ -477,7 +477,7 @@
             *outErrMsg = @"Patch exceeds maximum RPC patch size.";
             return;
         }
-        NSDictionary* validation = [_patchService validatePatchAtPath:targetPath patch:patchStr currentText:params[@"currentText"]];
+        NSDictionary* validation = [_patchService validatePatchAtPath:targetPath patch:patchStr currentText:params[@"currentText"] options:params];
         NSDictionary* preview = PatchPreviewSummary(patchStr);
         if ([method isEqualToString:@"patch.validate"]) {
             *outResult = @{

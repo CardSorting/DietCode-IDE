@@ -30,6 +30,13 @@
 }
 
 - (NSDictionary*)validatePatchAtPath:(NSString*)path patch:(NSString*)patch currentText:(NSString*)currentTextOverride {
+    return [self validatePatchAtPath:path patch:patch currentText:currentTextOverride options:@{}];
+}
+
+- (NSDictionary*)validatePatchAtPath:(NSString*)path 
+                               patch:(NSString*)patch 
+                          currentText:(NSString*)currentTextOverride 
+                              options:(NSDictionary*)options {
     NSString* ws = [_windowBridge workspacePath];
     NSString* targetPath = AbsolutePathForRPCPath(path, ws);
     BOOL insideWorkspace = ws.length > 0 && PathIsInsideWorkspace(targetPath, ws);
@@ -80,9 +87,26 @@
         result[@"rejectedReason"] = preview[@"error"] ?: @"Patch does not apply cleanly.";
         return result;
     }
+
+    BOOL ignoreSyntax = YES; // Default is YES (relaxed)
+    if (options[@"ignoreSyntax"] != nil) {
+        ignoreSyntax = [options[@"ignoreSyntax"] boolValue];
+    } else if (options[@"force"] != nil) {
+        ignoreSyntax = [options[@"force"] boolValue];
+    }
+
     if ([preview[@"syntaxDanger"] boolValue]) {
-        result[@"rejectedReason"] = preview[@"syntaxErrors"] ?: @"Patch introduces syntax risk.";
-        return result;
+        // Hoist syntaxDanger flag and a human-readable syntaxWarning to the root of
+        // the validation dict so agents can check validation.syntaxDanger without
+        // having to inspect the nested preview object.
+        result[@"syntaxDanger"] = @YES;
+        result[@"syntaxWarning"] = preview[@"syntaxErrors"] ?: @"Patch introduces syntax risk.";
+        if (!ignoreSyntax) {
+            result[@"rejectedReason"] = preview[@"syntaxErrors"] ?: @"Patch introduces syntax risk.";
+            return result;
+        }
+    } else {
+        result[@"syntaxDanger"] = @NO;
     }
 
     result[@"ok"] = @YES;
@@ -101,7 +125,7 @@
         return nil;
     }
     
-    NSDictionary* validation = [self validatePatchAtPath:targetPath patch:patchStr currentText:nil];
+    NSDictionary* validation = [self validatePatchAtPath:targetPath patch:patchStr currentText:nil options:params];
     if (![validation[@"ok"] boolValue]) {
         if (errorCodeOut) *errorCodeOut = @"patch_failed";
         if (errorOut) *errorOut = validation[@"rejectedReason"] ?: @"Patch validation failed.";
@@ -176,7 +200,7 @@
         }
         NSString* absPath = AbsolutePathForRPCPath(relPath, ws);
         combinedBytes += [patchStr lengthOfBytesUsingEncoding:NSUTF8StringEncoding];
-        NSDictionary* validation = [self validatePatchAtPath:absPath patch:patchStr currentText:nil];
+        NSDictionary* validation = [self validatePatchAtPath:absPath patch:patchStr currentText:nil options:params];
         if ([validation[@"requiresConfirmation"] boolValue]) needsConfirm = YES;
         [results addObject:@{ @"path": absPath ?: @"", @"validation": validation }];
         if (![validation[@"ok"] boolValue]) {

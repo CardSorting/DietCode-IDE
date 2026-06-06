@@ -77,14 +77,19 @@
 
     if ([method isEqualToString:@"combo.cancel"]) {
         NSString* comboId = params[@"comboId"];
-        NSMutableDictionary* combo = comboId ? [_comboRuntime.combos[comboId] mutableCopy] : nil;
-        if (!combo) {
+        if (comboId.length == 0) {
             *outErrCode = @"invalid_params";
-            *outErrMsg = @"Unknown comboId.";
+            *outErrMsg = @"comboId parameter required.";
             return;
         }
-        combo[@"status"] = @"cancelled";
-        *outResult = @{ @"cancelled": @YES };
+        NSString* cancelErr = nil;
+        BOOL ok = [_comboRuntime cancelComboWithId:comboId error:&cancelErr];
+        if (!ok) {
+            *outErrCode = @"invalid_request";
+            *outErrMsg = cancelErr ?: @"Failed to cancel combo.";
+            return;
+        }
+        *outResult = @{ @"cancelled": @YES, @"comboId": comboId };
         return;
     }
 

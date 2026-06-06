@@ -136,7 +136,7 @@
     NSString* taskId = params[@"taskId"];
     NSMutableDictionary* task = taskId ? _tasks[taskId] : nil;
     NSArray* steps = params[@"steps"] ?: @[];
-    if (!task || ![steps isKindOfClass:[NSArray class]] || steps.count > kMaxPlanSteps) {
+    if (!task || ![steps isKindOfClass:[NSArray class]] || steps.count > (NSUInteger)kMaxPlanSteps) {
         *outErrCode = @"invalid_params";
         *outErrMsg = @"taskId and bounded steps array required.";
         return nil;
@@ -187,7 +187,7 @@
                outErrCode:(NSString**)outErrCode 
                 outErrMsg:(NSString**)outErrMsg {
     NSArray* steps = params[@"steps"];
-    if (![steps isKindOfClass:[NSArray class]] || steps.count == 0 || steps.count > kMaxPlanSteps) {
+    if (![steps isKindOfClass:[NSArray class]] || steps.count == 0 || steps.count > (NSUInteger)kMaxPlanSteps) {
         *outErrCode = @"invalid_params";
         *outErrMsg = @"steps array required and must be bounded.";
         return nil;
@@ -213,7 +213,7 @@
     NSArray* steps = params[@"steps"] ?: plan[@"steps"];
     NSString* taskId = params[@"taskId"];
     NSMutableDictionary* task = taskId ? _tasks[taskId] : nil;
-    if (![steps isKindOfClass:[NSArray class]] || steps.count == 0 || steps.count > kMaxPlanSteps) {
+    if (![steps isKindOfClass:[NSArray class]] || steps.count == 0 || steps.count > (NSUInteger)kMaxPlanSteps) {
         *outErrCode = @"invalid_params";
         *outErrMsg = @"planId or bounded steps array required.";
         return nil;
@@ -242,8 +242,13 @@
 }
 
 - (BOOL)task:(NSMutableDictionary*)task canConsumeStep:(NSDictionary*)step error:(NSString**)errorOut {
-    if ([task[@"status"] isEqualToString:@"cancelled"] || [task[@"status"] isEqualToString:@"complete"]) {
-        if (errorOut) *errorOut = @"Task is not active.";
+    NSString* taskStatus = task[@"status"] ?: @"";
+    // Terminal states — no further steps can be consumed once a task reaches these.
+    if ([taskStatus isEqualToString:@"cancelled"] ||
+        [taskStatus isEqualToString:@"complete"] ||
+        [taskStatus isEqualToString:@"verify_failed"] ||
+        [taskStatus isEqualToString:@"budget_exceeded"]) {
+        if (errorOut) *errorOut = [NSString stringWithFormat:@"Task is not active (status: %@).", taskStatus];
         return NO;
     }
     NSDictionary* budget = task[@"budget"] ?: @{};

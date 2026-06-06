@@ -18,11 +18,168 @@ NSString* runGitCmd(NSString* dir, NSArray<NSString*>* args) {
     return [NSString stringWithUTF8String:res.stdOut.c_str()] ?: @"";
 }
 
-BOOL checkBracketBalance(NSString* text) {
+BOOL checkBracketBalance(NSString* text, NSString* path) {
+    NSString* ext = [[path pathExtension] lowercaseString];
+    static NSSet* skippedExtensions = nil;
+    static dispatch_once_t onceToken;
+    dispatch_once(&onceToken, ^{
+        skippedExtensions = [NSSet setWithObjects:@"md", @"markdown", @"txt", @"text", @"log", @"patch", @"diff", @"plist", @"svg", @"csv", @"tsv", @"yml", @"yaml", @"ini", @"conf", @"cfg", @"toml", @"css", @"scss", @"html", @"htm", @"xml", nil];
+    });
+    if (ext.length > 0 && [skippedExtensions containsObject:ext]) {
+        return YES;
+    }
+
+    BOOL isPython = [ext isEqualToString:@"py"];
     std::vector<unichar> stack;
     NSUInteger len = text.length;
-    for (NSUInteger i = 0; i < len; i++) {
+    NSUInteger i = 0;
+
+    while (i < len) {
         unichar c = [text characterAtIndex:i];
+
+        if (isPython) {
+            if (c == '#') {
+                while (i < len && [text characterAtIndex:i] != '\n') {
+                    i++;
+                }
+                continue;
+            }
+            if (i + 2 < len) {
+                NSString* sub3 = [text substringWithRange:NSMakeRange(i, 3)];
+                if ([sub3 isEqualToString:@"\"\"\""]) {
+                    i += 3;
+                    while (i < len) {
+                        if (i + 2 < len && [[text substringWithRange:NSMakeRange(i, 3)] isEqualToString:@"\"\"\""]) {
+                            i += 3;
+                            break;
+                        }
+                        if ([text characterAtIndex:i] == '\\') {
+                            i += 2;
+                        } else {
+                            i++;
+                        }
+                    }
+                    continue;
+                }
+                if ([sub3 isEqualToString:@"'''"]) {
+                    i += 3;
+                    while (i < len) {
+                        if (i + 2 < len && [[text substringWithRange:NSMakeRange(i, 3)] isEqualToString:@"'''"]) {
+                            i += 3;
+                            break;
+                        }
+                        if ([text characterAtIndex:i] == '\\') {
+                            i += 2;
+                        } else {
+                            i++;
+                        }
+                    }
+                    continue;
+                }
+            }
+            if (c == '"') {
+                i++;
+                while (i < len) {
+                    unichar sc = [text characterAtIndex:i];
+                    if (sc == '"') {
+                        i++;
+                        break;
+                    }
+                    if (sc == '\\') {
+                        i += 2;
+                    } else {
+                        i++;
+                    }
+                }
+                continue;
+            }
+            if (c == '\'') {
+                i++;
+                while (i < len) {
+                    unichar sc = [text characterAtIndex:i];
+                    if (sc == '\'') {
+                        i++;
+                        break;
+                    }
+                    if (sc == '\\') {
+                        i += 2;
+                    } else {
+                        i++;
+                    }
+                }
+                continue;
+            }
+        } else {
+            if (c == '/' && i + 1 < len) {
+                unichar nextC = [text characterAtIndex:i+1];
+                if (nextC == '/') {
+                    i += 2;
+                    while (i < len && [text characterAtIndex:i] != '\n') {
+                        i++;
+                    }
+                    continue;
+                } else if (nextC == '*') {
+                    i += 2;
+                    while (i < len) {
+                        if (i + 1 < len && [text characterAtIndex:i] == '*' && [text characterAtIndex:i+1] == '/') {
+                            i += 2;
+                            break;
+                        }
+                        i++;
+                    }
+                    continue;
+                }
+            }
+            if (c == '"') {
+                i++;
+                while (i < len) {
+                    unichar sc = [text characterAtIndex:i];
+                    if (sc == '"') {
+                        i++;
+                        break;
+                    }
+                    if (sc == '\\') {
+                        i += 2;
+                    } else {
+                        i++;
+                    }
+                }
+                continue;
+            }
+            if (c == '\'') {
+                i++;
+                while (i < len) {
+                    unichar sc = [text characterAtIndex:i];
+                    if (sc == '\'') {
+                        i++;
+                        break;
+                    }
+                    if (sc == '\\') {
+                        i += 2;
+                    } else {
+                        i++;
+                    }
+                }
+                continue;
+            }
+            if (c == '`') {
+                i++;
+                while (i < len) {
+                    unichar sc = [text characterAtIndex:i];
+                    if (sc == '`') {
+                        i++;
+                        break;
+                    }
+                    if (sc == '\\') {
+                        i += 2;
+                    } else {
+                        i++;
+                    }
+                }
+                continue;
+            }
+        }
+
         if (c == '(' || c == '[' || c == '{') {
             stack.push_back(c);
         } else if (c == ')') {
@@ -35,6 +192,7 @@ BOOL checkBracketBalance(NSString* text) {
             if (stack.empty() || stack.back() != '{') return NO;
             stack.pop_back();
         }
+        i++;
     }
     return stack.empty();
 }
@@ -115,8 +273,9 @@ BOOL checkBracketBalance(NSString* text) {
 
     // Setup temp files
     NSString* tempDir = NSTemporaryDirectory() ?: @"/tmp";
-    NSString* tempSrcPath = [tempDir stringByAppendingPathComponent:[NSString stringWithFormat:@"dietcode_preview_src_%u.txt", arc4random()]];
-    NSString* tempDiffPath = [tempDir stringByAppendingPathComponent:[NSString stringWithFormat:@"dietcode_preview_diff_%u.diff", arc4random()]];
+    NSString* uuidStr = [[NSUUID UUID] UUIDString];
+    NSString* tempSrcPath = [tempDir stringByAppendingPathComponent:[NSString stringWithFormat:@"dietcode_preview_src_%@.txt", uuidStr]];
+    NSString* tempDiffPath = [tempDir stringByAppendingPathComponent:[NSString stringWithFormat:@"dietcode_preview_diff_%@.diff", uuidStr]];
 
     // RAII-style cleanup: guarantee temp files are removed on all exit paths.
     @try {
@@ -208,12 +367,12 @@ BOOL checkBracketBalance(NSString* text) {
         }
 
         // Bracket-matching syntax safety check
-        BOOL syntaxDanger = !checkBracketBalance(patchedText);
+        BOOL syntaxDanger = !checkBracketBalance(patchedText, path);
         NSString* syntaxErrors = @"";
 
         // Python-specific compile check
         if ([[path lowercaseString] hasSuffix:@".py"]) {
-            NSString* tempPyPath = [tempDir stringByAppendingPathComponent:[NSString stringWithFormat:@"dietcode_syntax_check_%u.py", arc4random()]];
+            NSString* tempPyPath = [tempDir stringByAppendingPathComponent:[NSString stringWithFormat:@"dietcode_syntax_check_%@.py", [[NSUUID UUID] UUIDString]]];
             unlink([tempPyPath UTF8String]);
             [patchedText writeToFile:tempPyPath atomically:YES encoding:NSUTF8StringEncoding error:nil];
 
