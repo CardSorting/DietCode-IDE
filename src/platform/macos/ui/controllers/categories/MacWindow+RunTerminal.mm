@@ -268,6 +268,10 @@ using namespace dietcode::platform::macos;
     }]];
     [storage endEditing];
     [self.terminalTextView scrollRangeToVisible:NSMakeRange(storage.length, 0)];
+    
+    [[NSNotificationCenter defaultCenter] postNotificationName:kDietCodeTerminalOutputDidUpdateNotification
+                                                        object:self
+                                                      userInfo:@{ @"text": text }];
 }
 
 - (void)ensureTerminalProcess {

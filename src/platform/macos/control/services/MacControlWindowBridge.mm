@@ -1,5 +1,6 @@
 #import "MacControlWindowBridge.hpp"
 #import "MacWindow.hpp"
+#import "MacWindow+Private.hpp"
 
 @implementation DietCodeControlWindowBridge {
     __weak DietCodeWindowController* _controller;
@@ -133,6 +134,83 @@
     if ([NSThread isMainThread]) return [_controller agentAutonomyLevel];
     __block NSInteger res = 0;
     dispatch_sync(dispatch_get_main_queue(), ^{ res = [_controller agentAutonomyLevel]; });
+    return res;
+}
+
+- (NSString*)hoverAtLocation:(NSString*)path line:(NSInteger)line column:(NSInteger)column {
+    __block NSString* res = nil;
+    dispatch_sync(dispatch_get_main_queue(), ^{
+        NSString* lang = [_controller detectLanguage:path];
+        dietcode::lsp::LSPClient* client = [_controller lspClientForLanguage:lang];
+        if (client && client->isRunning()) {
+            std::string hover = client->getHover([path UTF8String], (int)line, (int)column);
+            res = [NSString stringWithUTF8String:hover.c_str()];
+        }
+    });
+    return res;
+}
+
+- (NSArray*)completionsAtLocation:(NSString*)path line:(NSInteger)line column:(NSInteger)column {
+    __block NSArray* res = nil;
+    dispatch_sync(dispatch_get_main_queue(), ^{
+        NSString* lang = [_controller detectLanguage:path];
+        dietcode::lsp::LSPClient* client = [_controller lspClientForLanguage:lang];
+        if (client && client->isRunning()) {
+            auto items = client->getCompletions([path UTF8String], (int)line, (int)column);
+            NSMutableArray* list = [NSMutableArray array];
+            for (const auto& item : items) {
+                [list addObject:@{
+                    @"label": [NSString stringWithUTF8String:item.label.c_str()],
+                    @"detail": [NSString stringWithUTF8String:item.detail.c_str()],
+                    @"insertText": [NSString stringWithUTF8String:item.insertText.c_str()]
+                }];
+            }
+            res = list;
+        }
+    });
+    return res;
+}
+
+- (NSDictionary*)definitionAtLocation:(NSString*)path line:(NSInteger)line column:(NSInteger)column {
+    __block NSDictionary* res = nil;
+    dispatch_sync(dispatch_get_main_queue(), ^{
+        NSString* lang = [_controller detectLanguage:path];
+        dietcode::lsp::LSPClient* client = [_controller lspClientForLanguage:lang];
+        if (client && client->isRunning()) {
+            auto def = client->getDefinition([path UTF8String], (int)line, (int)column);
+            if (def.line != -1) {
+                res = @{
+                    @"path": [NSString stringWithUTF8String:def.filePath.c_str()],
+                    @"line": @(def.line),
+                    @"column": @(def.column)
+                };
+            }
+        }
+    });
+    return res;
+}
+
+- (NSArray*)lspSymbolsForFile:(NSString*)path {
+    __block NSArray* res = nil;
+    dispatch_sync(dispatch_get_main_queue(), ^{
+        NSString* lang = [_controller detectLanguage:path];
+        dietcode::lsp::LSPClient* client = [_controller lspClientForLanguage:lang];
+        if (client && client->isRunning()) {
+            auto symbols = client->getDocumentSymbols([path UTF8String]);
+            NSMutableArray* list = [NSMutableArray array];
+            for (const auto& s : symbols) {
+                [list addObject:@{
+                    @"name": [NSString stringWithUTF8String:s.name.c_str()],
+                    @"kind": [NSString stringWithUTF8String:s.kind.c_str()],
+                    @"line": @(s.line),
+                    @"column": @(s.column),
+                    @"endLine": @(s.endLine),
+                    @"endColumn": @(s.endColumn)
+                }];
+            }
+            res = list;
+        }
+    });
     return res;
 }
 

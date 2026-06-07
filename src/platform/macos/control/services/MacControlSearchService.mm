@@ -17,20 +17,186 @@ using namespace dietcode::platform::macos;
 
 static const NSInteger kMaxSearchContextLines = 20;
 
+@interface MacGrepSession : NSObject
+@property (nonatomic, copy) NSString* searchId;
+@property (nonatomic, copy) NSString* query;
+@property (nonatomic, copy) NSArray* filePaths;
+@property (nonatomic, assign) NSInteger currentFileIndex;
+@property (nonatomic, assign) BOOL caseSensitive;
+@property (nonatomic, strong) NSDate* createdAt;
+@end
+
+@implementation MacGrepSession
+@end
+
 @implementation MacControlSearchService {
     DietCodeControlWindowBridge* _windowBridge;
+    NSMutableDictionary<NSString*, MacGrepSession*>* _activeGrepSessions;
+    NSInteger _searchSessionCounter;
 }
 
 - (instancetype)initWithWindowBridge:(DietCodeControlWindowBridge*)windowBridge {
     self = [super init];
     if (self) {
         _windowBridge = windowBridge;
+        _activeGrepSessions = [NSMutableDictionary dictionary];
+        _searchSessionCounter = 0;
     }
     return self;
 }
 
+- (NSDictionary*)startGrepSession:(NSDictionary*)params 
+                       outErrCode:(NSString**)outErrCode 
+                        outErrMsg:(NSString**)outErrMsg {
+    NSString* ws = [_windowBridge workspacePath];
+    NSString* query = params[@"query"];
+    if (!ws || !query || query.length == 0) {
+        *outErrCode = @"invalid_params";
+        *outErrMsg = @"Query string and workspace required.";
+        return nil;
+    }
+
+    NSArray* includePatterns = params[@"include"] ?: @[];
+    NSArray* excludePatterns = params[@"exclude"] ?: @[];
+    BOOL caseSensitive = [params[@"caseSensitive"] boolValue];
+
+    std::string folder = StdStringFromNSString(ws);
+    NSMutableArray* filePaths = [NSMutableArray array];
+
+    std::error_code ec;
+    std::filesystem::recursive_directory_iterator it(folder, ec);
+    std::filesystem::recursive_directory_iterator end;
+    for (; it != end && !ec; it.increment(ec)) {
+        const auto& entry = *it;
+        std::filesystem::path p = entry.path();
+        std::string filename = p.filename().string();
+        std::string relPath = std::filesystem::relative(p, folder, ec).string();
+        if (entry.is_directory(ec)) {
+            if (it.depth() >= kMaxSearchDepth || ShouldPruneSearchDirectory(p, relPath, excludePatterns)) {
+                it.disable_recursion_pending();
+            }
+            continue;
+        }
+        if (entry.is_regular_file()) {
+            if (ShouldSkipSearchPath(p, relPath, includePatterns, excludePatterns)) continue;
+            [filePaths addObject:NSStringFromStdString(p.string())];
+        }
+    }
+
+    NSString* searchId = [NSString stringWithFormat:@"search-%ld", (long)++_searchSessionCounter];
+    MacGrepSession* session = [[MacGrepSession alloc] init];
+    session.searchId = searchId;
+    session.query = query;
+    session.filePaths = filePaths;
+    session.currentFileIndex = 0;
+    session.caseSensitive = caseSensitive;
+    session.createdAt = [NSDate date];
+
+    _activeGrepSessions[searchId] = session;
+
+    return @{
+        @"searchId": searchId,
+        @"totalFiles": @(filePaths.count),
+        @"query": query
+    };
+}
+
+- (NSDictionary*)nextGrepResults:(NSDictionary*)params 
+                      outErrCode:(NSString**)outErrCode 
+                       outErrMsg:(NSString**)outErrMsg {
+    NSString* searchId = params[@"searchId"];
+    MacGrepSession* session = searchId ? _activeGrepSessions[searchId] : nil;
+    if (!session) {
+        *outErrCode = @"invalid_params";
+        *outErrMsg = @"Unknown or expired searchId.";
+        return nil;
+    }
+
+    NSInteger maxFiles = params[@"maxFiles"] ? [params[@"maxFiles"] integerValue] : 50;
+    if (maxFiles <= 0) maxFiles = 50;
+
+    NSMutableArray* matches = [NSMutableArray array];
+    NSInteger filesProcessed = 0;
+    NSString* ws = [_windowBridge workspacePath];
+    std::string stdQuery = StdStringFromNSString(session.query);
+
+    while (session.currentFileIndex < (NSInteger)session.filePaths.count && filesProcessed < maxFiles) {
+        NSString* absPath = session.filePaths[session.currentFileIndex];
+        session.currentFileIndex++;
+        filesProcessed++;
+
+        NSString* readRes = [_windowBridge textForFileAtPath:absPath];
+        if (readRes) {
+            std::string content = StdStringFromNSString(readRes);
+            std::istringstream stream(content);
+            std::vector<std::string> fileLines;
+            std::string lineText;
+            while (std::getline(stream, lineText)) {
+                fileLines.push_back(lineText);
+            }
+
+            NSUInteger currentOffset = 0;
+            std::string relPath = std::filesystem::relative(std::filesystem::path([absPath UTF8String]), std::filesystem::path([ws UTF8String])).string();
+
+            for (size_t lineIdx = 0; lineIdx < fileLines.size(); lineIdx++) {
+                lineText = fileLines[lineIdx];
+                NSArray* spans = LiteralMatchSpans(lineText, stdQuery, session.caseSensitive);
+
+                if (spans.count > 0) {
+                    NSMutableArray* enrichedSpans = [NSMutableArray array];
+                    for (NSDictionary* span in spans) {
+                        NSMutableDictionary* s = [span mutableCopy];
+                        s[@"offset"] = @(currentOffset + [span[@"columnStart"] integerValue] - 1);
+                        s[@"length"] = @([span[@"columnEnd"] integerValue] - [span[@"columnStart"] integerValue] + 1);
+                        [enrichedSpans addObject:s];
+                    }
+
+                    NSInteger lineNumber = (NSInteger)lineIdx + 1;
+                    NSString* preview = NSStringFromStdString(lineText);
+                    [matches addObject:@{
+                        @"path": NSStringFromStdString(relPath),
+                        @"line": @(lineNumber),
+                        @"column": enrichedSpans.firstObject[@"columnStart"] ?: @1,
+                        @"matchSpans": enrichedSpans,
+                        @"preview": preview,
+                        @"contextBefore": ContextLines(fileLines, (NSInteger)lineIdx - 2, (NSInteger)lineIdx - 1),
+                        @"contextAfter": ContextLines(fileLines, (NSInteger)lineIdx + 1, (NSInteger)lineIdx + 2)
+                    }];
+                }
+                currentOffset += lineText.length() + 1;
+            }
+        }
+    }
+
+    BOOL finished = (session.currentFileIndex >= (NSInteger)session.filePaths.count);
+    if (finished) {
+        [_activeGrepSessions removeObjectForKey:searchId];
+    }
+
+    return @{
+        @"searchId": searchId,
+        @"matches": matches,
+        @"filesProcessed": @(filesProcessed),
+        @"totalFiles": @(session.filePaths.count),
+        @"currentFileIndex": @(session.currentFileIndex),
+        @"finished": @(finished)
+    };
+}
+
+- (NSDictionary*)cancelGrepSession:(NSDictionary*)params 
+                        outErrCode:(NSString**)outErrCode 
+                         outErrMsg:(NSString**)outErrMsg {
+    NSString* searchId = params[@"searchId"];
+    if (searchId && _activeGrepSessions[searchId]) {
+        [_activeGrepSessions removeObjectForKey:searchId];
+        return @{ @"searchId": searchId, @"cancelled": @YES };
+    }
+    return @{ @"cancelled": @NO };
+}
+
 - (NSDictionary*)workspaceGrep:(NSDictionary*)params 
-                    outErrCode:(NSString**)outErrCode 
+...
+
                      outErrMsg:(NSString**)outErrMsg {
     NSString* ws = [_windowBridge workspacePath];
     NSString* query = params[@"query"];
@@ -113,6 +279,7 @@ static const NSInteger kMaxSearchContextLines = 20;
             
             NSString* readRes = [_windowBridge textForFileAtPath:NSStringFromStdString(p.string())];
             if (readRes) {
+                NSUInteger currentOffset = 0;
                 std::string content = StdStringFromNSString(readRes);
                 std::istringstream stream(content);
                 std::vector<std::string> fileLines;
@@ -128,6 +295,7 @@ static const NSInteger kMaxSearchContextLines = 20;
                     if (spans.count > 0) {
                         NSInteger resultIndex = totalMatchesSeen++;
                         if (resultIndex < resultOffset) {
+                            currentOffset += lineText.length() + 1;
                             continue;
                         }
                         if (matches.count >= (NSUInteger)maxResults) {
@@ -135,15 +303,24 @@ static const NSInteger kMaxSearchContextLines = 20;
                             hasMore = YES;
                             break;
                         }
+                        
+                        NSMutableArray* enrichedSpans = [NSMutableArray array];
+                        for (NSDictionary* span in spans) {
+                            NSMutableDictionary* s = [span mutableCopy];
+                            s[@"offset"] = @(currentOffset + [span[@"columnStart"] integerValue] - 1);
+                            s[@"length"] = @([span[@"columnEnd"] integerValue] - [span[@"columnStart"] integerValue] + 1);
+                            [enrichedSpans addObject:s];
+                        }
+
                         NSInteger lineNumber = (NSInteger)lineIdx + 1;
-                        NSDictionary* firstSpan = spans.firstObject;
+                        NSDictionary* firstSpan = enrichedSpans.firstObject;
                         NSString* preview = NSStringFromStdString(lineText);
                         [matches addObject:@{
                             @"resultIndex": @(resultIndex),
                             @"path": NSStringFromStdString(relPath),
                             @"line": @(lineNumber),
                             @"column": firstSpan[@"columnStart"] ?: @1,
-                            @"matchSpans": spans,
+                            @"matchSpans": enrichedSpans,
                             @"matchCountOnLine": @(spans.count),
                             @"preview": preview,
                             @"lineSha256": StableHashForString(preview),
@@ -151,6 +328,7 @@ static const NSInteger kMaxSearchContextLines = 20;
                             @"contextAfter": ContextLines(fileLines, (NSInteger)lineIdx + 1, (NSInteger)lineIdx + 2)
                         }];
                     }
+                    currentOffset += lineText.length() + 1;
                 }
             }
         }

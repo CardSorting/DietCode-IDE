@@ -43,6 +43,36 @@ static const NSInteger kMaxReadAroundContextLines = 500;
         return;
     }
     
+    if ([method isEqualToString:@"workspace.findFiles"]) {
+        NSString* ws = [self safeWorkspacePath];
+        NSString* pattern = params[@"pattern"];
+        if (!ws || !pattern) {
+            *outErrCode = @"invalid_params";
+            *outErrMsg = @"pattern and workspace required.";
+            return;
+        }
+        NSInteger maxResults = params[@"maxResults"] ? [params[@"maxResults"] integerValue] : 1000;
+        
+        std::filesystem::path folder([ws UTF8String]);
+        NSMutableArray* matches = [NSMutableArray array];
+        std::error_code ec;
+        
+        for (auto const& entry : std::filesystem::recursive_directory_iterator(folder, ec)) {
+            if (matches.count >= (NSUInteger)maxResults) break;
+            if (entry.is_regular_file()) {
+                auto rel = std::filesystem::relative(entry.path(), folder, ec);
+                if (!ec) {
+                    NSString* relPath = NSStringFromStdString(rel.string());
+                    if (fnmatch([pattern UTF8String], [relPath UTF8String], FNM_CASEFOLD) == 0) {
+                        [matches addObject:relPath];
+                    }
+                }
+            }
+        }
+        *outResult = @{ @"files": matches };
+        return;
+    }
+    
     if ([method isEqualToString:@"workspace.listFiles"]) {
         NSString* ws = [self safeWorkspacePath];
         if (!ws) {
@@ -143,8 +173,49 @@ static const NSInteger kMaxReadAroundContextLines = 500;
     }
 
     // File reading primitives
-    if ([method isEqualToString:@"file.read"] || [method isEqualToString:@"file.readRange"] || [method isEqualToString:@"file.readAround"] || [method isEqualToString:@"file.getChunks"] || [method isEqualToString:@"file.stat"]) {
+    if ([method isEqualToString:@"file.read"] || [method isEqualToString:@"file.readBatch"] || [method isEqualToString:@"file.readRange"] || [method isEqualToString:@"file.readAround"] || [method isEqualToString:@"file.getChunks"] || [method isEqualToString:@"file.stat"] || [method isEqualToString:@"file.statBatch"]) {
         NSString* ws = [self safeWorkspacePath];
+        
+        if ([method isEqualToString:@"file.readBatch"] || [method isEqualToString:@"file.statBatch"]) {
+            NSArray* paths = params[@"paths"];
+            if (![paths isKindOfClass:[NSArray class]]) {
+                *outErrCode = @"invalid_params";
+                *outErrMsg = @"paths array required.";
+                return;
+            }
+            NSMutableDictionary* results = [NSMutableDictionary dictionary];
+            for (NSString* p in paths) {
+                NSString* absPath = AbsolutePathForRPCPath(p, ws);
+                if (!absPath || (ws && !PathIsInsideWorkspace(absPath, ws))) {
+                    results[p] = @{ @"ok": @NO, @"error": @"outside_workspace" };
+                    continue;
+                }
+                if (![[NSFileManager defaultManager] fileExistsAtPath:absPath]) {
+                    results[p] = @{ @"ok": @NO, @"error": @"not_found" };
+                    continue;
+                }
+                
+                if ([method isEqualToString:@"file.readBatch"]) {
+                    NSString* text = [self safeTextForFileAtPath:absPath];
+                    if (text) {
+                        results[p] = @{ @"ok": @YES, @"text": text };
+                    } else {
+                        results[p] = @{ @"ok": @NO, @"error": @"read_failed" };
+                    }
+                } else {
+                    NSDictionary* attrs = [[NSFileManager defaultManager] attributesOfItemAtPath:absPath error:nil];
+                    NSString* text = [self safeTextForFileAtPath:absPath];
+                    results[p] = @{
+                        @"ok": @YES,
+                        @"sizeBytes": attrs[NSFileSize] ?: @([text lengthOfBytesUsingEncoding:NSUTF8StringEncoding]),
+                        @"lineCount": @(LinesFromText(text ?: @"").count)
+                    };
+                }
+            }
+            *outResult = @{ @"results": results };
+            return;
+        }
+
         NSString* targetPath = AbsolutePathForRPCPath(params[@"path"], ws);
         if (!targetPath) {
             *outErrCode = @"invalid_params";

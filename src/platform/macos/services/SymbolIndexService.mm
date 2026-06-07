@@ -235,11 +235,13 @@ bool symbolFileWithinReadCap(const std::filesystem::path& p) {
 
             LineColumn startLoc = map.getLineColumn(matchedRange.location);
             LineColumn endLoc = startLoc;
+            NSUInteger endOffset = matchedRange.location + matchedRange.length;
 
             // Search matching closing brace
             NSRange endBraceRange = findBraceBlockEnd(content, matchedRange.location + matchedRange.length);
             if (endBraceRange.location != NSNotFound) {
                 endLoc = map.getLineColumn(endBraceRange.location);
+                endOffset = endBraceRange.location + endBraceRange.length;
             } else {
                 // Fallback to line end if no brace block is found
                 endLoc.column = [lines[startLoc.line - 1] length] + 1;
@@ -250,8 +252,10 @@ bool symbolFileWithinReadCap(const std::filesystem::path& p) {
                 @"kind": kind,
                 @"line": @(startLoc.line),
                 @"column": @(startLoc.column),
+                @"offset": @(matchedRange.location),
                 @"endLine": @(endLoc.line),
-                @"endColumn": @(endLoc.column)
+                @"endColumn": @(endLoc.column),
+                @"endOffset": @(endOffset)
             }];
         }
     }

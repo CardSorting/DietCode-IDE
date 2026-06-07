@@ -5,7 +5,61 @@
 #import "WorkspaceAnalysisService.hpp"
 #import "SymbolIndexService.hpp"
 
+static NSArray* BuildSymbolHierarchy(NSArray* flatSymbols) {
+    if (flatSymbols.count == 0) return @[];
+    
+    // Sort symbols by range (start offset ascending, then end offset descending)
+    NSArray* sorted = [flatSymbols sortedArrayUsingComparator:^NSComparisonResult(NSDictionary* a, NSDictionary* b) {
+        NSInteger aStart = [a[@"offset"] integerValue];
+        NSInteger bStart = [b[@"offset"] integerValue];
+        if (aStart < bStart) return NSOrderedAscending;
+        if (aStart > bStart) return NSOrderedDescending;
+        
+        NSInteger aEnd = [a[@"endOffset"] integerValue];
+        NSInteger bEnd = [b[@"endOffset"] integerValue];
+        if (aEnd > bEnd) return NSOrderedAscending; // Larger range first
+        if (aEnd < bEnd) return NSOrderedDescending;
+        return NSOrderedSame;
+    }];
+    
+    NSMutableArray* roots = [NSMutableArray array];
+    NSMutableArray* stack = [NSMutableArray array];
+    
+    for (NSDictionary* symbol in sorted) {
+        NSMutableDictionary* node = [symbol mutableCopy];
+        node[@"children"] = [NSMutableArray array];
+        
+        NSInteger start = [node[@"offset"] integerValue];
+        
+        while (stack.count > 0) {
+            NSDictionary* parent = stack.lastObject;
+            NSInteger pEnd = [parent[@"endOffset"] integerValue];
+            if (start < pEnd) {
+                // node is a child of parent
+                [parent[@"children"] addObject:node];
+                break;
+            } else {
+                [stack removeLastObject];
+            }
+        }
+        
+        if (stack.count == 0) {
+            [roots addObject:node];
+        }
+        [stack addObject:node];
+    }
+    
+    return roots;
+}
+
 @implementation DietCodeControlServer (Context)
+
+- (void)handleTerminalOutputUpdate:(NSNotification*)notification {
+    NSString* text = notification.userInfo[@"text"];
+    if (text.length > 0) {
+        [self notifyEvent:@"terminal.output" detail:text];
+    }
+}
 
 - (void)executeContextMethod:(NSString*)method 
                       params:(NSDictionary*)params 
@@ -364,7 +418,7 @@
     }
 
     // Symbol commands
-    if ([method isEqualToString:@"symbols.document"] || [method isEqualToString:@"symbols.outline"]) {
+    if ([method isEqualToString:@"symbols.document"] || [method isEqualToString:@"symbols.outline"] || [method isEqualToString:@"symbols.hierarchy"]) {
         NSString* ws = [self safeWorkspacePath];
         NSString* targetPath = AbsolutePathForRPCPath(params[@"path"] ?: [self safeActiveFilePath], ws);
         if (!targetPath) {
@@ -378,10 +432,18 @@
             *outErrMsg = @"File is not readable.";
             return;
         }
-        *outResult = @{
-            @"path": targetPath,
-            @"symbols": [DietCodeSymbolIndexService symbolsForFileContent:text extension:[[targetPath pathExtension] lowercaseString]]
-        };
+        NSArray* flat = [DietCodeSymbolIndexService symbolsForFileContent:text extension:[[targetPath pathExtension] lowercaseString]];
+        if ([method isEqualToString:@"symbols.hierarchy"]) {
+            *outResult = @{
+                @"path": targetPath,
+                @"symbols": BuildSymbolHierarchy(flat)
+            };
+        } else {
+            *outResult = @{
+                @"path": targetPath,
+                @"symbols": flat
+            };
+        }
         return;
     }
 
@@ -507,6 +569,53 @@
             [self.windowController.sessionLastSearches removeAllObjects];
         });
         *outResult = @{ @"cleared": @YES };
+        return;
+    }
+
+    if ([method isEqualToString:@"system.info"]) {
+        NSProcessInfo* info = [NSProcessInfo processInfo];
+        *outResult = @{
+            @"os": info.operatingSystemVersionString,
+            @"arch": info.machineHardwareName ?: @"unknown",
+            @"memoryGB": @(info.physicalMemory / (1024 * 1024 * 1024.0)),
+            @"cpuCount": @(info.processorCount),
+            @"appVersion": kDietCodeAppVersion,
+            @"isAgentMode": @YES
+        };
+        return;
+    }
+
+    // Language features commands
+    if ([method isEqualToString:@"language.hover"] || [method isEqualToString:@"language.completions"] || [method isEqualToString:@"language.definition"]) {
+        NSString* ws = [self safeWorkspacePath];
+        NSString* targetPath = AbsolutePathForRPCPath(params[@"path"] ?: [self safeActiveFilePath], ws);
+        if (!targetPath) {
+            *outErrCode = @"invalid_params";
+            *outErrMsg = @"path parameter or active file required.";
+            return;
+        }
+        NSInteger line = [params[@"line"] integerValue];
+        NSInteger column = [params[@"column"] integerValue];
+        if (line <= 0 || column <= 0) {
+            *outErrCode = @"invalid_params";
+            *outErrMsg = @"line and column must be positive 1-indexed integers.";
+            return;
+        }
+
+        if ([method isEqualToString:@"language.hover"]) {
+            NSString* hover = [_windowBridge hoverAtLocation:targetPath line:line column:column];
+            *outResult = @{ @"hover": hover ?: @"" };
+        } else if ([method isEqualToString:@"language.completions"]) {
+            NSArray* completions = [_windowBridge completionsAtLocation:targetPath line:line column:column];
+            *outResult = @{ @"completions": completions ?: @[] };
+        } else if ([method isEqualToString:@"language.definition"]) {
+            NSDictionary* def = [_windowBridge definitionAtLocation:targetPath line:line column:column];
+            if (def) {
+                *outResult = @{ @"location": def };
+            } else {
+                *outResult = @{ @"location": [NSNull null], @"heuristic": @YES };
+            }
+        }
         return;
     }
 

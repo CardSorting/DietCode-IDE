@@ -32,4 +32,17 @@
                         outErrCode:(NSString**)outErrCode 
                          outErrMsg:(NSString**)outErrMsg;
 
+// Search Session Management
+- (NSDictionary*)startGrepSession:(NSDictionary*)params 
+                       outErrCode:(NSString**)outErrCode 
+                        outErrMsg:(NSString**)outErrMsg;
+
+- (NSDictionary*)nextGrepResults:(NSDictionary*)params 
+                      outErrCode:(NSString**)outErrCode 
+                       outErrMsg:(NSString**)outErrMsg;
+
+- (NSDictionary*)cancelGrepSession:(NSDictionary*)params 
+                        outErrCode:(NSString**)outErrCode 
+                         outErrMsg:(NSString**)outErrMsg;
+
 @end

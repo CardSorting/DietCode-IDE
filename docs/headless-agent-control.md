@@ -35,13 +35,15 @@ DietCode features a deterministic execution runtime where individual operations 
 - `rpc.version`: Returns app, protocol, and schema versions.
 - `rpc.methods`: Returns a list of all available RPC method names.
 - `rpc.describe`: Returns a detailed schema for one or all methods.
+- `system.info`: Returns OS version, architecture, CPU count, and memory info.
 
 ### Workspace & Search
 - `workspace.getRoot`: Get the absolute path of the opened workspace.
 - `workspace.openFolder`: Change the active workspace.
+- `workspace.findFiles`: Discover files using glob patterns (e.g., `src/**/*.hpp`).
 - `workspace.listFiles`: Recursively list files in the workspace.
 - `workspace.openFile`: Open a file in the editor.
-- `workspace.grep`: Perform a high-speed literal substring scan across the workspace.
+- `workspace.grep`: Perform a high-speed literal substring scan across the workspace. Now includes absolute file offsets and lengths for match spans.
 - `search.text`: Advanced text search with context and offsets.
 - `search.files`: Find files by name/glob.
 - `search.todo`: Scan for TODO/FIXME comments.
@@ -49,7 +51,10 @@ DietCode features a deterministic execution runtime where individual operations 
 
 ### File & Editor Operations
 - `file.read`: Read entire file content.
+- `file.readBatch`: Read multiple files in a single call (reduced round-trips).
 - `file.readRange`: Read specific line ranges.
+- `file.stat`: Get metadata (size, line count, status) for a file.
+- `file.statBatch`: Get metadata for multiple files in a single call.
 - `file.write`: Overwrite file content.
 - `file.create`: Create a new file with content.
 - `editor.getActiveFile`: Get the path of the currently focused tab.
@@ -62,7 +67,8 @@ DietCode features a deterministic execution runtime where individual operations 
 
 ### Advanced Analysis & Symbols
 - `analysis.workspaceSummary`: Statistical overview of the workspace (languages, file counts).
-- `symbols.document`: Extract a symbol tree (classes, functions, etc.) for a file.
+- `symbols.document`: Extract a flat list of symbols (classes, functions, etc.) for a file. Now includes `offset` and `endOffset`.
+- `symbols.hierarchy`: Extract a nested tree of symbols for a file, providing structural context.
 - `symbols.references`: Find all usages of a specific symbol.
 - `symbols.atCursor`: Identify the symbol under the editor cursor.
 

@@ -25,4 +25,10 @@
 - (NSArray*)languageDiagnosticsForPath:(NSString*)path;
 - (NSInteger)agentAutonomyLevel;
 
+// LSP & Advanced Language Methods
+- (NSString*)hoverAtLocation:(NSString*)path line:(NSInteger)line column:(NSInteger)column;
+- (NSArray*)completionsAtLocation:(NSString*)path line:(NSInteger)line column:(NSInteger)column;
+- (NSDictionary*)definitionAtLocation:(NSString*)path line:(NSInteger)line column:(NSInteger)column;
+- (NSArray*)lspSymbolsForFile:(NSString*)path;
+
 @end

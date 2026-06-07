@@ -24,6 +24,7 @@ extern const NSUInteger kMaxSearchFileBytes;
 extern const NSInteger kMaxPlanSteps;
 extern const NSInteger kMaxActiveCombos;
 extern NSString* const kDietCodeAppVersion;
+extern NSString* const kDietCodeTerminalOutputDidUpdateNotification;
 
 NSString* NSStringFromStdString(const std::string& value);
 std::string StdStringFromNSString(NSString* value);

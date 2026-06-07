@@ -31,6 +31,7 @@ const NSUInteger kMaxSearchFileBytes = dietcode::domain::control::kMaxSearchFile
 const NSInteger kMaxPlanSteps = dietcode::domain::control::kMaxPlanSteps;
 const NSInteger kMaxActiveCombos = dietcode::domain::control::kMaxActiveCombos;
 NSString* const kDietCodeAppVersion = @"1.6.5";
+NSString* const kDietCodeTerminalOutputDidUpdateNotification = @"kDietCodeTerminalOutputDidUpdateNotification";
 
 NSString* NSStringFromStdString(const std::string& value) {
     return [NSString stringWithUTF8String:value.c_str()] ?: @"";

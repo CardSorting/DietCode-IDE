@@ -119,6 +119,11 @@ static NSString* DietCodeReadTextFileForControlServer(NSString* path) {
         _sessionToken = nil;
         _executionQueue = dispatch_queue_create("com.dietcode.runtime.execution", DISPATCH_QUEUE_SERIAL);
         _readQueue = dispatch_queue_create("com.dietcode.runtime.read", DISPATCH_QUEUE_CONCURRENT);
+        
+        [[NSNotificationCenter defaultCenter] addObserver:self
+                                                 selector:@selector(handleTerminalOutputUpdate:)
+                                                     name:kDietCodeTerminalOutputDidUpdateNotification
+                                                   object:nil];
         _globalMutationLock = NO;
         _lastVerifyStatus = @{
             @"command": @"",
