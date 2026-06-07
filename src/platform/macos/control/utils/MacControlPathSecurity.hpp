@@ -2,7 +2,12 @@
 
 #import <Cocoa/Cocoa.h>
 #include <filesystem>
+#include <fnmatch.h>
 #include <string>
+
+#ifndef FNM_CASEFOLD
+#define FNM_CASEFOLD 0
+#endif
 
 namespace dietcode::platform::macos {
 

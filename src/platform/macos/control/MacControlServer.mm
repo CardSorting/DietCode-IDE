@@ -517,7 +517,6 @@ static NSString* DietCodeReadTextFileForControlServer(NSString* path) {
                 }
             }
             [self sendSuccess:reqId result:@{ @"subscribed": @YES } clientFd:clientFd];
-            [self decrementPendingRequestsForConnection:conn];
             return;
         }
         
@@ -531,7 +530,6 @@ static NSString* DietCodeReadTextFileForControlServer(NSString* path) {
                 }
             }
             [self sendSuccess:reqId result:@{ @"unsubscribed": @YES } clientFd:clientFd];
-            [self decrementPendingRequestsForConnection:conn];
             return;
         }
         
@@ -599,6 +597,10 @@ static NSString* DietCodeReadTextFileForControlServer(NSString* path) {
                                   [method isEqualToString:@"combo.result"] ||
                                   [method isEqualToString:@"combo.cancel"] ||
                                   [method isEqualToString:@"combo.rollback"] ||
+                                  [method isEqualToString:@"combo.list"] ||
+                                  [method isEqualToString:@"workspace.searchStart"] ||
+                                  [method isEqualToString:@"workspace.searchNext"] ||
+                                  [method isEqualToString:@"workspace.searchCancel"] ||
                                   [method isEqualToString:@"verify.last"] ||
                                   [method isEqualToString:@"verify.status"] ||
                                   [method isEqualToString:@"verify.failures"] ||

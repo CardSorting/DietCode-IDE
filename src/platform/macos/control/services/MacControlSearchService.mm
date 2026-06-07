@@ -16,6 +16,7 @@
 using namespace dietcode::platform::macos;
 
 static const NSInteger kMaxSearchContextLines = 20;
+static const NSInteger kMaxSearchSessionFilesPerPoll = 500;
 
 @interface MacGrepSession : NSObject
 @property (nonatomic, copy) NSString* searchId;
@@ -113,7 +114,16 @@ static const NSInteger kMaxSearchContextLines = 20;
     }
 
     NSInteger maxFiles = params[@"maxFiles"] ? [params[@"maxFiles"] integerValue] : 50;
-    if (maxFiles <= 0) maxFiles = 50;
+    if (maxFiles <= 0) {
+        *outErrCode = @"invalid_params";
+        *outErrMsg = @"maxFiles must be greater than zero.";
+        return nil;
+    }
+    if (maxFiles > kMaxSearchSessionFilesPerPoll) {
+        *outErrCode = @"response_too_large";
+        *outErrMsg = [NSString stringWithFormat:@"maxFiles exceeds limit of %ld.", (long)kMaxSearchSessionFilesPerPoll];
+        return nil;
+    }
 
     NSMutableArray* matches = [NSMutableArray array];
     NSInteger filesProcessed = 0;
@@ -194,9 +204,8 @@ static const NSInteger kMaxSearchContextLines = 20;
     return @{ @"cancelled": @NO };
 }
 
-- (NSDictionary*)workspaceGrep:(NSDictionary*)params 
-...
-
+- (NSDictionary*)workspaceGrep:(NSDictionary*)params
+                    outErrCode:(NSString**)outErrCode
                      outErrMsg:(NSString**)outErrMsg {
     NSString* ws = [_windowBridge workspacePath];
     NSString* query = params[@"query"];

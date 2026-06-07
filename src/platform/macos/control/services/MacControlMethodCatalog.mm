@@ -16,6 +16,7 @@ NSArray<NSDictionary*>* MacControlRPCMethodDescriptions(void) {
             @{ @"name": @"combo.run", @"permission": @"Edit/Execute", @"params": @{ @"combo": @"object" }, @"returns": @{ @"combo": @"object" } },
             @{ @"name": @"combo.status", @"permission": @"Read", @"params": @{ @"comboId": @"string" }, @"returns": @{ @"combo": @"object" } },
             @{ @"name": @"combo.result", @"permission": @"Read", @"params": @{ @"comboId": @"string" }, @"returns": @{ @"combo": @"object" } },
+            @{ @"name": @"combo.list", @"permission": @"Read", @"params": @{}, @"returns": @{ @"combos": @"array" } },
             @{ @"name": @"combo.cancel", @"permission": @"Read", @"params": @{ @"comboId": @"string" }, @"returns": @{ @"cancelled": @"boolean" } },
             @{ @"name": @"combo.rollback", @"permission": @"Edit", @"params": @{ @"comboId": @"string optional" }, @"returns": @{ @"reverted": @"boolean" } },
             @{ @"name": @"recovery.scan", @"permission": @"Read", @"params": @{}, @"returns": @{ @"backups": @"array" } },
@@ -211,6 +212,8 @@ NSDictionary* MacControlPrimitiveForChip(NSString* chip, NSDictionary* params) {
     return @{ @"method": canonical, @"params": params ?: @{} };
 }
 
+#if 0
+
 NSDictionary* MacControlDescriptionForRPCMethod(NSString* method) {
     for (NSDictionary* desc in MacControlRPCMethodDescriptions()) {
         if ([desc[@"name"] isEqualToString:method]) {
@@ -269,3 +272,4 @@ NSDictionary* MacControlPrimitiveForChip(NSString* chip, NSDictionary* params) {
     if (canonical.length == 0) return @{};
     return @{ @"method": canonical, @"params": params ?: @{} };
 }
+#endif

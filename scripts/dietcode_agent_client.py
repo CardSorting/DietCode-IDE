@@ -26,18 +26,24 @@ MAX_RESPONSE_BYTES = 4 * 1024 * 1024
 
 READ_METHODS = {
     "rpc.ping", "rpc.version", "rpc.methods", "rpc.describe", "chip.list", "chip.describe",
-    "combo.status", "combo.result", "recovery.scan", "recovery.schemaInfo", "recovery.list",
-    "workspace.getRoot", "workspace.listFiles", "workspace.grep", "workspace.getRecentFiles",
+    "combo.status", "combo.result", "combo.list", "recovery.scan", "recovery.schemaInfo", "recovery.list",
+    "workspace.getRoot", "workspace.findFiles", "workspace.listFiles", "workspace.grep",
+    "workspace.searchStart", "workspace.searchNext", "workspace.searchCancel", "workspace.getRecentFiles",
     "search.files", "search.text", "search.todo", "search.semantic", "search.diagnostics",
-    "file.read", "file.readRange", "file.readAround", "file.getChunks", "file.stat",
+    "file.read", "file.readBatch", "file.readRange", "file.readAround", "file.getChunks", "file.stat", "file.statBatch",
     "editor.getActiveFile", "editor.getOpenFiles", "editor.getText", "editor.getSelection",
+    "analysis.workspaceSummary", "analysis.searchRanked", "analysis.fileSummary", "analysis.relatedFiles",
+    "symbols.document", "symbols.hierarchy", "symbols.outline", "symbols.activeDocument",
+    "symbols.references", "symbols.atCursor",
     "diff.workspaceInfo", "diff.stats", "diff.file", "diff.chunk", "diff.hunks",
     "diff.current", "diff.staged", "diff.unstaged", "diff.summary",
     "buffers.snapshot", "buffers.dirty", "buffers.active", "buffers.unsavedDiff",
     "changes.current", "changes.summary", "patch.chunk", "patch.hunks", "problems.list",
-    "language.diagnostics", "terminal.status", "terminal.jobs", "terminal.history",
+    "diagnostics.list", "diagnostics.summary", "diagnostics.cluster", "diagnostics.forFile",
+    "language.diagnostics", "language.hover", "language.completions", "language.definition",
+    "verify.last", "verify.status", "verify.failures", "terminal.status", "terminal.jobs", "terminal.history",
     "terminal.getOutput", "session.info", "session.workflowState", "session.recentCommands",
-    "session.lastSearches"
+    "session.lastSearches", "system.info"
 }
 
 
@@ -111,6 +117,15 @@ def _connect_probe(timeout: float = 0.5, socket_path: str = SOCKET_PATH) -> bool
         return False
 
 
+def _wait_for_socket(socket_path: str = SOCKET_PATH, timeout: float = 10.0, interval: float = 0.2) -> bool:
+    deadline = time.monotonic() + max(0.0, timeout)
+    while time.monotonic() <= deadline:
+        if _connect_probe(socket_path=socket_path):
+            return True
+        time.sleep(interval)
+    return _connect_probe(socket_path=socket_path)
+
+
 def _unlink_stale_socket(socket_path: str = SOCKET_PATH) -> None:
     try:
         st = os.lstat(socket_path)
@@ -157,7 +172,7 @@ def ensure_socket(
     start: bool = True,
 ) -> bool:
     """Ensure the control socket is accepting connections, launching headless if needed."""
-    if _connect_probe(socket_path=socket_path):
+    if _wait_for_socket(socket_path=socket_path, timeout=min(timeout, 1.0)):
         return True
     if not start:
         return False
@@ -180,13 +195,15 @@ def ensure_socket(
             check=False,
         )
     except subprocess.TimeoutExpired:
-        return False
+        return _wait_for_socket(socket_path=socket_path, timeout=2.0)
     if not quiet:
         for line in (completed.stdout + completed.stderr).splitlines():
             print(line, file=sys.stderr)
+    if _wait_for_socket(socket_path=socket_path, timeout=2.0):
+        return True
     if completed.returncode != 0:
         return False
-    return _connect_probe(socket_path=socket_path)
+    return _wait_for_socket(socket_path=socket_path, timeout=2.0)
 
 
 def load_token(token_path: str = TOKEN_PATH) -> str:
@@ -627,6 +644,9 @@ def run_self_test() -> dict[str, Any]:
         cursor_ok = False
     checks.append({"name": "patch.params_hunk_offset", "ok": cursor_ok})
     checks.append({"name": "read_methods.ping", "ok": "rpc.ping" in READ_METHODS})
+    checks.append({"name": "read_methods.batch", "ok": "file.readBatch" in READ_METHODS and "file.statBatch" in READ_METHODS})
+    checks.append({"name": "read_methods.search_session", "ok": "workspace.searchStart" in READ_METHODS and "workspace.searchNext" in READ_METHODS})
+    checks.append({"name": "read_methods.symbols", "ok": "symbols.hierarchy" in READ_METHODS and "system.info" in READ_METHODS})
     checks.append({"name": "read_methods.mutation", "ok": "patch.apply" not in READ_METHODS})
 
     ok = all(check["ok"] for check in checks)

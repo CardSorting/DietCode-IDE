@@ -9,6 +9,7 @@
 #include <string>
 
 static const NSInteger kMaxReadAroundContextLines = 500;
+static const NSInteger kMaxBatchFilePaths = 100;
 
 @implementation DietCodeControlServer (File)
 
@@ -52,6 +53,16 @@ static const NSInteger kMaxReadAroundContextLines = 500;
             return;
         }
         NSInteger maxResults = params[@"maxResults"] ? [params[@"maxResults"] integerValue] : 1000;
+        if (maxResults <= 0) {
+            *outErrCode = @"invalid_params";
+            *outErrMsg = @"maxResults must be greater than zero.";
+            return;
+        }
+        if (maxResults > 1000) {
+            *outErrCode = @"response_too_large";
+            *outErrMsg = @"maxResults exceeds limit of 1000.";
+            return;
+        }
         
         std::filesystem::path folder([ws UTF8String]);
         NSMutableArray* matches = [NSMutableArray array];
@@ -122,6 +133,21 @@ static const NSInteger kMaxReadAroundContextLines = 500;
         *outResult = [_searchService workspaceGrep:params outErrCode:outErrCode outErrMsg:outErrMsg];
         return;
     }
+
+    if ([method isEqualToString:@"workspace.searchStart"]) {
+        *outResult = [_searchService startGrepSession:params outErrCode:outErrCode outErrMsg:outErrMsg];
+        return;
+    }
+
+    if ([method isEqualToString:@"workspace.searchNext"]) {
+        *outResult = [_searchService nextGrepResults:params outErrCode:outErrCode outErrMsg:outErrMsg];
+        return;
+    }
+
+    if ([method isEqualToString:@"workspace.searchCancel"]) {
+        *outResult = [_searchService cancelGrepSession:params outErrCode:outErrCode outErrMsg:outErrMsg];
+        return;
+    }
     
     if ([method isEqualToString:@"workspace.openFile"]) {
         NSString* absPath = AbsolutePathForRPCPath(params[@"path"], [self safeWorkspacePath]);
@@ -178,13 +204,24 @@ static const NSInteger kMaxReadAroundContextLines = 500;
         
         if ([method isEqualToString:@"file.readBatch"] || [method isEqualToString:@"file.statBatch"]) {
             NSArray* paths = params[@"paths"];
-            if (![paths isKindOfClass:[NSArray class]]) {
+            if (![paths isKindOfClass:[NSArray class]] || paths.count == 0) {
                 *outErrCode = @"invalid_params";
-                *outErrMsg = @"paths array required.";
+                *outErrMsg = @"non-empty paths array required.";
+                return;
+            }
+            if (paths.count > (NSUInteger)kMaxBatchFilePaths) {
+                *outErrCode = @"response_too_large";
+                *outErrMsg = [NSString stringWithFormat:@"paths exceeds limit of %ld.", (long)kMaxBatchFilePaths];
                 return;
             }
             NSMutableDictionary* results = [NSMutableDictionary dictionary];
-            for (NSString* p in paths) {
+            for (id pathValue in paths) {
+                if (![pathValue isKindOfClass:[NSString class]] || [pathValue length] == 0) {
+                    *outErrCode = @"invalid_params";
+                    *outErrMsg = @"every paths entry must be a non-empty string.";
+                    return;
+                }
+                NSString* p = (NSString*)pathValue;
                 NSString* absPath = AbsolutePathForRPCPath(p, ws);
                 if (!absPath || (ws && !PathIsInsideWorkspace(absPath, ws))) {
                     results[p] = @{ @"ok": @NO, @"error": @"outside_workspace" };
@@ -388,6 +425,9 @@ static const NSInteger kMaxReadAroundContextLines = 500;
         *outResult = @{ key: @YES, @"path": targetPath, @"sizeBytes": @(contentBytes) };
         return;
     }
+
+    *outErrCode = @"method_not_found";
+    *outErrMsg = [NSString stringWithFormat:@"Unhandled file/workspace/search method: %@", method];
 }
 
 @end

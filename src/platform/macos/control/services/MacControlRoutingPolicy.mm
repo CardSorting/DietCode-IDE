@@ -6,6 +6,9 @@ BOOL MacControlIsReadQueueMethod(NSString* method) {
     dispatch_once(&onceToken, ^{
         readMethods = [NSSet setWithArray:@[
             @"workspace.grep",
+            @"workspace.getRoot",
+            @"workspace.findFiles",
+            @"workspace.getRecentFiles",
             @"search.text",
             @"search.files",
             @"search.todo",
@@ -17,11 +20,16 @@ BOOL MacControlIsReadQueueMethod(NSString* method) {
             @"diagnostics.forFile",
             @"workspace.listFiles",
             @"recovery.scan",
+            @"recovery.schemaInfo",
+            @"recovery.list",
+            @"combo.list",
             @"file.read",
+            @"file.readBatch",
             @"file.readRange",
             @"file.readAround",
             @"file.getChunks",
             @"file.stat",
+            @"file.statBatch",
             @"git.status",
             @"git.diff",
             @"analysis.workspaceSummary",
@@ -30,6 +38,7 @@ BOOL MacControlIsReadQueueMethod(NSString* method) {
             @"analysis.relatedFiles",
             @"symbols.document",
             @"symbols.outline",
+            @"symbols.hierarchy",
             @"symbols.activeDocument",
             @"symbols.references",
             @"editor.getActiveFile",
@@ -55,6 +64,9 @@ BOOL MacControlIsReadQueueMethod(NSString* method) {
             @"patch.hunks",
             @"problems.list",
             @"language.diagnostics",
+            @"verify.last",
+            @"verify.status",
+            @"verify.failures",
             @"terminal.status",
             @"terminal.jobs",
             @"terminal.history",
@@ -62,7 +74,8 @@ BOOL MacControlIsReadQueueMethod(NSString* method) {
             @"session.info",
             @"session.workflowState",
             @"session.recentCommands",
-            @"session.lastSearches"
+            @"session.lastSearches",
+            @"system.info"
         ]];
     });
     return [readMethods containsObject:method];

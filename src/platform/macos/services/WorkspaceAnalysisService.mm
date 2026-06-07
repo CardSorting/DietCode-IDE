@@ -7,6 +7,10 @@
 #include <algorithm>
 #include <fnmatch.h>
 
+#ifndef FNM_CASEFOLD
+#define FNM_CASEFOLD 0
+#endif
+
 using namespace dietcode::filesystem;
 
 namespace {

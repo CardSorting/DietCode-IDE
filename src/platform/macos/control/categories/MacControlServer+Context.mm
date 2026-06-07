@@ -5,6 +5,16 @@
 #import "WorkspaceAnalysisService.hpp"
 #import "SymbolIndexService.hpp"
 
+#include <sys/utsname.h>
+
+static NSString* DietCodeMachineArchitecture(void) {
+    struct utsname systemInfo;
+    if (uname(&systemInfo) == 0) {
+        return [NSString stringWithUTF8String:systemInfo.machine] ?: @"unknown";
+    }
+    return @"unknown";
+}
+
 static NSArray* BuildSymbolHierarchy(NSArray* flatSymbols) {
     if (flatSymbols.count == 0) return @[];
     
@@ -576,7 +586,7 @@ static NSArray* BuildSymbolHierarchy(NSArray* flatSymbols) {
         NSProcessInfo* info = [NSProcessInfo processInfo];
         *outResult = @{
             @"os": info.operatingSystemVersionString,
-            @"arch": info.machineHardwareName ?: @"unknown",
+            @"arch": DietCodeMachineArchitecture(),
             @"memoryGB": @(info.physicalMemory / (1024 * 1024 * 1024.0)),
             @"cpuCount": @(info.processorCount),
             @"appVersion": kDietCodeAppVersion,

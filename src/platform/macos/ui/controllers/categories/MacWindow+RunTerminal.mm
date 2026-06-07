@@ -1,6 +1,7 @@
 #import "MacWindow+Private.hpp"
 #import "MacWindowUtilities.hpp"
 #import "MacEditorComponents.hpp"
+#import "MacControlSupport.hpp"
 
 #include <util.h>
 #include <unistd.h>
