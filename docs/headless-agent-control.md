@@ -157,4 +157,6 @@ with DietCodeAgentClient() as rpc, DietCodeAgentClient() as events:
 
 For command-line listeners, use `--listen --listen-type terminal.output`. Repeat `--listen-type` to subscribe to multiple event types, and use `--listen-max-events N` for bounded automation. Event frames are written to stdout, while listener status text is written to stderr unless `--quiet` is set.
 
+For CI or agent scripts, add `--error-json` to receive JSON-RPC-style error envelopes on stderr instead of plain text failures.
+
 See [Technical Architecture](technical-architecture.md) for details on how the Control Server is implemented within the macOS layer.

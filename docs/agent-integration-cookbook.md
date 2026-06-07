@@ -119,6 +119,7 @@ else:
 ## 💡 Best Practices for Agent Developers
 - **Use Paging**: For large workspace scans, always use `resultOffset` and `maxResults`.
 - **Check Dirty Buffers**: Use `buffers.dirty` before applying patches to avoid conflicting with unsaved user changes.
+- **Prefer Structured CLI Failures**: Add `--error-json` when invoking `scripts/dietcode_agent_client.py` from automation. Successful responses stay on stdout; JSON error envelopes are written to stderr.
 - **Listen for Events on a Dedicated Socket**: Use `DietCodeAgentClient.event_subscription(...)`, `iter_events(...)`, or `event.subscribe` to avoid polling. The Python helper can skip interleaved `event.emitted` frames while waiting for a matching response id, and event iterators drain the same shared socket buffer as request/response calls. Long-running listeners should still use a separate connection from synchronous request/response RPC calls.
 - **Filter CLI Event Streams**: Use `python3 scripts/dietcode_agent_client.py --listen --listen-type terminal.output` when you only need specific events. Repeat `--listen-type` for multiple subscriptions, and add `--listen-max-events N` for bounded automation. Event frames stay on stdout; listener status text goes to stderr unless `--quiet` is set.
 - **End Event Lifecycles Cleanly**: Call `event.unsubscribe` before a long-running listener exits. The helper scopes temporary socket timeouts per call, so short listener polls do not leak into later RPC calls on the same socket.

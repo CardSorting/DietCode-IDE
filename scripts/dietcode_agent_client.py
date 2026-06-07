@@ -75,6 +75,8 @@ def local_error_response(request_id: str | None, code: str, message: str) -> dic
         numeric_code = -32602
     elif code == "transport_error":
         numeric_code = -32603
+    elif code == "rpc_error":
+        numeric_code = -32000
     return {
         "id": request_id or "unknown",
         "ok": False,
@@ -84,6 +86,16 @@ def local_error_response(request_id: str | None, code: str, message: str) -> dic
             "message": message,
         },
     }
+
+
+def exception_error_response(exc: Exception, request_id: str | None = None) -> dict[str, Any]:
+    if isinstance(exc, DietCodeRpcError):
+        return exc.response
+    if isinstance(exc, (DietCodeTransportError, OSError)):
+        return local_error_response(request_id, "transport_error", str(exc))
+    if isinstance(exc, ValueError):
+        return local_error_response(request_id, "invalid_params", str(exc))
+    return local_error_response(request_id, "rpc_error", str(exc))
 
 
 def json_text(value: Any, compact: bool = False) -> str:
@@ -829,6 +841,16 @@ def run_self_test() -> dict[str, Any]:
     except ValueError as exc:
         event_types_empty_ok = "non-empty" in str(exc)
     checks.append({"name": "events.normalize_empty", "ok": event_types_empty_ok})
+    validation_error = exception_error_response(ValueError("bad input"), "req-error")
+    checks.append({
+        "name": "errors.validation_envelope",
+        "ok": validation_error["id"] == "req-error" and validation_error["error"]["string_code"] == "invalid_params",
+    })
+    transport_error = exception_error_response(DietCodeTransportError("closed"), "transport-error")
+    checks.append({
+        "name": "errors.transport_envelope",
+        "ok": transport_error["id"] == "transport-error" and transport_error["error"]["string_code"] == "transport_error",
+    })
     try:
         DietCodeAgentClient(start=False).subscribe_events([])
         sdk_invalid_subscribe_ok = False
@@ -1020,6 +1042,7 @@ def main() -> int:
     parser.add_argument("--describe", help="Call rpc.describe for one method and exit.")
     parser.add_argument("--raw-response", action="store_true", help="Print the full JSON-RPC response envelope.")
     parser.add_argument("--compact", action="store_true", help="Print compact JSON on one line.")
+    parser.add_argument("--error-json", action="store_true", help="Print failures as JSON envelopes on stderr.")
     parser.add_argument("--listen", action="store_true", help="Listen for asynchronous event notifications.")
     parser.add_argument("--listen-type", action="append", help="Event type to subscribe to with --listen. May be repeated; defaults to '*'.")
     parser.add_argument("--listen-max-events", type=int, help="Stop --listen after printing this many event notifications.")
@@ -1266,7 +1289,10 @@ def main() -> int:
         return 0
     except Exception as exc:
         if not args.quiet:
-            print(str(exc), file=sys.stderr)
+            if getattr(args, "error_json", False):
+                print(json_text(exception_error_response(exc, getattr(args, "request_id", None)), compact=args.compact), file=sys.stderr)
+            else:
+                print(str(exc), file=sys.stderr)
         return 1
 
 
