@@ -33,6 +33,10 @@ The Unix socket at `~/.dietcode/control.sock` is created with `0600` permissions
 - **Symbolic Link Protection**: Aborts if `~/.dietcode` is a symlink (to prevent redirection attacks).
 - **Ownership Verification**: Ensures the config directory is owned by the current UID.
 
+The Python agent client preserves probe diagnostics while checking the socket. A failed probe can now report `not_found`, `connection_refused`, `timeout`, `permission_denied`, or an OS-level error. This matters in managed or sandboxed environments where the socket file may exist and be owned by the current user, but the calling process is not allowed to connect. In that case, the client reports the permission denial directly instead of misclassifying the server as inactive.
+
+Startup recovery intentionally avoids unlinking an existing current-user socket from the client. If the socket refuses connections, the client delegates recovery to the native `--ensure-socket` path so the server lifecycle stays owned by the DietCode binary.
+
 ### 3. Frame Integrity
 The server enforces a `kMaxRequestBytes` (1MB) limit on every JSON frame to prevent memory exhaustion attacks from malicious or runaway agents.
 
@@ -44,3 +48,12 @@ When an RPC method needs to interact with the UI (e.g., `editor.insertText`), th
 
 - **Deadlock Prevention**: The bridge is carefully engineered to only sync for UI-bound operations. Core domain logic and filesystem reads stay on the background RPC queues.
 - **Atomic Snapshots**: For search operations, the bridge can capture a snapshot of the `TextBuffer` and hand it back to the background `_readQueue`, allowing the UI to continue rendering while the search proceeds.
+- **Headless Guards**: UI-adjacent read methods such as `workspace.openFile`, `language.hover`, `language.completions`, and `language.definition` short-circuit safely in headless mode when editor views or UI-backed LSP state are unavailable. They return explicit headless results rather than invoking uninitialized UI paths.
+
+---
+
+## Event Stream Isolation
+
+`event.subscribe` turns a socket connection into a duplex stream: it still receives the subscription response, and then receives asynchronous `event.emitted` frames. Agent harnesses should use a dedicated connection for event listening and keep ordinary JSON-RPC calls on a separate request/response connection.
+
+This avoids a common race where a background event listener reads the next synchronous RPC response before the caller that issued the request can consume it.

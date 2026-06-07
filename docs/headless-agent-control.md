@@ -42,8 +42,11 @@ DietCode features a deterministic execution runtime where individual operations 
 - `workspace.openFolder`: Change the active workspace.
 - `workspace.findFiles`: Discover files using glob patterns (e.g., `src/**/*.hpp`).
 - `workspace.listFiles`: Recursively list files in the workspace.
-- `workspace.openFile`: Open a file in the editor.
+- `workspace.openFile`: Open a file in the editor. In headless mode, this validates the file, updates recent-file state, and returns `{ "opened": true, "headless": true }` without touching UI-only editor views.
 - `workspace.grep`: Perform a high-speed literal substring scan across the workspace. Now includes absolute file offsets and lengths for match spans.
+- `workspace.searchStart`: Start an incremental workspace search session.
+- `workspace.searchNext`: Poll the next batch of search results. `maxFiles` must be positive and is capped.
+- `workspace.searchCancel`: Cancel an incremental search session.
 - `search.text`: Advanced text search with context and offsets.
 - `search.files`: Find files by name/glob.
 - `search.todo`: Scan for TODO/FIXME comments.
@@ -100,9 +103,27 @@ DietCode features a deterministic execution runtime where individual operations 
 - `diagnostics.cluster`: Group diagnostics by cause or file.
 - `repair.fromCompilerErrors`: Suggest or apply fixes based on diagnostic evidence.
 
+### Language Features
+- `language.hover`: Return hover text for a file location. In headless mode, this returns a stable empty hover with `headless: true` when no UI/LSP editor session is active.
+- `language.completions`: Return completions for a file location. In headless mode, this returns an empty list with `headless: true` instead of failing.
+- `language.definition`: Return the definition location for a file location. In headless mode, this returns `location: null`, `heuristic: true`, and `headless: true` when UI-backed LSP state is unavailable.
+
 ### Events (Duplex)
 - `event.subscribe`: Listen for real-time notifications (e.g., `DocumentSaved`, `ActivityChanged`).
 - `event.unsubscribe`: Stop listening for events.
+
+Use a dedicated socket connection for event subscriptions. Event notifications are delivered on the subscribed connection and can interleave with ordinary JSON-RPC responses, so sharing one socket between an event listener thread and synchronous request/response calls can consume frames out of order.
+
+---
+
+## Headless Ergonomics Notes
+
+Recent agent ergonomics work tightened the behavior of the headless control surface:
+
+- Socket startup probes preserve the underlying failure reason (`not_found`, `connection_refused`, `timeout`, `permission_denied`, or another OS error) instead of reporting every failed probe as an inactive socket.
+- The Python client no longer unlinks an existing current-user socket during startup recovery. A stale or refused socket is diagnosed and the native `--ensure-socket` path is used to start a fresh server.
+- Headless-safe UI-adjacent RPCs return explicit headless results rather than terminating the headless process.
+- Incremental workspace search and batch file read/stat methods are advertised in `rpc.methods` / `rpc.describe` and are treated as read-only agent methods.
 
 ---
 
@@ -122,6 +143,15 @@ with DietCodeAgentClient() as client:
     
     # Terminal execution
     client.call("terminal.run", {"command": "make test"})
+```
+
+For event-driven tools, keep the event stream separate:
+
+```python
+with DietCodeAgentClient() as rpc, DietCodeAgentClient() as events:
+    events.call("event.subscribe", {"types": ["terminal.output"]})
+    rpc.call("terminal.run", {"command": "make test"})
+    # Read event notifications from events.sock only.
 ```
 
 See [Technical Architecture](technical-architecture.md) for details on how the Control Server is implemented within the macOS layer.

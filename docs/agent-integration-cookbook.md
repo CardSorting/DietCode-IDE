@@ -119,4 +119,5 @@ else:
 ## 💡 Best Practices for Agent Developers
 - **Use Paging**: For large workspace scans, always use `resultOffset` and `maxResults`.
 - **Check Dirty Buffers**: Use `buffers.dirty` before applying patches to avoid conflicting with unsaved user changes.
-- **Listen for Events**: Use `event.subscribe` to avoid polling for file saves or diagnostic updates.
+- **Listen for Events on a Dedicated Socket**: Use `event.subscribe` to avoid polling, but keep event streaming on a separate connection from synchronous request/response RPC calls.
+- **Handle Headless Fallbacks**: In headless mode, UI-adjacent methods can return `headless: true` with stable non-UI results. Treat those as successful capability probes rather than editor navigation.
