@@ -107,35 +107,62 @@ def _path_state(path: str) -> dict[str, Any]:
     return state
 
 
-def _connect_probe(timeout: float = 0.5, socket_path: str = SOCKET_PATH) -> bool:
+def _probe_socket(timeout: float = 0.5, socket_path: str = SOCKET_PATH) -> tuple[bool, str | None]:
     try:
         with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as test_sock:
             test_sock.settimeout(timeout)
             test_sock.connect(socket_path)
-            return True
-    except (ConnectionRefusedError, FileNotFoundError, socket.timeout, OSError):
-        return False
+            return True, None
+    except PermissionError as exc:
+        return False, f"permission_denied: {exc}"
+    except FileNotFoundError:
+        return False, "not_found"
+    except ConnectionRefusedError as exc:
+        return False, f"connection_refused: {exc}"
+    except socket.timeout:
+        return False, "timeout"
+    except OSError as exc:
+        return False, f"os_error: {exc}"
 
 
-def _wait_for_socket(socket_path: str = SOCKET_PATH, timeout: float = 10.0, interval: float = 0.2) -> bool:
+def _connect_probe(timeout: float = 0.5, socket_path: str = SOCKET_PATH) -> bool:
+    ok, _ = _probe_socket(timeout=timeout, socket_path=socket_path)
+    return ok
+
+
+def _append_probe_error(errors: list[str] | None, error: str | None) -> None:
+    if errors is not None and error and (not errors or errors[-1] != error):
+        errors.append(error)
+
+
+def _wait_for_socket(
+    socket_path: str = SOCKET_PATH,
+    timeout: float = 10.0,
+    interval: float = 0.2,
+    errors: list[str] | None = None,
+) -> bool:
     deadline = time.monotonic() + max(0.0, timeout)
     while time.monotonic() <= deadline:
-        if _connect_probe(socket_path=socket_path):
+        ok, error = _probe_socket(socket_path=socket_path)
+        if ok:
             return True
+        _append_probe_error(errors, error)
         time.sleep(interval)
-    return _connect_probe(socket_path=socket_path)
+    ok, error = _probe_socket(socket_path=socket_path)
+    _append_probe_error(errors, error)
+    return ok
 
 
-def _unlink_stale_socket(socket_path: str = SOCKET_PATH) -> None:
-    try:
-        st = os.lstat(socket_path)
-    except FileNotFoundError:
-        return
-    if stat.S_ISSOCK(st.st_mode) and st.st_uid == os.getuid():
-        try:
-            os.unlink(socket_path)
-        except OSError:
-            pass
+def _socket_probe_diagnostic(socket_path: str, errors: list[str]) -> str | None:
+    if not errors:
+        return None
+    last_error = errors[-1]
+    if last_error.startswith("permission_denied:"):
+        return (
+            f"control socket exists at {socket_path}, but this process cannot connect to it "
+            f"({last_error}). Run the harness with permission to access the DietCode socket."
+        )
+    return f"last socket probe error for {socket_path}: {last_error}"
 
 
 def resolve_app_path(app_path: str | os.PathLike[str] | None = None) -> Path:
@@ -170,20 +197,23 @@ def ensure_socket(
     quiet: bool = False,
     socket_path: str = SOCKET_PATH,
     start: bool = True,
+    probe_errors: list[str] | None = None,
 ) -> bool:
     """Ensure the control socket is accepting connections, launching headless if needed."""
-    if _wait_for_socket(socket_path=socket_path, timeout=min(timeout, 1.0)):
+    if _wait_for_socket(socket_path=socket_path, timeout=min(timeout, 1.0), errors=probe_errors):
         return True
     if not start:
         return False
 
-    _unlink_stale_socket(socket_path)
     app_binary = resolve_app_path(app_path)
     if not app_binary.exists():
         raise RuntimeError(f"DietCode binary not found at {app_binary}. Run 'make app' first.")
 
     if not quiet:
         print("control socket not active, asking DietCode to ensure headless control...", file=sys.stderr)
+        diagnostic = _socket_probe_diagnostic(socket_path, probe_errors or [])
+        if diagnostic:
+            print(diagnostic, file=sys.stderr)
 
     try:
         completed = subprocess.run(
@@ -195,15 +225,15 @@ def ensure_socket(
             check=False,
         )
     except subprocess.TimeoutExpired:
-        return _wait_for_socket(socket_path=socket_path, timeout=2.0)
+        return _wait_for_socket(socket_path=socket_path, timeout=2.0, errors=probe_errors)
     if not quiet:
         for line in (completed.stdout + completed.stderr).splitlines():
             print(line, file=sys.stderr)
-    if _wait_for_socket(socket_path=socket_path, timeout=2.0):
+    if _wait_for_socket(socket_path=socket_path, timeout=2.0, errors=probe_errors):
         return True
     if completed.returncode != 0:
         return False
-    return _wait_for_socket(socket_path=socket_path, timeout=2.0)
+    return _wait_for_socket(socket_path=socket_path, timeout=2.0, errors=probe_errors)
 
 
 def load_token(token_path: str = TOKEN_PATH) -> str:
@@ -219,7 +249,7 @@ def status(
     app_path: str | os.PathLike[str] | None = None,
 ) -> dict[str, Any]:
     app_binary = resolve_app_path(app_path)
-    socket_active = _connect_probe(socket_path=socket_path)
+    socket_active, socket_probe_error = _probe_socket(socket_path=socket_path)
     token_state = _path_state(token_path)
     socket_state = _path_state(socket_path)
     rpc_ready = False
@@ -256,6 +286,8 @@ def status(
         result["rpcPing"] = rpc_ping
     if rpc_error is not None:
         result["rpcError"] = rpc_error
+    if socket_probe_error is not None:
+        result["socketProbeError"] = socket_probe_error
     return result
 
 
@@ -576,8 +608,11 @@ def connect(
     socket_path: str = SOCKET_PATH,
     start: bool = True,
 ) -> socket.socket:
-    if not ensure_socket(app_path=app_path, timeout=timeout, socket_path=socket_path, start=start):
-        raise RuntimeError(f"failed to start DietCode control socket at {socket_path}")
+    probe_errors: list[str] = []
+    if not ensure_socket(app_path=app_path, timeout=timeout, socket_path=socket_path, start=start, probe_errors=probe_errors):
+        diagnostic = _socket_probe_diagnostic(socket_path, probe_errors)
+        suffix = f": {diagnostic}" if diagnostic else ""
+        raise RuntimeError(f"failed to start DietCode control socket at {socket_path}{suffix}")
     sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
     sock.settimeout(timeout)
     sock.connect(socket_path)
@@ -648,6 +683,8 @@ def run_self_test() -> dict[str, Any]:
     checks.append({"name": "read_methods.search_session", "ok": "workspace.searchStart" in READ_METHODS and "workspace.searchNext" in READ_METHODS})
     checks.append({"name": "read_methods.symbols", "ok": "symbols.hierarchy" in READ_METHODS and "system.info" in READ_METHODS})
     checks.append({"name": "read_methods.mutation", "ok": "patch.apply" not in READ_METHODS})
+    diagnostic = _socket_probe_diagnostic("/tmp/control.sock", ["permission_denied: [Errno 1] Operation not permitted"])
+    checks.append({"name": "socket_probe.permission_diagnostic", "ok": diagnostic is not None and "cannot connect" in diagnostic})
 
     ok = all(check["ok"] for check in checks)
     return {"ok": ok, "checks": checks}

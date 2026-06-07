@@ -611,6 +611,16 @@ static NSArray* BuildSymbolHierarchy(NSArray* flatSymbols) {
             *outErrMsg = @"line and column must be positive 1-indexed integers.";
             return;
         }
+        if (self.windowController.isHeadless || ![[self.windowController window] isVisible]) {
+            if ([method isEqualToString:@"language.hover"]) {
+                *outResult = @{ @"hover": @"", @"headless": @YES };
+            } else if ([method isEqualToString:@"language.completions"]) {
+                *outResult = @{ @"completions": @[], @"headless": @YES };
+            } else {
+                *outResult = @{ @"location": [NSNull null], @"heuristic": @YES, @"headless": @YES };
+            }
+            return;
+        }
 
         if ([method isEqualToString:@"language.hover"]) {
             NSString* hover = [_windowBridge hoverAtLocation:targetPath line:line column:column];

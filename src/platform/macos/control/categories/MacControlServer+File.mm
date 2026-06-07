@@ -161,6 +161,18 @@ static const NSInteger kMaxBatchFilePaths = 100;
             *outErrMsg = [NSString stringWithFormat:@"File does not exist: %@", absPath];
             return;
         }
+        if (self.windowController.isHeadless || ![[self.windowController window] isVisible]) {
+            NSArray* recents = [[NSUserDefaults standardUserDefaults] stringArrayForKey:@"RecentFiles"] ?: @[];
+            NSMutableArray* updatedRecents = [recents mutableCopy];
+            [updatedRecents removeObject:absPath];
+            [updatedRecents insertObject:absPath atIndex:0];
+            if (updatedRecents.count > 20) {
+                [updatedRecents removeObjectsInRange:NSMakeRange(20, updatedRecents.count - 20)];
+            }
+            [[NSUserDefaults standardUserDefaults] setObject:updatedRecents forKey:@"RecentFiles"];
+            *outResult = @{ @"opened": @YES, @"path": absPath, @"headless": @YES };
+            return;
+        }
         [self.windowController openFileAtPath:absPath line:1 column:1];
         *outResult = @{ @"opened": @YES, @"path": absPath };
         return;

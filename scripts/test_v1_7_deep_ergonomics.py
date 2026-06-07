@@ -25,16 +25,16 @@ def listen_events(sock):
 def main():
     print("=== DietCode v1.7 Deep Ergonomics Verification Suite ===")
 
-    with connect() as sock:
+    with connect() as sock, connect() as event_sock:
         token = load_token()
-        
-        # Start event listener thread
-        t = threading.Thread(target=listen_events, args=(sock,), daemon=True)
-        t.start()
 
         # 1. Test terminal streaming
         print("\nTest 1: Terminal Streaming")
-        call(sock, token, "event.subscribe", {"types": ["terminal.output"]})
+        call(event_sock, token, "event.subscribe", {"types": ["terminal.output"]})
+        # Keep event notifications on a dedicated connection so they cannot
+        # consume synchronous RPC responses from the main request socket.
+        t = threading.Thread(target=listen_events, args=(event_sock,), daemon=True)
+        t.start()
         print("Running command 'ls -la'...")
         call(sock, token, "terminal.run", {"command": "ls -la"})
         time.sleep(1) # Wait for output events
