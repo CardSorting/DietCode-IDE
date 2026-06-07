@@ -155,6 +155,6 @@ with DietCodeAgentClient() as rpc, DietCodeAgentClient() as events:
         print(frame["params"]["detail"])
 ```
 
-For command-line listeners, use `--listen --listen-type terminal.output`. Repeat `--listen-type` to subscribe to multiple event types, and use `--listen-max-events N` for bounded automation.
+For command-line listeners, use `--listen --listen-type terminal.output`. Repeat `--listen-type` to subscribe to multiple event types, and use `--listen-max-events N` for bounded automation. Event frames are written to stdout, while listener status text is written to stderr unless `--quiet` is set.
 
 See [Technical Architecture](technical-architecture.md) for details on how the Control Server is implemented within the macOS layer.

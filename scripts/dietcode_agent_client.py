@@ -92,6 +92,17 @@ def json_text(value: Any, compact: bool = False) -> str:
     return json.dumps(value, indent=2, sort_keys=True)
 
 
+def normalize_event_types(types: list[str]) -> list[str]:
+    if not isinstance(types, list) or not types:
+        raise ValueError("event types must be a non-empty list of strings")
+    normalized: list[str] = []
+    for event_type in types:
+        if not isinstance(event_type, str) or not event_type:
+            raise ValueError("event types must contain only non-empty strings")
+        normalized.append(event_type)
+    return normalized
+
+
 def _path_state(path: str) -> dict[str, Any]:
     expanded = os.path.expanduser(path)
     state: dict[str, Any] = {"path": expanded, "exists": False}
@@ -663,13 +674,16 @@ class DietCodeAgentClient:
         return read_rpc_frame(self.sock, request_timeout=request_timeout)
 
     def subscribe_events(self, types: list[str], request_id: str | None = None) -> dict[str, Any]:
+        types = normalize_event_types(types)
         return self.call("event.subscribe", {"types": types}, request_id)
 
     def unsubscribe_events(self, types: list[str], request_id: str | None = None) -> dict[str, Any]:
+        types = normalize_event_types(types)
         return self.call("event.unsubscribe", {"types": types}, request_id)
 
     @contextmanager
     def event_subscription(self, types: list[str]) -> Iterator["DietCodeAgentClient"]:
+        types = normalize_event_types(types)
         self.subscribe_events(types)
         try:
             yield self
@@ -683,6 +697,8 @@ class DietCodeAgentClient:
         max_events: int | None = None,
         unsubscribe: bool = True,
     ) -> Iterator[dict[str, Any]]:
+        types = normalize_event_types(types)
+
         def events() -> Iterator[dict[str, Any]]:
             delivered = 0
             while max_events is None or delivered < max_events:
@@ -806,6 +822,19 @@ def run_self_test() -> dict[str, Any]:
 
     compact = json_text({"b": 2, "a": 1}, compact=True)
     checks.append({"name": "json.compact", "ok": compact == '{"a":1,"b":2}'})
+    checks.append({"name": "events.normalize_valid", "ok": normalize_event_types(["terminal.output"]) == ["terminal.output"]})
+    try:
+        normalize_event_types([])
+        event_types_empty_ok = False
+    except ValueError as exc:
+        event_types_empty_ok = "non-empty" in str(exc)
+    checks.append({"name": "events.normalize_empty", "ok": event_types_empty_ok})
+    try:
+        DietCodeAgentClient(start=False).subscribe_events([])
+        sdk_invalid_subscribe_ok = False
+    except ValueError as exc:
+        sdk_invalid_subscribe_ok = "non-empty" in str(exc)
+    checks.append({"name": "events.sdk_invalid_subscribe", "ok": sdk_invalid_subscribe_ok})
     fake_args = argparse.Namespace(app=None)
     checks.append({"name": "config.value", "ok": config_value(fake_args, {"app": "configured"}, "app", "app", None) == "configured"})
     patch_args = argparse.Namespace(
@@ -1179,8 +1208,9 @@ def main() -> int:
                 agent_id=args.agent_id,
                 rationale=args.rationale,
             ) as client:
-                listen_types = args.listen_type or ["*"]
-                print("Listening for events... (Press Ctrl+C to stop)")
+                listen_types = normalize_event_types(args.listen_type or ["*"])
+                if not args.quiet:
+                    print("Listening for events... (Press Ctrl+C to stop)", file=sys.stderr)
                 try:
                     for frame in client.iter_events(
                         listen_types,
