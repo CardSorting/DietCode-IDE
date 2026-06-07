@@ -1,32 +1,65 @@
 # Command Catalog
 
-Every command should have a plain English label, menu location, optional shortcut, command palette entry, description, enabled state, and risk level.
+This catalog reflects the verified commands and keyboard shortcuts available in the DietCode macOS implementation.
 
-## Initial commands
+## 📁 File Menu
 
-| Command | Menu | Shortcut | Palette label | Description | Phase |
-|---|---|---|---|---|---|
-| New File | File > New File | Cmd/Ctrl+N | New File | Start with a blank file. | 1A |
-| Open File | File > Open File | Cmd/Ctrl+O | Open File | Edit an existing file. | 1A |
-| Save | File > Save | Cmd/Ctrl+S | Save | Save changes to the current file. | 1A |
-| Save As | File > Save As | Cmd/Ctrl+Shift+S | Save As | Save this file to a chosen location. | 1A |
-| Close Tab | File > Close Tab | Cmd/Ctrl+W | Close Tab | Close the current file, asking first if unsaved. | 1B |
-| Find | Edit > Find | Cmd/Ctrl+F | Find | Find text in the current file. | 1B |
-| Replace | Edit > Replace | Cmd/Ctrl+H | Replace | Replace text in the current file. | 2 |
-| Go to Line | Go > Go to Line | Cmd/Ctrl+G | Go to Line | Jump to a line number. | 2 |
-| Command Palette | View > Command Palette | Cmd/Ctrl+Shift+P | Command Palette | Search available commands. | 2 |
-| Toggle Sidebar | View > Toggle Sidebar | Cmd/Ctrl+B | Toggle Sidebar | Show or hide the sidebar. | 1B |
-| Open Folder | File > Open Folder | Cmd/Ctrl+Shift+O | Open Folder | See a folder of files on the left. | 2 |
-| Search Folder | Search panel | none | Search Folder | Search inside the opened folder. | 3 |
-| Run Current File | Run > Run Current File | F5 or Cmd/Ctrl+R | Run Current File | Run the current file when supported. | 3 |
-| Toggle Terminal | Terminal > Toggle Terminal | Ctrl+` | Toggle Terminal | Open or close the terminal. | 3 |
-| Open Settings | App/Menu > Settings | Cmd/Ctrl+, | Open Settings | Change theme, font size, and editor options. | 1B |
-| Open Welcome | Help > Welcome | none | Open Welcome | Return to the welcome screen. | 1A |
-| Learn DietCode Basics | Help > Learn DietCode Basics | none | Learn DietCode Basics | Start or restart the optional beginner guide. | 4 |
+| Command | Shortcut | Description |
+|---|---|---|
+| New File | `Cmd+N` | Create a blank document. |
+| Open File... | `Cmd+O` | Open a file from disk. |
+| Open Folder... | `Cmd+Option+O` | Open a workspace directory. |
+| Save | `Cmd+S` | Save current file. |
+| Save As... | `Cmd+Shift+S` | Save file with a new name. |
+| Close Tab | `Cmd+W` | Close the active editor tab. |
 
-## Command safety requirements
+## 📝 Edit Menu
 
-- Destructive commands require confirmation.
-- Disabled commands should explain why when practical.
-- Commands that spawn processes must be visible and user-triggered.
-- Command names use plain English.
+| Command | Shortcut | Description |
+|---|---|---|
+| Undo | `Cmd+Z` | Revert last action. |
+| Redo | `Cmd+Shift+Z` | Re-apply last reverted action. |
+| Cut | `Cmd+X` | Cut selection to clipboard. |
+| Copy | `Cmd+C` | Copy selection to clipboard. |
+| Paste | `Cmd+V` | Paste from clipboard. |
+| Find | `Cmd+F` | Open the search bar. |
+| Format Document | `Cmd+Shift+F` | Run the language-specific formatter (e.g., clang-format, black). |
+
+## 👁️ View Menu
+
+| Command | Shortcut | Description |
+|---|---|---|
+| Open Welcome | none | Return to the welcome screen. |
+| Command Palette... | `Cmd+Shift+P` | Launch the global command search. |
+| Toggle Sidebar | `Cmd+B` | Show/hide the file explorer. |
+
+## 🚀 Go Menu
+
+| Command | Shortcut | Description |
+|---|---|---|
+| Go to Line... | `Cmd+G` | Jump to a specific line number. |
+| Go to Definition | `Cmd+Ctrl+D` | Jump to the definition of the symbol under cursor. |
+| Next Tab | `Ctrl+Tab` | Switch to the next open document. |
+| Previous Tab | `Ctrl+Shift+Tab` | Switch to the previous open document. |
+
+## ⚙️ Run & Tools
+
+| Command | Shortcut | Description |
+|---|---|---|
+| Run Current File | `Cmd+R` | Execute the active file in the terminal. |
+| Run Linter | `Cmd+Shift+L` | Run static analysis on the current file. |
+| Refresh Git Status | `Cmd+Shift+G` | Manually poll for git changes. |
+| Toggle Terminal | `Cmd+`` | Open/close the integrated terminal panel. |
+
+## 🛠️ Advanced Developer Commands
+
+These commands are available via the **Command Palette** (`Cmd+Shift+P`):
+
+- **Toggle Auto-Save**: Enable/disable automatic saving on focus loss.
+- **Clear Terminal**: Wipe the scrollback of the active terminal.
+- **Prune Recovery Store**: Clean up old session backups.
+- **Reset Workspace Cache**: Clear the internal file and symbol indices.
+
+---
+
+*Note: Shortcuts follow standard macOS conventions. Windows and Linux support will use Ctrl equivalents in Phase 2/3.*

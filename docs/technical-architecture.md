@@ -1,113 +1,49 @@
 # Technical Architecture
 
-## Architecture summary
+DietCode is engineered with a strict decoupled architecture, separating a portable C++20 core from high-performance native shells and a robust agent-control surface.
 
-DietCode has a portable C++20 core and thin native platform shells. The macOS shell uses Objective-C++ and AppKit. The Windows shell will later use Win32 and DirectWrite. Linux will be approached honestly later.
+## Layer Model
 
-## Layer model
+### 1. Domain / Editor Core (`src/editor/`, `src/search/`, `src/syntax/`)
+- **Text Buffer:** Gap-buffer or piece-table based implementation for efficient large-file handling.
+- **State Management:** Pure C++ implementation of cursors, selections, and a recursive undo/redo stack.
+- **Search Engine:** High-speed literal substring scan and regex primitives.
+- **Syntax Scaffolding:** Lightweight tokenization and language-detection logic.
+- **Rules:** Zero platform dependencies. Testable in a headless environment.
 
-### Domain / editor logic
+### 2. Infrastructure & I/O (`src/filesystem/`, `src/platform/`)
+- **File Service:** Thread-safe file I/O with change notification support.
+- **Git Service:** Native integration for staging, diffing, and committing.
+- **Path Utilities:** UTF-8 safe path manipulation and security validation.
 
-Location:
+### 3. macOS Platform Shell (`src/platform/macos/`)
+The macOS implementation is the primary high-fidelity reference for the DietCode architecture.
 
-- `src/editor/`
-- `src/search/`
-- `src/syntax/`
+#### Native UI (`ui/`)
+- **AppKit Shell:** Uses `NSWindowController` and `NSView` for zero-latency rendering and standard macOS behavior.
+- **Terminal Panel:** Native PTY (Pseudo-Terminal) implementation with interactive execution support.
+- **Layout Engine:** Nested `NSSplitView` architecture for the sidebar, editor, and bottom panels.
 
-Responsibilities:
+#### Control & Agent Surface (`control/`)
+- **MacControlServer:** A dedicated Unix socket listener running a JSON-RPC 2.0 protocol.
+- **Chip/Combo Runtime:** A deterministic execution engine for atomic operations (Chips) and complex transactions (Combos).
+- **Security & Routing:** Strict permission-based routing policy and path-security verification.
 
-- Text buffer.
-- Cursor and selection.
-- Undo/redo.
-- Search result models.
-- Lightweight language/token models.
+#### Platform Services (`services/`)
+- **SymbolIndexService:** High-speed, on-demand symbol extraction and indexing.
+- **WorkspaceAnalysisService:** Real-time linguistic and statistical analysis of the opened directory.
+- **DiffAnalysisService:** Structured hunk analysis for agentic patching and conflict detection.
 
-Rules:
+### 4. Application Orchestration (`src/core/`)
+- **Command Registry:** Centralized dispatch for IDE actions.
+- **Event Bus:** Duplex notification system for document and session events.
 
-- No AppKit.
-- No filesystem dialogs.
-- No process APIs.
-- Testable without mocks.
+## Native Vertical Slice Strategy
 
-### Core / orchestration
+The initial implementation uses `NSTextView` for the editor surface to provide immediate accessibility, IME, and high-quality text rendering. The pure C++ editor primitives in `src/editor/` are designed to eventually drive a custom CoreText-based renderer, but the "Diet" philosophy prioritizes stable product loops (Launch -> Edit -> Save) over early custom rendering complexity.
 
-Location:
+## Threading & Performance
 
-- `src/core/`
-
-Responsibilities:
-
-- App state.
-- Config.
-- Commands.
-- Command registry.
-- Events.
-- Logging.
-
-Rules:
-
-- Orchestrates; does not implement platform I/O.
-- Talks to infrastructure through interfaces or small adapters.
-
-### Infrastructure / external world
-
-Location:
-
-- `src/filesystem/`
-- `src/platform/`
-- `src/platform/macos/`
-- `src/run/` later
-
-Responsibilities:
-
-- File reads/writes.
-- Native windows.
-- Native menus.
-- Native file dialogs.
-- Native clipboard.
-- Process running later.
-
-### UI / presentation models
-
-Location:
-
-- `src/ui/`
-
-Responsibilities:
-
-- App shell concepts.
-- Layout concepts.
-- Status bar model.
-- Welcome screen copy and actions.
-- Sidebar and tab models.
-
-### Plumbing / stateless helpers
-
-Location:
-
-- `src/utils/`
-
-Responsibilities:
-
-- String helpers.
-- UTF-8 safety helpers.
-- Small pure utilities.
-
-## macOS vertical slice strategy
-
-The first prototype uses `NSTextView` as the visible editing surface. This keeps the MVP native, dependency-free, accessible, and usable quickly. Pure C++ editor primitives are still implemented and tested, but custom text rendering is deferred until the document lifecycle and navigation model are stable.
-
-## Why this is industry-standard
-
-Text editors are difficult. Native text controls provide accessibility, keyboard editing, selection, scrolling, clipboard, and IME behavior immediately. DietCode should prove its product loop first: launch, welcome, open, edit, save, and status.
-
-## Future custom editor renderer
-
-When replacing `NSTextView`, the custom editor must:
-
-- Render visible lines only.
-- Use predictable monospace measurement.
-- Handle common UTF-8 safely.
-- Provide selection, cursor, keyboard navigation, and mouse selection.
-- Preserve accessibility behavior.
-- Avoid full Unicode perfection in v1.
+- **Main Thread:** Reserved for UI rendering and standard event processing.
+- **Control Thread:** Handles RPC requests from the Unix socket to ensure the UI remains responsive during large-scale agent operations.
+- **Worker Pool:** Used for background search, symbol indexing, and diff generation.

@@ -1,86 +1,85 @@
-DietCode
-========
+<p align="center">
+  <img src="resources/AppIcon.icns" width="128" height="128" alt="DietCode Logo">
+</p>
 
-DietCode is a lightweight, native, VSCode-like IDE prototype for people who want a familiar coding workspace without surprise compute cost.
+<h1 align="center">DietCode IDE</h1>
 
-Product promise:
+<p align="center">
+  <strong>The High-Fidelity, Agent-Native Coding Workspace.</strong><br>
+  <em>Open. Code. Run. Save. Zero Surprise Compute.</em>
+</p>
 
-> Open. Code. Run. Save. No jet engine.
+<p align="center">
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="License"></a>
+  <img src="https://img.shields.io/badge/platform-macOS-lightgrey.svg" alt="Platform">
+  <img src="https://img.shields.io/badge/language-C%2B%2B20-orange.svg" alt="Language">
+</p>
 
-DietCode is macOS-first in this repository. It uses C++20 for the portable core and Objective-C++/AppKit for the native shell. The MVP intentionally avoids Electron, Chromium, Qt, SDL, ImGui, package managers, telemetry, cloud accounts, background indexing, extension hosts, AI defaults, hidden daemons, and automatic sync.
+---
 
-Current prototype goals
------------------------
+**DietCode** is a native, lightweight IDE engineered for developers and autonomous agents who demand a high-performance, predictable, and local-first coding environment. It eliminates the "compute tax" of modern editors by stripping away hidden background indexing, telemetry, and extension-host overhead.
 
-- Native macOS window and menu bar.
-- Calm welcome screen with obvious beginner actions.
-- New File, Open File, Save, and Save As.
-- Editable native text surface for the first vertical slice.
-- Unsaved-change indicator.
-- Simple status bar.
-- Pure C++ editor/search primitives with no third-party test framework.
-- Documentation that preserves the product boundary before feature growth.
+## 🤖 Built for Agents: The Headless Control Surface
 
-Repository map
---------------
+Unlike editors with bolted-on AI plugins, DietCode is designed from the ground up as an **Agentic IDE**. It exposes a massive JSON-RPC surface over a local Unix socket, enabling external agents to perform high-fidelity workspace operations.
+
+- **Deterministic Runtime:** Operations are executed as atomic **Chips**, which can be composed into stateful, recoverable **Combos**.
+- **Deep Visibility:** Agents have native access to symbol outlines, diagnostic clusters, git status, and terminal scrollback.
+- **Transactional Safety:** Built-in validation and rollback support for complex multi-file edits and patches.
+- **Duplex Observability:** Real-time event subscriptions (LSP diagnostics, file saves, focus changes) via the socket.
+
+## ⚡ Technical Architecture
+
+DietCode follows a strict layered architecture to ensure portability and native performance:
+
+- **Core (C++20):** Platform-agnostic domain logic, including the high-performance text buffer, search algorithms, and command registry.
+- **Native Shell (Obj-C++/AppKit):** Zero-latency macOS integration using native Cocoa components for windows, menus, and the primary editing surface.
+- **Control Server:** A dedicated thread managing the Unix socket, providing thread-safe access to the editor's state and infrastructure.
+- **PTY Execution:** A native pseudo-terminal implementation for low-overhead subprocess management and interactive tool execution.
+
+## 🧠 The "Diet" Philosophy
+
+We prioritize **predictability** and **sovereignty**:
+- 🚫 **No Background Indexing:** Symbols are indexed on-demand or during idle periods with explicit limits.
+- 🚫 **No Extension Bloat:** Core features are built-in; no package managers or dependency hell.
+- 🚫 **No Hidden Daemons:** When you quit DietCode, every related process dies.
+- 🚫 **Privacy by Default:** Zero telemetry. Your code and interaction data never leave your machine.
+
+## 🏗️ Repository Mapping
 
 ```text
-docs/                 Product, UX, architecture, performance, and testing docs
-src/core/             Application orchestration models and command registry
-src/editor/           Pure C++ editor domain primitives
-src/filesystem/       File I/O adapters
-src/platform/         Platform contracts
-src/platform/macos/   AppKit Objective-C++ shell
-src/search/           Pure search models and algorithms
-src/syntax/           Lightweight syntax model scaffolding
-src/ui/               Platform-neutral UI view models/concepts
-src/utils/            Stateless helpers
-tests/                No-dependency C++ test runner
-.wiki/                Sovereign Knowledge Ledger
+docs/                 Technical specs, agent protocol, and architectural guides.
+scripts/              Python SDK and integration test suites for the agent API.
+src/core/             The portable C++20 editor core.
+src/platform/macos/   AppKit shell, PTY terminal, and JSON-RPC control server.
+src/editor/           Domain primitives: Buffer, Cursor, Selection, Undo/Redo.
+src/filesystem/       Native I/O adapters and Git integration service.
+.wiki/                The Sovereign Knowledge Ledger (Internal decision logs).
 ```
 
-Build quick start
------------------
+## 🛠️ Build & Development
 
-Requirements:
+DietCode uses standard platform tools for maximum transparency.
 
-- macOS
-- Xcode Command Line Tools with `clang++` and `make`
-
-Commands:
-
-```sh
+```bash
+# Verify the core logic
 make test
+
+# Compile the native macOS bundle
 make app
+
+# Launch the IDE
 make run
 ```
 
-Headless agent control:
+*See [docs/build-instructions.md](docs/build-instructions.md) for environment details.*
 
-```sh
-make app
-make agent-self-test
-make ensure-socket
-make agent-ready
-make agent-status
-make agent-ping
-make agent-methods
-make agent-capabilities
-python3 scripts/dietcode_agent_client.py --ensure-only --compact
-python3 scripts/dietcode_agent_client.py --compact rpc.ping
-python3 scripts/dietcode_agent_client.py --diff-source unstaged --diff-hunks --compact
-python3 scripts/dietcode_agent_client.py --diff-source unstaged --offset 0 --max-bytes 65536 --compact
-```
+## 📄 License
 
-`--ensure-socket` exits immediately if `~/.dietcode/control.sock` is already accepting connections. Otherwise it starts a detached `--headless` DietCode process and waits for the socket. `--ensure-timeout <seconds>` controls that wait. Python agents can import `scripts/dietcode_agent_client.py` and call `ensure_socket()` before sending JSON-RPC frames.
+DietCode is open-source software released under the [MIT License](LICENSE).
 
-See `docs/headless-agent-control.md` for the machine-readable CLI contract, environment variables, timeouts, and stdin/file parameter examples.
+---
 
-See `docs/build-instructions.md` for details.
-
-Scope guard
------------
-
-DietCode v1 does not include extensions, LSP, debugger, remote containers, cloud sync, account login, AI chat, marketplace, background embeddings, or automatic project graph generation.
-
-Small tools are good tools.
+<p align="center">
+  <em>Small tools are good tools. High-fidelity tools are better.</em>
+</p>

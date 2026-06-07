@@ -1,342 +1,121 @@
-Headless Agent Control
-======================
+# Headless Agent Control
 
-DietCode exposes a local Unix socket control surface for automation at:
+DietCode exposes a high-fidelity local Unix socket control surface designed for deep integration with automation tools and AI agents.
 
-```text
-~/.dietcode/control.sock
-```
+**Socket Path:** `~/.dietcode/control.sock`
+**Protocol:** Newline-delimited JSON-RPC (2.0-style)
+**Authentication:** Requires a session token from `~/.dietcode/session.token`
 
-The socket uses newline-delimited JSON-RPC-style request and response frames. Requests must include the current session token from:
+---
 
-```text
-~/.dietcode/session.token
-```
+## 🏗️ The "Chip & Combo" Runtime
 
-Recommended entry points
-------------------------
+DietCode features a deterministic execution runtime where individual operations are called **Chips**. Multiple chips can be orchestrated into a **Combo** (a stateful transaction or script).
 
-Build the app and ensure the socket is active:
+- **Chips:** Atomic, reusable operations with metadata (idempotency, side-effects, rollback support).
+- **Combos:** Sequential or branched execution of chips with built-in validation and recovery.
 
-```sh
-make app
-make ensure-socket
-```
+### Chip Registry Methods
+- `chip.list`: List all registered atomic operations.
+- `chip.describe`: Get detailed metadata for a specific chip (params, returns, risk level).
 
-Run a compact health check suitable for scripts:
+### Combo Management
+- `combo.validate`: Check if a sequence of chips is valid before execution.
+- `combo.run`: Execute a combo and return the results.
+- `combo.status`: Check the progress of a running combo.
+- `combo.cancel`: Halt an active combo.
+- `combo.rollback`: Revert the side-effects of a completed combo (requires chip rollback support).
 
-```sh
-make agent-ready
-make agent-status
-make agent-ping
-make agent-methods
-make agent-capabilities
-make agent-self-test
-```
+---
 
-Use the Python helper directly:
+## 🛠️ RPC Method Reference
 
-```sh
-python3 scripts/dietcode_agent_client.py --ensure-only --compact
-python3 scripts/dietcode_agent_client.py --wait-ready --compact
-python3 scripts/dietcode_agent_client.py --status --compact
-python3 scripts/dietcode_agent_client.py --self-test --compact
-python3 scripts/dietcode_agent_client.py --emit-config --compact
-python3 scripts/dietcode_agent_client.py --capabilities --compact
-python3 scripts/dietcode_agent_client.py --server-version --compact
-python3 scripts/dietcode_agent_client.py --list-methods --compact
-python3 scripts/dietcode_agent_client.py --describe file.read --compact
-python3 scripts/dietcode_agent_client.py --compact rpc.ping
-python3 scripts/dietcode_agent_client.py --raw-response rpc.ping
-```
+### Core & Discovery
+- `rpc.ping`: Health check. Returns `pong: true`.
+- `rpc.version`: Returns app, protocol, and schema versions.
+- `rpc.methods`: Returns a list of all available RPC method names.
+- `rpc.describe`: Returns a detailed schema for one or all methods.
 
-CLI output contract
--------------------
+### Workspace & Search
+- `workspace.getRoot`: Get the absolute path of the opened workspace.
+- `workspace.openFolder`: Change the active workspace.
+- `workspace.listFiles`: Recursively list files in the workspace.
+- `workspace.openFile`: Open a file in the editor.
+- `workspace.grep`: Perform a high-speed literal substring scan across the workspace.
+- `search.text`: Advanced text search with context and offsets.
+- `search.files`: Find files by name/glob.
+- `search.todo`: Scan for TODO/FIXME comments.
+- `search.semantic`: In-memory semantic search (when indexed).
 
-- stdout is reserved for machine-readable JSON.
-- diagnostics and startup status are written to stderr.
-- successful calls exit with status 0.
-- startup, auth, transport, validation, and RPC errors exit nonzero.
+### File & Editor Operations
+- `file.read`: Read entire file content.
+- `file.readRange`: Read specific line ranges.
+- `file.write`: Overwrite file content.
+- `file.create`: Create a new file with content.
+- `editor.getActiveFile`: Get the path of the currently focused tab.
+- `editor.getOpenFiles`: Get a list of all files currently open in tabs.
+- `editor.insertText`: Insert text at the current cursor position.
+- `editor.replaceRange`: Replace a specific character range in a file.
+- `editor.applyPatch`: Apply a unified diff patch to a file with validation.
+- `editor.saveFile`: Trigger a save operation.
+- `editor.goto`: Navigate to a specific line/column.
 
-This lets agents pipe stdout directly into JSON parsers without filtering logs.
+### Advanced Analysis & Symbols
+- `analysis.workspaceSummary`: Statistical overview of the workspace (languages, file counts).
+- `symbols.document`: Extract a symbol tree (classes, functions, etc.) for a file.
+- `symbols.references`: Find all usages of a specific symbol.
+- `symbols.atCursor`: Identify the symbol under the editor cursor.
 
-Configuration
--------------
+### Diff & Patch (Agent Optimized)
+- `diff.chunk`: Read large diffs in chunks to avoid frame limits.
+- `diff.hunks`: Get structured unified diff hunks with old/new line mapping.
+- `patch.validate`: Dry-run a patch to check for conflicts or syntax dangers.
+- `patch.apply`: Execute a patch with optional confirmation logic.
+- `patch.applyBatch`: Apply multiple patches across multiple files atomically.
 
-The helper accepts flags, environment variables, and an optional JSON config file. Precedence is:
+### Git Integration
+- `git.status`: Get staged, modified, and untracked file lists.
+- `git.diff`: Get raw git diff text.
+- `git.stage` / `git.unstage`: Manage the staging area.
+- `git.commit`: Create a commit with a message.
 
-```text
-CLI flags > config file > environment defaults > built-in defaults
-```
+### Terminal & Execution
+- `terminal.run`: Execute a shell command in the integrated terminal.
+- `terminal.getOutput`: Capture current terminal scrollback.
+- `terminal.status`: Check if a process is still running.
 
-Environment variables:
+### Stateful Task Runtime
+- `task.start`: Initialize a high-level goal with a budget and verification steps.
+- `task.step`: Execute a single step in a multi-turn task.
+- `task.runLoop`: Autonomously run steps until a goal is met or budget exceeded.
 
-```sh
-DIETCODE_APP_PATH=/path/to/DietCode \
-DIETCODE_SOCKET_PATH=~/.dietcode/control.sock \
-DIETCODE_TOKEN_PATH=~/.dietcode/session.token \
-python3 scripts/dietcode_agent_client.py rpc.ping
-```
+### Diagnostics & Repair
+- `diagnostics.list`: Get all current compiler/linter errors and warnings.
+- `diagnostics.cluster`: Group diagnostics by cause or file.
+- `repair.fromCompilerErrors`: Suggest or apply fixes based on diagnostic evidence.
 
-Config file:
+### Events (Duplex)
+- `event.subscribe`: Listen for real-time notifications (e.g., `DocumentSaved`, `ActivityChanged`).
+- `event.unsubscribe`: Stop listening for events.
 
-```sh
-python3 scripts/dietcode_agent_client.py --config docs/headless-agent-config.example.json --status --compact
-```
+---
 
-Supported config keys:
+## 🐍 Python SDK Usage
 
-```json
-{
-  "app": "build/DietCode.app/Contents/MacOS/DietCode",
-  "socket": "~/.dietcode/control.sock",
-  "tokenFile": "~/.dietcode/session.token",
-  "timeout": 10,
-  "requestTimeout": 30,
-  "retries": 0
-}
-```
-
-Useful flags:
-
-```text
---config PATH           JSON config file, also supported with DIETCODE_AGENT_CONFIG
---app PATH              DietCode binary path
---socket PATH           Unix socket path
---token-file PATH       Session token path
---timeout SECONDS       socket startup/connect timeout
---request-timeout SECONDS
---retries N             transport retries for safe/idempotent calls
---no-start              fail if the socket is not already active
---ensure-only           ensure socket activity, then exit
---status                print local socket/token/app readiness JSON
---wait-ready            ensure socket activity and wait for authenticated RPC readiness
---self-test             run client-only checks without connecting to DietCode
---emit-config           print resolved config without connecting to DietCode
---capabilities          print version, methods, schema, and transport limits
---server-version        call rpc.version
---list-methods          call rpc.methods
---describe METHOD       call rpc.describe for one method
---raw-response          print the full response envelope
---compact               print one-line JSON
---request-id ID         set the JSON-RPC request id
---params-file PATH      load RPC params from a JSON file
---params-stdin          load RPC params from stdin
---path PATH             path for patch stdin/file helpers
---grep QUERY            call workspace.grep with a literal query
---search-text QUERY     call search.text with a literal query
---result-offset N       zero-based result cursor for workspace.grep or search.text
---max-results N         maximum results for workspace.grep or search.text
---before N              context lines before each search.text result
---after N               context lines after each search.text result
---case-sensitive        use case-sensitive literal grep/text search
---include GLOB          include glob for grep/text search, repeatable
---exclude GLOB          exclude glob for grep/text search, repeatable
---diff-source SOURCE    call diff.chunk for unstaged, staged, or file
---diff-hunks            use diff.hunks with --diff-source instead of diff.chunk
---offset BYTES          byte offset for diff.chunk or patch.chunk
---max-bytes BYTES       maximum bytes for diff.chunk or patch.chunk
---max-hunks N           maximum hunk summaries for diff.hunks or patch.hunks
---hunk-offset N         zero-based hunk cursor for diff.hunks or patch.hunks
---include-lines         include literal per-row old/new line evidence in hunk responses
---max-lines-per-hunk N  maximum literal line rows per returned hunk
---patch-file PATH       load unified diff text from a file
---patch-stdin           load unified diff text from stdin
---patch-hunks           default patch stdin/file calls to patch.hunks
---confirm               set confirm=true for patch apply calls
---batch-file PATH       load newline-delimited JSON RPC requests from a file
---batch-stdin           load newline-delimited JSON RPC requests from stdin
-```
-
-Python SDK usage
-----------------
-
-Agents that need more than one call should reuse one connection:
+The `scripts/dietcode_agent_client.py` provides a robust wrapper for these methods.
 
 ```python
-from scripts.dietcode_agent_client import DietCodeAgentClient, DietCodeRpcError
+from dietcode_agent_client import DietCodeAgentClient
 
-try:
-    with DietCodeAgentClient() as client:
-        version = client.call("rpc.version")
-        methods = client.call("rpc.methods")
-except DietCodeRpcError as exc:
-    print(exc.string_code, exc.message)
-```
-
-Use `raw_call()` when the full response envelope is needed:
-
-```python
 with DietCodeAgentClient() as client:
-    response = client.raw_call("rpc.ping", request_id="healthcheck-1")
+    # High-level workspace search
+    results = client.call("workspace.grep", {"query": "TODO"})
+    
+    # Structured diff reading
+    hunks = client.call("diff.hunks", {"source": "unstaged", "includeLines": True})
+    
+    # Terminal execution
+    client.call("terminal.run", {"command": "make test"})
 ```
 
-The SDK automatically reloads the session token once if the server reports an invalid token. Read-only methods (e.g. `rpc.ping`, `workspace.grep`, `search.text`, etc.) are automatically retried at least once on transient socket/connection errors. Transport retries for mutations are opt-in with `retries=N` to prevent duplication of side-effects.
-
-Readiness levels
-----------------
-
-Use the narrowest check that matches the workflow:
-
-```text
---ensure-only   socket exists or was started
---status        socket/token/app metadata plus authenticated rpc.ping
---wait-ready    start if needed, then wait until authenticated rpc.ping succeeds
---capabilities  authenticated startup payload for planning agent actions
-```
-
-Parameter examples
-------------------
-
-Inline params:
-
-```sh
-python3 scripts/dietcode_agent_client.py workspace.grep '{"query":"DietCode","maxResults":3}'
-```
-
-Params from stdin:
-
-```sh
-printf '{"query":"TODO","maxResults":10}' | \
-  python3 scripts/dietcode_agent_client.py --params-stdin search.text
-```
-
-Params from a file:
-
-```sh
-python3 scripts/dietcode_agent_client.py --params-file /tmp/params.json file.read
-```
-
-Batch mode
-----------
-
-Batch mode accepts newline-delimited JSON requests. Each line is an object with `method`, optional `params`, and optional `id`.
-
-```sh
-cat > /tmp/dietcode-batch.jsonl <<'JSONL'
-{"id":"health","method":"rpc.ping"}
-{"id":"methods","method":"rpc.describe","params":{"method":"file.read"}}
-JSONL
-
-python3 scripts/dietcode_agent_client.py --batch-file /tmp/dietcode-batch.jsonl
-```
-
-Responses are printed as compact JSONL, one response per input request. The process exits nonzero if any response has `ok: false`.
-
-Literal grep and diff evidence
-------------------------------
-
-`workspace.grep` and `search.text` are literal substring scans. They do not use semantic trees, graphs, fuzzy matching, or inferred ranking. Each result includes:
-
-```text
-path
-line
-column
-matchSpans
-preview
-contextBefore/contextAfter
-```
-
-Use `matchSpans` rather than re-inferring columns from `preview`.
-
-For large searches, page literal results instead of assuming omitted matches:
-
-```sh
-python3 scripts/dietcode_agent_client.py workspace.grep '{"query":"TODO","maxResults":100,"resultOffset":0}'
-python3 scripts/dietcode_agent_client.py workspace.grep '{"query":"TODO","maxResults":100,"resultOffset":100}'
-python3 scripts/dietcode_agent_client.py --grep TODO --max-results 100 --result-offset 0 --compact
-python3 scripts/dietcode_agent_client.py --search-text TODO --before 1 --after 1 --max-results 100 --result-offset 100 --compact
-```
-
-`workspace.grep` and `search.text` return `resultIndex`, `resultOffset`, `nextResultOffset`, `hasMore`, and `lineSha256`. Page until `hasMore` is false. Use `lineSha256` with `path`, `line`, and `matchSpans` when carrying evidence across turns.
-
-For changed files, prefer hunk maps before raw diff text when the agent only needs exact locations:
-
-```sh
-python3 scripts/dietcode_agent_client.py diff.hunks '{"source":"unstaged","maxHunks":200}'
-python3 scripts/dietcode_agent_client.py diff.hunks '{"source":"unstaged","maxHunks":200,"hunkOffset":200}'
-python3 scripts/dietcode_agent_client.py diff.hunks '{"source":"file","path":"src/app.py","maxHunks":50}'
-python3 scripts/dietcode_agent_client.py --diff-source unstaged --diff-hunks --max-hunks 200 --compact
-python3 scripts/dietcode_agent_client.py --diff-source unstaged --diff-hunks --max-hunks 200 --hunk-offset 200 --compact
-python3 scripts/dietcode_agent_client.py --diff-source unstaged --diff-hunks --include-lines --max-lines-per-hunk 120 --compact
-```
-
-`diff.hunks` returns literal unified diff file headers, hunk headers, diff-text line ranges, old/new line ranges, added/removed/context counts, `hunkIndex`, `sha256`, `nextHunkOffset`, `hasMoreHunks`, and `truncated`. With `includeLines`, each returned hunk also includes exact row objects with `diffLine`, `kind`, `oldLine`, `newLine`, `raw`, and `text`; added rows have `oldLine: null`, removed rows have `newLine: null`. It does not infer symbols, intent, ownership, or fuzzy path matches.
-
-For large diffs, page until `hasMoreHunks` is false. Pass the prior response's `nextHunkOffset` as the next request's `hunkOffset`. Each response includes the same full-diff `sha256`; if it changes between pages, restart the read because the working tree changed.
-
-For large diffs, prefer chunked reads:
-
-```sh
-python3 scripts/dietcode_agent_client.py diff.chunk '{"source":"unstaged","offset":0,"maxBytes":65536}'
-python3 scripts/dietcode_agent_client.py diff.chunk '{"source":"staged","offset":0,"maxBytes":65536}'
-python3 scripts/dietcode_agent_client.py diff.chunk '{"source":"file","path":"src/app.py","offset":0}'
-python3 scripts/dietcode_agent_client.py --diff-source unstaged --offset 0 --max-bytes 65536 --compact
-```
-
-Chunk responses include `offset`, `nextOffset`, `hasMore`, `sha256`, and `chunkSha256`.
-
-Patch streaming
----------------
-
-Agents can pipe streamed unified diff text directly into the helper without JSON escaping:
-
-```sh
-generate_patch | python3 scripts/dietcode_agent_client.py --patch-stdin --path src/app.py patch.validate
-generate_patch | python3 scripts/dietcode_agent_client.py --patch-stdin --path src/app.py patch.preview
-generate_patch | python3 scripts/dietcode_agent_client.py --patch-stdin --path src/app.py --confirm patch.apply
-```
-
-If no method is supplied with `--patch-stdin` or `--patch-file`, the helper defaults to `patch.validate`.
-
-Use `--patch-hunks` to inspect streamed patch structure without applying or validating it against a workspace file:
-
-```sh
-generate_patch | python3 scripts/dietcode_agent_client.py --patch-stdin --patch-hunks --max-hunks 200 --compact
-generate_patch | python3 scripts/dietcode_agent_client.py --patch-stdin --patch-hunks --max-hunks 200 --hunk-offset 200 --compact
-generate_patch | python3 scripts/dietcode_agent_client.py --patch-stdin --patch-hunks --include-lines --max-lines-per-hunk 120 --compact
-python3 scripts/dietcode_agent_client.py patch.hunks --patch-file /tmp/change.diff
-```
-
-Patch text can also be chunked for stream consumers:
-
-```sh
-python3 scripts/dietcode_agent_client.py patch.chunk --patch-file /tmp/change.diff
-python3 scripts/dietcode_agent_client.py patch.chunk --patch-file /tmp/change.diff --offset 65536 --max-bytes 65536
-```
-
-Event Notifications and Subscriptions
--------------------------------------
-
-DietCode supports a duplex observer protocol to eliminate the need for polling. Agents can subscribe to events to receive asynchronous notifications pushed by the server.
-
-Use the `event.subscribe` and `event.unsubscribe` methods:
-
-```sh
-# Subscribe to specific events:
-python3 scripts/dietcode_agent_client.py event.subscribe '{"types":["DocumentSaved","ActivityChanged"]}'
-```
-
-To stream notifications to stdout in real-time, use the `--listen` CLI flag (which auto-subscribes to all events via the `*` wildcard):
-
-```sh
-python3 scripts/dietcode_agent_client.py --listen
-```
-
-Supported event types:
-- `DocumentOpened`: Emitted when a document tab is opened. The event detail contains the file path.
-- `DocumentSaved`: Emitted when a document tab is saved. The event detail contains the file path.
-- `DocumentClosed`: Emitted when a document tab is closed. The event detail contains the file path.
-- `ActivityChanged`: Emitted when the user switches focus to a different tab or document. The event detail contains the active file path.
-
-Limits
-------
-
-The client mirrors the server transport caps:
-
-```text
-max request frame:  1 MB
-max response frame: 4 MB
-```
-
-Use paged read APIs such as `file.readRange` or `file.getChunks` for large files.
+See [Technical Architecture](technical-architecture.md) for details on how the Control Server is implemented within the macOS layer.
