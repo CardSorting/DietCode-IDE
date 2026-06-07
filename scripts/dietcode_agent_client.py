@@ -4,6 +4,8 @@
 from __future__ import annotations
 
 import argparse
+from collections.abc import Iterator
+from contextlib import contextmanager
 import json
 import os
 import socket
@@ -26,6 +28,7 @@ DEFAULT_APP_PATH = REPO_ROOT / "build" / "DietCode.app" / "Contents" / "MacOS" /
 MAX_REQUEST_BYTES = 1024 * 1024
 MAX_RESPONSE_BYTES = 4 * 1024 * 1024
 _SOCKET_READ_BUFFERS: weakref.WeakKeyDictionary[socket.socket, bytearray] = weakref.WeakKeyDictionary()
+_SOCKET_LOCKS: weakref.WeakKeyDictionary[socket.socket, Any] = weakref.WeakKeyDictionary()
 
 READ_METHODS = {
     "rpc.ping", "rpc.version", "rpc.methods", "rpc.describe", "chip.list", "chip.describe",
@@ -402,6 +405,14 @@ def _socket_read_buffer(sock: socket.socket) -> bytearray:
     return buffer
 
 
+def _socket_lock(sock: socket.socket) -> Any:
+    lock = _SOCKET_LOCKS.get(sock)
+    if lock is None:
+        lock = threading.RLock()
+        _SOCKET_LOCKS[sock] = lock
+    return lock
+
+
 def _discard_socket_read_buffer(sock: socket.socket) -> None:
     try:
         del _SOCKET_READ_BUFFERS[sock]
@@ -409,20 +420,41 @@ def _discard_socket_read_buffer(sock: socket.socket) -> None:
         pass
 
 
+def _discard_socket_state(sock: socket.socket) -> None:
+    _discard_socket_read_buffer(sock)
+    try:
+        del _SOCKET_LOCKS[sock]
+    except KeyError:
+        pass
+
+
+@contextmanager
+def _scoped_socket_timeout(sock: socket.socket, timeout: float | None) -> Iterator[None]:
+    previous_timeout = sock.gettimeout()
+    if timeout is not None:
+        sock.settimeout(timeout)
+    try:
+        yield
+    finally:
+        if timeout is not None:
+            sock.settimeout(previous_timeout)
+
+
 def _read_json_frame(sock: socket.socket, method: str, max_response_bytes: int) -> dict[str, Any]:
     buffer = _socket_read_buffer(sock)
-    while b"\n" not in buffer:
-        chunk = sock.recv(65536)
-        if not chunk:
-            raise DietCodeTransportError(f"socket closed while waiting for {method}")
-        buffer.extend(chunk)
-        if len(buffer) > max_response_bytes + 1 and b"\n" not in buffer:
-            raise RuntimeError(f"response exceeds maximum allowed size of {max_response_bytes} bytes")
+    while True:
+        while b"\n" not in buffer:
+            chunk = sock.recv(65536)
+            if not chunk:
+                raise DietCodeTransportError(f"socket closed while waiting for {method}")
+            buffer.extend(chunk)
+            if len(buffer) > max_response_bytes + 1 and b"\n" not in buffer:
+                raise RuntimeError(f"response exceeds maximum allowed size of {max_response_bytes} bytes")
 
-    line, _, rest = buffer.partition(b"\n")
-    buffer[:] = rest
-    if not line:
-        return _read_json_frame(sock, method, max_response_bytes)
+        line, _, rest = buffer.partition(b"\n")
+        buffer[:] = rest
+        if line:
+            break
     if len(line) > max_response_bytes:
         raise RuntimeError(f"response exceeds maximum allowed size of {max_response_bytes} bytes")
     try:
@@ -432,6 +464,17 @@ def _read_json_frame(sock: socket.socket, method: str, max_response_bytes: int) 
     if not isinstance(frame, dict):
         raise DietCodeTransportError(f"non-object JSON frame while waiting for {method}")
     return frame
+
+
+def read_rpc_frame(
+    sock: socket.socket,
+    request_timeout: float | None = None,
+    max_response_bytes: int = MAX_RESPONSE_BYTES,
+) -> dict[str, Any]:
+    """Read one newline-delimited JSON-RPC frame using the shared socket buffer."""
+    with _socket_lock(sock):
+        with _scoped_socket_timeout(sock, request_timeout):
+            return _read_json_frame(sock, "event frame", max_response_bytes)
 
 
 def load_batch_requests(args: argparse.Namespace) -> list[dict[str, Any]]:
@@ -474,17 +517,17 @@ def send_rpc(
     encoded = json.dumps(payload, separators=(",", ":")).encode("utf-8") + b"\n"
     if len(encoded) > max_request_bytes:
         raise RuntimeError(f"request exceeds maximum allowed size of {max_request_bytes} bytes")
-    if request_timeout is not None:
-        sock.settimeout(request_timeout)
-    sock.sendall(encoded)
-    while True:
-        frame = _read_json_frame(sock, method, max_response_bytes)
-        frame_id = frame.get("id")
-        if frame_id == expected_id:
-            return frame
-        if frame_id is None and isinstance(frame.get("method"), str):
-            continue
-        raise DietCodeTransportError(f"received response id {frame_id!r} while waiting for {expected_id!r}")
+    with _socket_lock(sock):
+        with _scoped_socket_timeout(sock, request_timeout):
+            sock.sendall(encoded)
+            while True:
+                frame = _read_json_frame(sock, method, max_response_bytes)
+                frame_id = frame.get("id")
+                if frame_id == expected_id:
+                    return frame
+                if frame_id is None and isinstance(frame.get("method"), str):
+                    continue
+                raise DietCodeTransportError(f"received response id {frame_id!r} while waiting for {expected_id!r}")
 
 
 def call(
@@ -548,7 +591,7 @@ class DietCodeAgentClient:
 
     def close(self) -> None:
         if self.sock is not None:
-            _discard_socket_read_buffer(self.sock)
+            _discard_socket_state(self.sock)
             self.sock.close()
             self.sock = None
 
@@ -613,6 +656,52 @@ class DietCodeAgentClient:
             raise DietCodeRpcError(method, response)
         return response.get("result", {})
 
+    def read_frame(self, request_timeout: float | None = None) -> dict[str, Any]:
+        if self.sock is None:
+            self.open()
+        assert self.sock is not None
+        return read_rpc_frame(self.sock, request_timeout=request_timeout)
+
+    def subscribe_events(self, types: list[str], request_id: str | None = None) -> dict[str, Any]:
+        return self.call("event.subscribe", {"types": types}, request_id)
+
+    def unsubscribe_events(self, types: list[str], request_id: str | None = None) -> dict[str, Any]:
+        return self.call("event.unsubscribe", {"types": types}, request_id)
+
+    @contextmanager
+    def event_subscription(self, types: list[str]) -> Iterator["DietCodeAgentClient"]:
+        self.subscribe_events(types)
+        try:
+            yield self
+        finally:
+            self.unsubscribe_events(types)
+
+    def iter_events(
+        self,
+        types: list[str],
+        event_timeout: float = 1.0,
+        max_events: int | None = None,
+        unsubscribe: bool = True,
+    ) -> Iterator[dict[str, Any]]:
+        def events() -> Iterator[dict[str, Any]]:
+            delivered = 0
+            while max_events is None or delivered < max_events:
+                try:
+                    frame = self.read_frame(request_timeout=event_timeout)
+                except socket.timeout:
+                    continue
+                if frame.get("method") != "event.emitted":
+                    continue
+                delivered += 1
+                yield frame
+
+        if unsubscribe:
+            with self.event_subscription(types):
+                yield from events()
+        else:
+            self.subscribe_events(types)
+            yield from events()
+
     def batch(self, requests: list[dict[str, Any]]) -> list[dict[str, Any]]:
         responses: list[dict[str, Any]] = []
         for index, request in enumerate(requests, start=1):
@@ -675,9 +764,21 @@ def _socketpair_rpc_server(frames_by_request: list[list[dict[str, Any]]]) -> tup
                     if not chunk:
                         return
                     request_buffer.extend(chunk)
+                request_line, _, _ = request_buffer.partition(b"\n")
+                try:
+                    request = json.loads(request_line.decode("utf-8"))
+                    request_id = request.get("id") if isinstance(request, dict) else None
+                except json.JSONDecodeError:
+                    request_id = None
+                resolved_frames: list[dict[str, Any]] = []
+                for frame in frames:
+                    resolved = dict(frame)
+                    if resolved.get("id") == "$request_id":
+                        resolved["id"] = request_id
+                    resolved_frames.append(resolved)
                 payload = b"".join(
                     json.dumps(frame, separators=(",", ":")).encode("utf-8") + b"\n"
-                    for frame in frames
+                    for frame in resolved_frames
                 )
                 server_sock.sendall(payload)
         finally:
@@ -769,10 +870,84 @@ def run_self_test() -> dict[str, Any]:
     except Exception:
         buffered_ok = False
     finally:
-        _discard_socket_read_buffer(client_sock)
+        _discard_socket_state(client_sock)
         client_sock.close()
         server_thread.join(timeout=2.0)
     checks.append({"name": "transport.notification_buffering", "ok": buffered_ok})
+
+    event_sock, event_thread = _socketpair_rpc_server([
+        [
+            {"id": "subscribe-1", "ok": True, "result": {"subscribed": True}},
+            {"method": "event.emitted", "params": {"type": "terminal.output", "detail": {"text": "buffered"}}},
+        ],
+    ])
+    try:
+        response = send_rpc(event_sock, "token", "event.subscribe", {"types": ["terminal.output"]}, request_id="subscribe-1", request_timeout=2.0)
+        event = read_rpc_frame(event_sock, request_timeout=0.1)
+        listener_ok = (
+            response.get("ok") is True
+            and event.get("method") == "event.emitted"
+            and event.get("params", {}).get("detail", {}).get("text") == "buffered"
+        )
+    except Exception:
+        listener_ok = False
+    finally:
+        _discard_socket_state(event_sock)
+        event_sock.close()
+        event_thread.join(timeout=2.0)
+    checks.append({"name": "transport.listener_uses_shared_buffer", "ok": listener_ok})
+
+    timeout_sock, timeout_thread = _socketpair_rpc_server([
+        [{"id": "timeout-req", "ok": True, "result": {"ok": True}}],
+    ])
+    try:
+        timeout_sock.settimeout(7.0)
+        send_rpc(timeout_sock, "token", "rpc.ping", request_id="timeout-req", request_timeout=0.1)
+        timeout_restore_ok = timeout_sock.gettimeout() == 7.0
+    except Exception:
+        timeout_restore_ok = False
+    finally:
+        _discard_socket_state(timeout_sock)
+        timeout_sock.close()
+        timeout_thread.join(timeout=2.0)
+    checks.append({"name": "transport.rpc_timeout_restored", "ok": timeout_restore_ok})
+
+    frame_timeout_sock, frame_timeout_thread = _socketpair_rpc_server([
+        [{"method": "event.emitted", "params": {"type": "terminal.output", "detail": {"text": "timeout"}}}],
+    ])
+    try:
+        frame_timeout_sock.settimeout(6.0)
+        frame_timeout_sock.sendall(b'{"id":"subscribe","method":"event.subscribe","params":{}}\n')
+        read_rpc_frame(frame_timeout_sock, request_timeout=0.1)
+        frame_timeout_restore_ok = frame_timeout_sock.gettimeout() == 6.0
+    except Exception:
+        frame_timeout_restore_ok = False
+    finally:
+        _discard_socket_state(frame_timeout_sock)
+        frame_timeout_sock.close()
+        frame_timeout_thread.join(timeout=2.0)
+    checks.append({"name": "transport.frame_timeout_restored", "ok": frame_timeout_restore_ok})
+
+    iterator_sock, iterator_thread = _socketpair_rpc_server([
+        [
+            {"id": "$request_id", "ok": True, "result": {"subscribed": True, "types": ["terminal.output"]}},
+            {"method": "event.emitted", "params": {"type": "terminal.output", "detail": {"text": "first"}}},
+            {"method": "event.emitted", "params": {"type": "terminal.output", "detail": {"text": "second"}}},
+        ],
+        [{"id": "$request_id", "ok": True, "result": {"unsubscribed": True, "types": ["terminal.output"]}}],
+    ])
+    iterator_client = DietCodeAgentClient(start=False)
+    iterator_client.sock = iterator_sock
+    iterator_client.token = "token"
+    try:
+        events = list(iterator_client.iter_events(["terminal.output"], event_timeout=0.1, max_events=2))
+        iterator_ok = [event.get("params", {}).get("detail", {}).get("text") for event in events] == ["first", "second"]
+    except Exception:
+        iterator_ok = False
+    finally:
+        iterator_client.close()
+        iterator_thread.join(timeout=2.0)
+    checks.append({"name": "sdk.iter_events_unsubscribes", "ok": iterator_ok})
 
     mismatch_sock, mismatch_thread = _socketpair_rpc_server([
         [{"id": "wrong-id", "ok": True, "result": {}}],
@@ -785,7 +960,7 @@ def run_self_test() -> dict[str, Any]:
     except Exception:
         mismatch_ok = False
     finally:
-        _discard_socket_read_buffer(mismatch_sock)
+        _discard_socket_state(mismatch_sock)
         mismatch_sock.close()
         mismatch_thread.join(timeout=2.0)
     checks.append({"name": "transport.response_id_mismatch", "ok": mismatch_ok})
@@ -817,6 +992,8 @@ def main() -> int:
     parser.add_argument("--raw-response", action="store_true", help="Print the full JSON-RPC response envelope.")
     parser.add_argument("--compact", action="store_true", help="Print compact JSON on one line.")
     parser.add_argument("--listen", action="store_true", help="Listen for asynchronous event notifications.")
+    parser.add_argument("--listen-type", action="append", help="Event type to subscribe to with --listen. May be repeated; defaults to '*'.")
+    parser.add_argument("--listen-max-events", type=int, help="Stop --listen after printing this many event notifications.")
     parser.add_argument("--request-id", help="Override the JSON-RPC request id.")
     parser.add_argument("--agent-id", help="Identify the agent calling the RPC.")
     parser.add_argument("--rationale", help="Provide a human-readable explanation for the action.")
@@ -906,6 +1083,8 @@ def main() -> int:
             raise ValueError("provide only one of --batch-stdin or --params-stdin")
         if args.grep and args.search_text:
             raise ValueError("provide only one of --grep or --search-text")
+        if args.listen_max_events is not None and args.listen_max_events <= 0:
+            raise ValueError("--listen-max-events must be greater than zero")
         batch_mode = args.batch_file is not None or args.batch_stdin
         batch_requests = load_batch_requests(args)
         if batch_mode:
@@ -1000,28 +1179,19 @@ def main() -> int:
                 agent_id=args.agent_id,
                 rationale=args.rationale,
             ) as client:
-                client.call("event.subscribe", {"types": ["*"]})
+                listen_types = args.listen_type or ["*"]
                 print("Listening for events... (Press Ctrl+C to stop)")
-                sock_buffer = b""
-                while True:
-                    try:
-                        client.sock.settimeout(1.0)
-                        chunk = client.sock.recv(65536)
-                        if not chunk:
-                            print("Socket closed by server.")
-                            break
-                        sock_buffer += chunk
-                        while b"\n" in sock_buffer:
-                            line, sock_buffer = sock_buffer.split(b"\n", 1)
-                            if not line: continue
-                            try:
-                                print(json_text(json.loads(line), compact=args.compact))
-                            except json.JSONDecodeError:
-                                print(f"Failed to decode frame: {line!r}")
-                    except socket.timeout:
-                        continue
-                    except KeyboardInterrupt:
-                        break
+                try:
+                    for frame in client.iter_events(
+                        listen_types,
+                        event_timeout=1.0,
+                        max_events=args.listen_max_events,
+                    ):
+                        print(json_text(frame, compact=args.compact))
+                except KeyboardInterrupt:
+                    pass
+                except DietCodeTransportError as exc:
+                    print(f"Socket closed by server: {exc}", file=sys.stderr)
             return 0
 
         if shortcut_method:

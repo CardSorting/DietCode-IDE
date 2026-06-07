@@ -4,40 +4,47 @@ import os
 import time
 import threading
 
-from dietcode_agent_client import connect, load_token, send_rpc
+from dietcode_agent_client import DietCodeAgentClient, connect, load_token, send_rpc
 
 def call(sock, token, method, params=None, request_id=None):
     return send_rpc(sock, token, method, params, request_id)
 
-def listen_events(sock):
+def listen_events(client):
     while True:
         try:
-            line = sock.recv(1024 * 1024).decode('utf-8')
-            if not line: break
-            for part in line.split('\n'):
-                if not part: continue
-                msg = json.loads(part)
-                if msg.get("method") == "event.emitted":
-                    print(f"\n[EVENT] {msg['params']['type']}: {msg['params']['detail']}")
+            msg = client.read_frame(request_timeout=1.0)
+            if msg.get("method") == "event.emitted":
+                print(f"\n[EVENT] {msg['params']['type']}: {msg['params']['detail']}")
+        except TimeoutError:
+            continue
         except:
             break
 
 def main():
     print("=== DietCode v1.7 Deep Ergonomics Verification Suite ===")
 
-    with connect() as sock, connect() as event_sock:
+    with connect() as sock, DietCodeAgentClient() as event_client:
         token = load_token()
 
         # 1. Test terminal streaming
         print("\nTest 1: Terminal Streaming")
-        call(event_sock, token, "event.subscribe", {"types": ["terminal.output"]})
+        invalid_subscribe = call(sock, token, "event.subscribe", {"types": []})
+        assert not invalid_subscribe.get("ok"), "event.subscribe should reject an empty types array"
+        assert invalid_subscribe.get("error", {}).get("string_code") == "invalid_params", "event.subscribe should return invalid_params"
+        subscribe_result = call(sock, token, "event.subscribe", {"types": ["terminal.output"]})
+        assert subscribe_result.get("ok"), "event.subscribe failed"
+        assert subscribe_result.get("result", {}).get("types") == ["terminal.output"], "event.subscribe did not echo subscribed types"
+        unsubscribe_result = call(sock, token, "event.unsubscribe", {"types": ["terminal.output"]})
+        assert unsubscribe_result.get("ok"), "event.unsubscribe failed"
+        assert unsubscribe_result.get("result", {}).get("types") == ["terminal.output"], "event.unsubscribe did not echo unsubscribed types"
         # Keep event notifications on a dedicated connection so they cannot
         # consume synchronous RPC responses from the main request socket.
-        t = threading.Thread(target=listen_events, args=(event_sock,), daemon=True)
-        t.start()
-        print("Running command 'ls -la'...")
-        call(sock, token, "terminal.run", {"command": "ls -la"})
-        time.sleep(1) # Wait for output events
+        with event_client.event_subscription(["terminal.output"]):
+            t = threading.Thread(target=listen_events, args=(event_client,), daemon=True)
+            t.start()
+            print("Running command 'ls -la'...")
+            call(sock, token, "terminal.run", {"command": "ls -la"})
+            time.sleep(1) # Wait for output events
 
         # 2. Test workspace.searchSession
         print("\nTest 2: Workspace Search Session")

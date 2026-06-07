@@ -149,9 +149,12 @@ For event-driven tools, keep the event stream separate:
 
 ```python
 with DietCodeAgentClient() as rpc, DietCodeAgentClient() as events:
-    events.call("event.subscribe", {"types": ["terminal.output"]})
-    rpc.call("terminal.run", {"command": "make test"})
-    # Read event notifications from events.sock only.
+    with events.event_subscription(["terminal.output"]):
+        rpc.call("terminal.run", {"command": "make test"})
+        frame = events.read_frame(request_timeout=5.0)
+        print(frame["params"]["detail"])
 ```
+
+For command-line listeners, use `--listen --listen-type terminal.output`. Repeat `--listen-type` to subscribe to multiple event types, and use `--listen-max-events N` for bounded automation.
 
 See [Technical Architecture](technical-architecture.md) for details on how the Control Server is implemented within the macOS layer.
