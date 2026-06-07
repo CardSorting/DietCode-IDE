@@ -1199,6 +1199,11 @@ static NSString* DietCodeReadTextFileForControlServer(NSString* path) {
     } else {
         [self executeContextMethod:method params:params outResult:outResult outErrCode:outErrCode outErrMsg:outErrMsg outPaths:outPaths];
     }
+
+    if (!*outErrCode && !*outResult) {
+        *outErrCode = @"method_not_found";
+        *outErrMsg = [NSString stringWithFormat:@"The method '%@' is not defined.", method];
+    }
 }
 
 - (void)sendSuccess:(NSString*)reqId result:(NSDictionary*)result clientFd:(int)clientFd {

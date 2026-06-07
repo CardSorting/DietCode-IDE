@@ -6,7 +6,7 @@ import shutil
 import hashlib
 import plistlib
 
-from dietcode_agent_client import connect, load_token, send_rpc
+from dietcode_agent_client import connect, ensure_workspace_root, load_token, send_rpc
 
 BACKUPS_DIR = os.path.expanduser("~/.dietcode/backups")
 AUDIT_LOG_DIR = os.path.expanduser("~/.dietcode")
@@ -33,17 +33,8 @@ def main():
         print(f"Ping result: {res}")
         assert res.get("ok"), "Ping failed"
 
-        # Get workspace root
-        res = call(sock, token, "workspace.getRoot")
-        workspace_root = res.get("result", {}).get("path")
-        if not workspace_root:
-            print("Workspace not open. Opening '/Users/bozoegg/Desktop/DietCode-IDE'...")
-            open_res = call(sock, token, "workspace.openFolder", {"path": "/Users/bozoegg/Desktop/DietCode-IDE"})
-            print(f"Open folder result: {open_res}")
-            res = call(sock, token, "workspace.getRoot")
-            workspace_root = res.get("result", {}).get("path")
+        workspace_root = ensure_workspace_root(sock, token)
         print(f"Workspace root: {workspace_root}")
-        assert workspace_root, "Failed to get workspace root"
 
         # Clean all backups directory first for clean test
         shutil.rmtree(BACKUPS_DIR, ignore_errors=True)

@@ -2,15 +2,27 @@
 
 This cookbook provides hands-on examples of orchestrating DietCode's RPC surface to build powerful autonomous agents and developer tools.
 
+Run scripts from the repo root so `scripts/` is on the import path:
+
+```bash
+python3 scripts/dietcode_agent_client.py --wait-ready --compact --error-json
+python3 scripts/control_smoke_test.py --compact
+```
+
+CLI grep/diff/patch shortcuts and the verification ladder live in [Headless Agent Control](headless-agent-control.md). Stable error codes: [Error Codes](error-codes.md).
+
 ## 🥣 Recipe 1: The "Self-Healing" Loop
 
 Goal: Identify a compiler error, find the relevant symbol, apply a suggested fix, and verify with a build.
 
 ### Step 1: List current diagnostics
 ```python
-# Call diagnostics.list to get all active errors
-errors = client.call("diagnostics.list")
-target = [e for e in errors if e["severity"] == "error"][0]
+from dietcode_agent_client import DietCodeAgentClient
+
+with DietCodeAgentClient() as client:
+    payload = client.call("diagnostics.list")
+    errors = payload.get("diagnostics", [])
+    target = next(e for e in errors if e.get("severity") == "error")
 ```
 
 ### Step 2: Find the symbol definition
@@ -86,19 +98,19 @@ client.call("editor.setSelection", {"start": selection["start"], "end": selectio
 Goal: Perform a multi-file replacement atomically with a rollback safety net.
 
 ```python
-# Define a Combo plan
+# Define a Combo plan (chips use @version suffixes; see deterministic-combo-runtime-spec.md)
 plan = {
     "schemaVersion": "1.6.2",
     "goal": "Refactor ClassName to NewClassName",
     "steps": [
         {
             "id": "step1",
-            "chip": "file.write",
+            "chip": "file.write@1",
             "params": {"path": "src/OldClass.hpp", "content": "...new content..."}
         },
         {
             "id": "step2",
-            "chip": "file.write",
+            "chip": "file.write@1",
             "params": {"path": "src/main.cpp", "content": "...updated main..."}
         }
     ],
@@ -117,10 +129,11 @@ else:
 ---
 
 ## 💡 Best Practices for Agent Developers
+- **Prefer CLI for inspection**: Use `--grep`, `--diff-hunks`, and `--raw-response` before writing Python wrappers. Exit codes reflect `ok:false` when `--raw-response` is set.
 - **Use Paging**: For large workspace scans, always use `resultOffset` and `maxResults`.
 - **Check Dirty Buffers**: Use `buffers.dirty` before applying patches to avoid conflicting with unsaved user changes.
 - **Prefer Structured CLI Failures**: Add `--error-json` when invoking `scripts/dietcode_agent_client.py` from automation. Successful responses stay on stdout; JSON error envelopes are written to stderr.
 - **Listen for Events on a Dedicated Socket**: Use `DietCodeAgentClient.event_subscription(...)`, `iter_events(...)`, or `event.subscribe` to avoid polling. The Python helper can skip interleaved `event.emitted` frames while waiting for a matching response id, and event iterators drain the same shared socket buffer as request/response calls. Long-running listeners should still use a separate connection from synchronous request/response RPC calls.
-- **Filter CLI Event Streams**: Use `python3 scripts/dietcode_agent_client.py --listen --listen-type terminal.output` when you only need specific events. Repeat `--listen-type` for multiple subscriptions, and add `--listen-max-events N` for bounded automation. Event frames stay on stdout; listener status text goes to stderr unless `--quiet` is set.
+- **Filter CLI Event Streams**: Use `python3 scripts/dietcode_agent_client.py --listen --listen-type terminal.output` when you only need specific events. Repeat `--listen-type` for multiple subscriptions, and add `--listen-max-events N` or `--listen-idle-timeout SECONDS` for bounded automation. Event frames stay on stdout; listener status text goes to stderr unless `--quiet` is set.
 - **End Event Lifecycles Cleanly**: Call `event.unsubscribe` before a long-running listener exits. The helper scopes temporary socket timeouts per call, so short listener polls do not leak into later RPC calls on the same socket.
 - **Handle Headless Fallbacks**: In headless mode, UI-adjacent methods can return `headless: true` with stable non-UI results. Treat those as successful capability probes rather than editor navigation.

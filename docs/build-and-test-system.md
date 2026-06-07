@@ -27,8 +27,52 @@ DietCode employs a **Zero-Dependency Testing** approach. Tests are designed to b
 - **Speed**: The entire suite runs in milliseconds, encouraging frequent execution during the development cycle.
 
 ### Integration & Agent Tests
-- **`make agent-self-test`**: Verifies the Python agent client's configuration and connectivity.
-- **`make control-smoke`**: Executes `scripts/control_smoke_test.py` to perform high-level integration checks between the agent client and a running (or headless) DietCode instance.
+
+| Target | Socket required? | Output |
+|--------|------------------|--------|
+| `make agent-self-test` | No | Compact JSON self-test report |
+| `make control-smoke` | Yes | NDJSON check lines + summary |
+| `make agent-integration` | Yes | NDJSON rollup via `run_agent_integration_tests.py` |
+| `make test-agent-integration` | Yes | Alias for `agent-integration` |
+
+- **`make agent-self-test`**: Runs offline parser/transport checks in `scripts/dietcode_agent_client.py --self-test`. Does **not** connect to a live server.
+- **`make control-smoke`**: Runs `scripts/control_smoke_test.py`, which emits one NDJSON object per check and a final `{"type":"summary",...}` line.
+- **`make test-ergonomics`**: Runs `scripts/test_ergonomics.py` for patch validation and task-runtime contracts (requires an open workspace).
+- **`make agent-integration`**: Runs `scripts/run_agent_integration_tests.py` (smoke + ergonomics NDJSON rollup).
+- **`make test-agent-integration`**: Alias for `agent-integration`.
+
+Environment variables and config precedence: [Agent Environment](agent-environment.md).
+
+### Agent verification ladder
+
+```bash
+# 1. Build
+make app
+
+# 2. Offline client checks (no socket)
+make agent-self-test
+
+# 3. Ensure socket + RPC readiness
+make agent-ready
+make agent-status    # expect "ok":true
+make agent-ping      # expect {"pong":true,...}
+
+# 4. Live integration (NDJSON smoke + contract suite)
+make test-agent-integration
+
+# 5. Grep/diff CLI shortcuts (literal search, no semantic layer)
+python3 scripts/dietcode_agent_client.py --grep DietCode --max-results 3 --compact
+python3 scripts/dietcode_agent_client.py --diff-source unstaged --diff-hunks --include-lines --compact
+```
+
+Override the workspace used by integration scripts:
+
+```bash
+export DIETCODE_TEST_WORKSPACE=/path/to/workspace
+make test-agent-integration
+```
+
+See [Error Codes](error-codes.md) for stable `string_code` values and grep anchors.
 
 ---
 

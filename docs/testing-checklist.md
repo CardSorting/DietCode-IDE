@@ -1,5 +1,16 @@
 # Testing Checklist
 
+## Agent / RPC surface
+
+- [ ] `make agent-self-test` passes (offline, no socket)
+- [ ] `make agent-ready` → `make agent-status` reports `"ok":true`
+- [ ] `make control-smoke` emits NDJSON summary with `"ok":true`
+- [ ] `make agent-integration` passes smoke + ergonomics rollup
+- [ ] `python3 scripts/dietcode_agent_client.py --emit-config --json` shows resolved paths
+- [ ] Error envelopes use stable `string_code` (see [Error Codes](error-codes.md))
+
+---
+
 ## Pure C++ tests
 
 - Text buffer initializes with one empty line.

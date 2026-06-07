@@ -81,7 +81,7 @@ MACOS_MM := \
 	src/filesystem/FileWatcher.mm \
 	src/core/LSPClient.mm
 
-.PHONY: all app run headless ensure-socket agent-ready agent-status agent-ping agent-methods agent-capabilities agent-self-test control-smoke test clean
+.PHONY: all app run headless ensure-socket agent-ready agent-status agent-ping agent-methods agent-capabilities agent-self-test control-smoke test-ergonomics test-agent-integration agent-integration test clean
 
 all: app test
 
@@ -109,25 +109,36 @@ ensure-socket: app
 	$(APP_MACOS)/$(APP_NAME) --ensure-socket
 
 agent-ready: app
-	python3 scripts/dietcode_agent_client.py --wait-ready --compact
+	python3 scripts/dietcode_agent_client.py --wait-ready --compact --error-json
 
 agent-status: app
-	python3 scripts/dietcode_agent_client.py --status --compact
+	python3 scripts/dietcode_agent_client.py --status --compact --error-json
 
 agent-ping: app
-	python3 scripts/dietcode_agent_client.py --compact rpc.ping
+	python3 scripts/dietcode_agent_client.py --compact --error-json rpc.ping
 
 agent-methods: app
-	python3 scripts/dietcode_agent_client.py --list-methods --compact
+	python3 scripts/dietcode_agent_client.py --list-methods --compact --error-json
 
 agent-capabilities: app
-	python3 scripts/dietcode_agent_client.py --capabilities --compact
+	python3 scripts/dietcode_agent_client.py --capabilities --compact --error-json
 
 agent-self-test:
 	python3 scripts/dietcode_agent_client.py --self-test --compact
 
 control-smoke: app
-	python3 scripts/control_smoke_test.py
+	python3 scripts/dietcode_agent_client.py --wait-ready --compact --error-json --quiet
+	python3 scripts/control_smoke_test.py --compact
+
+test-ergonomics: app
+	python3 scripts/dietcode_agent_client.py --wait-ready --compact --error-json --quiet
+	python3 scripts/test_ergonomics.py --compact
+
+agent-integration: app
+	python3 scripts/dietcode_agent_client.py --wait-ready --compact --error-json --quiet
+	python3 scripts/run_agent_integration_tests.py --compact
+
+test-agent-integration: agent-integration
 
 $(TEST_BIN): $(BUILD_DIR) $(CORE_CPP) tests/test_editor.cpp
 	$(CXX) $(CXXFLAGS) $(CORE_CPP) tests/test_editor.cpp -o $(TEST_BIN)

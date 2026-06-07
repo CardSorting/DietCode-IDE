@@ -56,4 +56,23 @@ When an RPC method needs to interact with the UI (e.g., `editor.insertText`), th
 
 `event.subscribe` turns a socket connection into a duplex stream: it still receives the subscription response, and then receives asynchronous `event.emitted` frames. `scripts/dietcode_agent_client.py` keeps a per-socket read buffer, serializes reads on that socket, scopes temporary socket timeouts to each call, skips notification frames while waiting for a matching response id, and fails fast if it receives a mismatched response id. Listener loops should use `DietCodeAgentClient.event_subscription(...)`, `iter_events(...)`, or `read_rpc_frame` so they drain the same buffer as request/response calls.
 
-Dedicated event connections are still recommended for long-running listeners. They avoid a common race where two different readers in the same process compete for one socket and consume each other's frames. Clean listeners should call `event.unsubscribe` before shutting down, though closing the subscribed socket also drops its subscription state. Event type lists must be non-empty strings; the Python helper validates that before sending subscription RPCs.
+Dedicated event connections are still recommended for long-running listeners. They avoid a common race where two different readers in the same process compete for one socket and consume each other's frames. Clean listeners should call `event.unsubscribe` before shutting down, though closing the subscribed socket also drops its subscription state. Event type lists must be non-empty strings; the Python helper validates that before sending subscription RPCs. For bounded automation, prefer `iter_events(..., max_events=N, idle_timeout=SECONDS)` or CLI `--listen-max-events` plus `--listen-idle-timeout`.
+
+## Verification commands
+
+```bash
+# Offline transport checks (mock socketpair; no live server)
+python3 scripts/dietcode_agent_client.py --self-test --compact
+
+# Socket probe diagnostics (permission_denied vs connection_refused)
+python3 scripts/dietcode_agent_client.py --status --compact | python3 -m json.tool
+
+# Bounded event listener (stdout = NDJSON frames, stderr = status unless --quiet)
+python3 scripts/dietcode_agent_client.py --listen --listen-type terminal.output \
+  --listen-max-events 1 --listen-idle-timeout 2 --compact --error-json
+
+# Grep the error-code mapping table
+rg 'stringCode isEqualToString' src/platform/macos/control/MacControlServer.mm
+```
+
+See [Error Codes](error-codes.md) and [Headless Agent Control](headless-agent-control.md) for the full verification ladder.

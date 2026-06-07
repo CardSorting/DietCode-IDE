@@ -155,8 +155,80 @@ with DietCodeAgentClient() as rpc, DietCodeAgentClient() as events:
         print(frame["params"]["detail"])
 ```
 
-For command-line listeners, use `--listen --listen-type terminal.output`. Repeat `--listen-type` to subscribe to multiple event types, and use `--listen-max-events N` for bounded automation. Event frames are written to stdout, while listener status text is written to stderr unless `--quiet` is set.
+For command-line listeners, use `--listen --listen-type terminal.output`. Repeat `--listen-type` to subscribe to multiple event types, and use `--listen-max-events N` or `--listen-idle-timeout SECONDS` for bounded automation. Event frames are written to stdout, while listener status text is written to stderr unless `--quiet` is set.
 
-For CI or agent scripts, add `--error-json` to receive JSON-RPC-style error envelopes on stderr instead of plain text failures.
+For CI or agent scripts, add `--error-json` to receive JSON-RPC-style error envelopes on stderr instead of plain text failures. With `--error-json`, failures are emitted even when `--quiet` suppresses informational stderr.
+
+See [Error Codes](error-codes.md) for the full `string_code` catalog and grep anchors. Environment variables and config precedence: [Agent Environment](agent-environment.md).
+
+---
+
+## CLI shortcuts (grep / diff / patch)
+
+Run from the repo root. All examples use compact JSON on stdout.
+
+```bash
+# Preflight (offline-safe except --wait-ready)
+python3 scripts/dietcode_agent_client.py --self-test --compact
+python3 scripts/dietcode_agent_client.py --status --compact
+python3 scripts/dietcode_agent_client.py --wait-ready --compact --error-json
+
+# Literal workspace grep (paged)
+python3 scripts/dietcode_agent_client.py --grep executeMethod --max-results 5 --compact
+python3 scripts/dietcode_agent_client.py --grep TODO --include '*.py' --result-offset 10 --compact
+
+# Unified diff hunks with literal line evidence
+python3 scripts/dietcode_agent_client.py --diff-source unstaged --diff-hunks --include-lines --compact
+python3 scripts/dietcode_agent_client.py --diff-source file --path src/main.mm --diff-hunks --max-hunks 3 --compact
+
+# Patch dry-run from stdin
+git diff -- path/to/file | python3 scripts/dietcode_agent_client.py --patch-stdin --path path/to/file --compact
+
+# Batch NDJSON (one envelope per line; exit 1 if any ok:false)
+printf '%s\n' '{"id":"1","method":"rpc.ping","params":{}}' \
+  | python3 scripts/dietcode_agent_client.py --batch-stdin --compact
+
+# Invalid params: full envelope + non-zero exit with --raw-response
+python3 scripts/dietcode_agent_client.py --raw-response --compact event.subscribe '{}'; echo exit=$?
+```
+
+### Config file
+
+```bash
+python3 scripts/dietcode_agent_client.py \
+  --config docs/headless-agent-config.example.json \
+  --emit-config --compact
+export DIETCODE_AGENT_CONFIG=docs/headless-agent-config.example.json
+```
+
+### Verification ladder
+
+```bash
+make app && make agent-self-test
+make agent-ready && make agent-status && make agent-ping
+make control-smoke | rg '"type":"(check|summary)"'
+make agent-integration | rg '"type":"summary"'
+```
+
+Integration scripts resolve the workspace from `DIETCODE_TEST_WORKSPACE`, then the repo root, then `workspace.getRoot`.
+
+---
+
+## CLI flag reference
+
+| Flag | Purpose |
+|------|---------|
+| `--grep QUERY` | `workspace.grep` literal substring scan |
+| `--search-text QUERY` | `search.text` with optional `--before` / `--after` |
+| `--diff-source` + `--diff-hunks` | Structured unified diff hunks |
+| `--patch-stdin` / `--patch-file` | Route to `patch.validate` or `patch.hunks` |
+| `--dry-run` / `--no-dry-run` | Set `dryRun` on supported mutations |
+| `--raw-response` | Print full envelope; exit 1 when `ok:false` |
+| `--compact` / `--json` | Single-line sorted JSON |
+| `--error-json` | JSON error envelopes on stderr |
+| `--verbose` | Diagnostic stderr (overrides `--quiet`) |
+| `--batch-stdin` / `--batch-file` | NDJSON multi-call mode |
+| `--listen` + `--listen-type` | Bounded event stream on stdout |
+| `--self-test` | Offline client checks (no socket) |
 
 See [Technical Architecture](technical-architecture.md) for details on how the Control Server is implemented within the macOS layer.

@@ -25,6 +25,16 @@ SOCKET_PATH = os.path.expanduser(os.environ.get("DIETCODE_SOCKET_PATH", "~/.diet
 TOKEN_PATH = os.path.expanduser(os.environ.get("DIETCODE_TOKEN_PATH", "~/.dietcode/session.token"))
 REPO_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_APP_PATH = REPO_ROOT / "build" / "DietCode.app" / "Contents" / "MacOS" / "DietCode"
+TEST_WORKSPACE_ENV = "DIETCODE_TEST_WORKSPACE"
+
+# Documented environment variables (grep: rg 'DIETCODE_' docs/agent-environment.md)
+ENV_REGISTRY: dict[str, str] = {
+    "DIETCODE_AGENT_CONFIG": "Path to JSON config file (overridden by --config)",
+    "DIETCODE_APP_PATH": "Path to DietCode binary (overridden by --app and config.app)",
+    "DIETCODE_SOCKET_PATH": "Unix control socket path (overridden by --socket and config.socket)",
+    "DIETCODE_TOKEN_PATH": "Session token file path (overridden by --token-file and config.tokenFile)",
+    "DIETCODE_TEST_WORKSPACE": "Workspace root for integration harnesses (default: repo root)",
+}
 MAX_REQUEST_BYTES = 1024 * 1024
 MAX_RESPONSE_BYTES = 4 * 1024 * 1024
 _SOCKET_READ_BUFFERS: weakref.WeakKeyDictionary[socket.socket, bytearray] = weakref.WeakKeyDictionary()
@@ -102,6 +112,55 @@ def json_text(value: Any, compact: bool = False) -> str:
     if compact:
         return json.dumps(value, separators=(",", ":"), sort_keys=True)
     return json.dumps(value, indent=2, sort_keys=True)
+
+
+def rpc_succeeded(response: Any) -> bool:
+    """Return True when a JSON-RPC envelope (or local error envelope) succeeded."""
+    return isinstance(response, dict) and response.get("ok") is True
+
+
+def rpc_exit_code(response: Any, *, raw_response: bool = False) -> int:
+    """Map a printed RPC payload to a Unix exit code."""
+    if raw_response:
+        return 0 if rpc_succeeded(response) else 1
+    return 0
+
+
+def emit_test_line(payload: dict[str, Any], *, compact: bool = True) -> None:
+    """Print one NDJSON test result line to stdout."""
+    print(json_text(payload, compact=compact))
+
+
+def finish_test_run(checks: list[dict[str, Any]], *, suite: str, compact: bool = True) -> int:
+    """Print a final NDJSON summary and return 0/1."""
+    ok = all(check.get("ok") for check in checks)
+    emit_test_line({"type": "summary", "suite": suite, "ok": ok, "checks": len(checks)}, compact=compact)
+    return 0 if ok else 1
+
+
+def default_test_workspace() -> str:
+    """Resolve the workspace path used by integration harnesses."""
+    configured = os.environ.get(TEST_WORKSPACE_ENV)
+    if configured:
+        return os.path.abspath(os.path.expanduser(configured))
+    return str(REPO_ROOT)
+
+
+def ensure_workspace_root(sock: socket.socket, token: str) -> str:
+    """Return an open workspace root, opening the default test workspace when needed."""
+    response = send_rpc(sock, token, "workspace.getRoot")
+    workspace_root = response.get("result", {}).get("path")
+    if workspace_root:
+        return workspace_root
+    target = default_test_workspace()
+    open_response = send_rpc(sock, token, "workspace.openFolder", {"path": target})
+    if not open_response.get("ok"):
+        raise DietCodeRpcError("workspace.openFolder", open_response)
+    response = send_rpc(sock, token, "workspace.getRoot")
+    workspace_root = response.get("result", {}).get("path")
+    if not workspace_root:
+        raise RuntimeError("workspace.getRoot returned no path after workspace.openFolder")
+    return workspace_root
 
 
 def normalize_event_types(types: list[str]) -> list[str]:
@@ -707,20 +766,36 @@ class DietCodeAgentClient:
         types: list[str],
         event_timeout: float = 1.0,
         max_events: int | None = None,
+        idle_timeout: float | None = None,
         unsubscribe: bool = True,
     ) -> Iterator[dict[str, Any]]:
         types = normalize_event_types(types)
+        if event_timeout <= 0:
+            raise ValueError("event_timeout must be greater than zero")
+        if max_events is not None and max_events <= 0:
+            raise ValueError("max_events must be greater than zero")
+        if idle_timeout is not None and idle_timeout <= 0:
+            raise ValueError("idle_timeout must be greater than zero")
 
         def events() -> Iterator[dict[str, Any]]:
             delivered = 0
+            idle_deadline = time.monotonic() + idle_timeout if idle_timeout is not None else None
             while max_events is None or delivered < max_events:
+                read_timeout = event_timeout
+                if idle_deadline is not None:
+                    remaining = idle_deadline - time.monotonic()
+                    if remaining <= 0:
+                        break
+                    read_timeout = min(read_timeout, remaining)
                 try:
-                    frame = self.read_frame(request_timeout=event_timeout)
+                    frame = self.read_frame(request_timeout=read_timeout)
                 except socket.timeout:
                     continue
                 if frame.get("method") != "event.emitted":
                     continue
                 delivered += 1
+                if idle_deadline is not None:
+                    idle_deadline = time.monotonic() + idle_timeout
                 yield frame
 
         if unsubscribe:
@@ -1000,6 +1075,30 @@ def run_self_test() -> dict[str, Any]:
         iterator_thread.join(timeout=2.0)
     checks.append({"name": "sdk.iter_events_unsubscribes", "ok": iterator_ok})
 
+    idle_sock, idle_thread = _socketpair_rpc_server([
+        [{"id": "$request_id", "ok": True, "result": {"subscribed": True, "types": ["terminal.output"]}}],
+        [{"id": "$request_id", "ok": True, "result": {"unsubscribed": True, "types": ["terminal.output"]}}],
+    ])
+    idle_client = DietCodeAgentClient(start=False)
+    idle_client.sock = idle_sock
+    idle_client.token = "token"
+    try:
+        idle_events = list(idle_client.iter_events(["terminal.output"], event_timeout=0.01, max_events=1, idle_timeout=0.03))
+        idle_ok = idle_events == []
+    except Exception:
+        idle_ok = False
+    finally:
+        idle_client.close()
+        idle_thread.join(timeout=2.0)
+    checks.append({"name": "sdk.iter_events_idle_timeout", "ok": idle_ok})
+
+    try:
+        list(DietCodeAgentClient(start=False).iter_events(["terminal.output"], event_timeout=0))
+        event_timeout_validation_ok = False
+    except ValueError as exc:
+        event_timeout_validation_ok = "event_timeout" in str(exc)
+    checks.append({"name": "sdk.iter_events_event_timeout_validation", "ok": event_timeout_validation_ok})
+
     mismatch_sock, mismatch_thread = _socketpair_rpc_server([
         [{"id": "wrong-id", "ok": True, "result": {}}],
     ])
@@ -1015,6 +1114,25 @@ def run_self_test() -> dict[str, Any]:
         mismatch_sock.close()
         mismatch_thread.join(timeout=2.0)
     checks.append({"name": "transport.response_id_mismatch", "ok": mismatch_ok})
+    checks.append({"name": "rpc.succeeded_true", "ok": rpc_succeeded({"ok": True, "result": {}})})
+    checks.append({"name": "rpc.succeeded_false", "ok": not rpc_succeeded({"ok": False, "error": {"string_code": "invalid_params"}})})
+    checks.append({
+        "name": "rpc.exit_code_raw_failure",
+        "ok": rpc_exit_code({"ok": False, "error": {"string_code": "invalid_params"}}, raw_response=True) == 1,
+    })
+    checks.append({
+        "name": "rpc.exit_code_raw_success",
+        "ok": rpc_exit_code({"ok": True, "result": {}}, raw_response=True) == 0,
+    })
+    checks.append({"name": "workspace.default_test_path", "ok": default_test_workspace() == str(REPO_ROOT)})
+    checks.append({"name": "env.registry_documented", "ok": TEST_WORKSPACE_ENV in ENV_REGISTRY})
+    checks.append({"name": "env.registry_socket", "ok": "DIETCODE_SOCKET_PATH" in ENV_REGISTRY})
+    configured_workspace = os.environ.get(TEST_WORKSPACE_ENV)
+    if configured_workspace:
+        checks.append({
+            "name": "workspace.env_override",
+            "ok": default_test_workspace() == os.path.abspath(os.path.expanduser(configured_workspace)),
+        })
 
     ok = all(check["ok"] for check in checks)
     return {"ok": ok, "checks": checks}
@@ -1031,6 +1149,7 @@ def main() -> int:
     parser.add_argument("--retries", type=int, help="Transport retries after socket errors. Use only for safe/idempotent calls.")
     parser.add_argument("--no-start", action="store_true", help="Do not launch DietCode if the socket is inactive.")
     parser.add_argument("--quiet", action="store_true", help="Suppress diagnostic output on stderr.")
+    parser.add_argument("--verbose", action="store_true", help="Print diagnostic messages on stderr (overrides --quiet).")
     parser.add_argument("--ensure-only", action="store_true", help="Only ensure the socket is active, then exit.")
     parser.add_argument("--status", action="store_true", help="Print local socket/token/app readiness JSON, then exit.")
     parser.add_argument("--wait-ready", action="store_true", help="Ensure the socket, then wait for authenticated RPC readiness.")
@@ -1042,10 +1161,12 @@ def main() -> int:
     parser.add_argument("--describe", help="Call rpc.describe for one method and exit.")
     parser.add_argument("--raw-response", action="store_true", help="Print the full JSON-RPC response envelope.")
     parser.add_argument("--compact", action="store_true", help="Print compact JSON on one line.")
+    parser.add_argument("--json", action="store_true", help="Alias for --compact (machine-readable single-line JSON).")
     parser.add_argument("--error-json", action="store_true", help="Print failures as JSON envelopes on stderr.")
     parser.add_argument("--listen", action="store_true", help="Listen for asynchronous event notifications.")
     parser.add_argument("--listen-type", action="append", help="Event type to subscribe to with --listen. May be repeated; defaults to '*'.")
     parser.add_argument("--listen-max-events", type=int, help="Stop --listen after printing this many event notifications.")
+    parser.add_argument("--listen-idle-timeout", type=float, help="Stop --listen after this many seconds without an event.")
     parser.add_argument("--request-id", help="Override the JSON-RPC request id.")
     parser.add_argument("--agent-id", help="Identify the agent calling the RPC.")
     parser.add_argument("--rationale", help="Provide a human-readable explanation for the action.")
@@ -1081,6 +1202,9 @@ def main() -> int:
     parser.add_argument("method", nargs="?", default="rpc.ping", help="RPC method to call after ensuring the socket.")
     parser.add_argument("params_json", nargs="?", help="JSON object params for the RPC call.")
     args = parser.parse_args()
+    if args.json:
+        args.compact = True
+    quiet = args.quiet and not args.verbose
 
     try:
         config = load_config(args.config)
@@ -1104,6 +1228,9 @@ def main() -> int:
                 "timeout": timeout,
                 "requestTimeout": request_timeout,
                 "retries": retries,
+                "schemaVersion": SCHEMA_VERSION,
+                "environment": ENV_REGISTRY,
+                "precedence": ["CLI flag", "config file", "environment variable", "built-in default"],
             }
             print(json_text(resolved, compact=args.compact))
             return 0
@@ -1120,13 +1247,13 @@ def main() -> int:
                 token_path=token_path,
                 timeout=timeout,
                 start=not args.no_start,
-                quiet=args.quiet,
+                quiet=quiet,
             )
             print(json_text(state, compact=args.compact))
             return 0 if state["ok"] else 1
 
         if args.ensure_only:
-            if ensure_socket(app_path=app_path, timeout=timeout, quiet=args.quiet, socket_path=socket_path, start=not args.no_start):
+            if ensure_socket(app_path=app_path, timeout=timeout, quiet=quiet, socket_path=socket_path, start=not args.no_start):
                 print(json_text({"ok": True, "socket": socket_path}, compact=args.compact))
                 return 0
             raise RuntimeError(f"failed to start DietCode control socket at {socket_path}")
@@ -1137,6 +1264,8 @@ def main() -> int:
             raise ValueError("provide only one of --grep or --search-text")
         if args.listen_max_events is not None and args.listen_max_events <= 0:
             raise ValueError("--listen-max-events must be greater than zero")
+        if args.listen_idle_timeout is not None and args.listen_idle_timeout <= 0:
+            raise ValueError("--listen-idle-timeout must be greater than zero")
         batch_mode = args.batch_file is not None or args.batch_stdin
         batch_requests = load_batch_requests(args)
         if batch_mode:
@@ -1155,8 +1284,8 @@ def main() -> int:
             ) as client:
                 responses = client.batch(batch_requests)
             for response in responses:
-                print(json_text(response, compact=True))
-            return 0 if all(response.get("ok") for response in responses) else 1
+                print(json_text(response, compact=args.compact))
+            return 0 if all(rpc_succeeded(response) for response in responses) else 1
 
         shortcut_method: str | None = None
         shortcut_params: dict[str, Any] = {}
@@ -1232,13 +1361,14 @@ def main() -> int:
                 rationale=args.rationale,
             ) as client:
                 listen_types = normalize_event_types(args.listen_type or ["*"])
-                if not args.quiet:
+                if not quiet:
                     print("Listening for events... (Press Ctrl+C to stop)", file=sys.stderr)
                 try:
                     for frame in client.iter_events(
                         listen_types,
                         event_timeout=1.0,
                         max_events=args.listen_max_events,
+                        idle_timeout=args.listen_idle_timeout,
                     ):
                         print(json_text(frame, compact=args.compact))
                 except KeyboardInterrupt:
@@ -1264,7 +1394,7 @@ def main() -> int:
                 else:
                     response = client.call(shortcut_method, shortcut_params, args.request_id)
             print(json_text(response, compact=args.compact))
-            return 0
+            return rpc_exit_code(response, raw_response=args.raw_response)
 
         effective_method = args.method
         if (args.patch_file or args.patch_stdin) and effective_method == "rpc.ping":
@@ -1286,13 +1416,12 @@ def main() -> int:
             else:
                 response = client.call(effective_method, params, args.request_id)
         print(json_text(response, compact=args.compact))
-        return 0
+        return rpc_exit_code(response, raw_response=args.raw_response)
     except Exception as exc:
-        if not args.quiet:
-            if getattr(args, "error_json", False):
-                print(json_text(exception_error_response(exc, getattr(args, "request_id", None)), compact=args.compact), file=sys.stderr)
-            else:
-                print(str(exc), file=sys.stderr)
+        if getattr(args, "error_json", False):
+            print(json_text(exception_error_response(exc, getattr(args, "request_id", None)), compact=args.compact), file=sys.stderr)
+        elif not quiet:
+            print(str(exc), file=sys.stderr)
         return 1
 
 
