@@ -83,7 +83,8 @@ All harnesses emit **NDJSON** (one JSON object per line):
 |--------|------------|-------------|
 | `scripts/control_smoke_test.py` | `control_smoke` | After `make agent-ready` |
 | `scripts/test_ergonomics.py` | `ergonomics` | Patch/task contract verification |
-| `scripts/run_agent_integration_tests.py` | `agent_integration` | Rolls up smoke + ergonomics |
+| `scripts/test_task_server_health.py` | `task_server_health` | Task/socket survival after `task.runLoop` |
+| `scripts/run_agent_integration_tests.py` | `agent_integration` | Rolls up smoke + task health + ergonomics |
 
 ```bash
 make agent-integration
@@ -100,5 +101,7 @@ pkill -f "DietCode.app/Contents/MacOS/DietCode" || true
 build/DietCode.app/Contents/MacOS/DietCode --ensure-socket --ensure-timeout 15
 make agent-integration
 ```
+
+Task failure recovery: [Task Server Recovery](task-server-recovery.md).
 
 See [Build & Test System](build-and-test-system.md) and [Error Codes](error-codes.md).

@@ -32,6 +32,7 @@ DietCode employs a **Zero-Dependency Testing** approach. Tests are designed to b
 |--------|------------------|--------|
 | `make agent-self-test` | No | Compact JSON self-test report |
 | `make control-smoke` | Yes | NDJSON check lines + summary |
+| `make test-task-health` | Yes | Task/socket survival regression (`test_task_server_health.py`) |
 | `make agent-integration` | Yes | NDJSON rollup via `run_agent_integration_tests.py` |
 | `make test-agent-integration` | Yes | Alias for `agent-integration` |
 

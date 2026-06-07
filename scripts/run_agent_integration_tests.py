@@ -14,6 +14,7 @@ from dietcode_agent_client import REPO_ROOT, emit_test_line, finish_test_run
 
 SUITES: list[tuple[str, list[str]]] = [
     ("control_smoke", [sys.executable, "scripts/control_smoke_test.py", "--compact"]),
+    ("task_server_health", [sys.executable, "scripts/test_task_server_health.py", "--compact"]),
     ("ergonomics", [sys.executable, "scripts/test_ergonomics.py", "--compact"]),
 ]
 
@@ -24,7 +25,7 @@ def main() -> int:
     parser.add_argument(
         "--suite",
         action="append",
-        choices=[name for name, _ in SUITES],
+        choices=tuple(name for name, _ in SUITES),
         help="Run only the named suite(s). Default: all.",
     )
     args = parser.parse_args()

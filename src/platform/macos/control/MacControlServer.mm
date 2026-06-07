@@ -96,20 +96,19 @@ static NSString* DietCodeReadTextFileForControlServer(NSString* path) {
         _patchService = [[MacControlPatchService alloc] initWithWindowBridge:_windowBridge];
         
         __weak DietCodeControlServer* weakSelf = self;
+        MacControlMethodExecutor nestedExecutor = ^(NSString* method, NSDictionary* params, NSDictionary** outResult, NSString** outErrCode, NSString** outErrMsg, NSString** outPaths) {
+            [weakSelf executeNestedMethod:method params:params outResult:outResult outErrCode:outErrCode outErrMsg:outErrMsg outPaths:outPaths];
+        };
         _taskRuntime = [[MacControlTaskRuntime alloc] initWithWindowBridge:_windowBridge
                                                                patchService:_patchService
                                                               searchService:_searchService
-                                                                   executor:^(NSString* method, NSDictionary* params, NSDictionary** outResult, NSString** outErrCode, NSString** outErrMsg, NSString** outPaths) {
-            [weakSelf executeMethod:method params:params outResult:outResult outErrCode:outErrCode outErrMsg:outErrMsg outPaths:outPaths];
-        }];
+                                                                   executor:nestedExecutor];
         
         _comboRuntime = [[MacControlComboRuntime alloc] initWithWindowBridge:_windowBridge
                                                                recoveryStore:_recoveryStore
                                                                 patchService:_patchService
                                                                  taskRuntime:_taskRuntime
-                                                                    executor:^(NSString *method, NSDictionary *params, NSDictionary *__autoreleasing *outResult, NSString *__autoreleasing *outErrCode, NSString *__autoreleasing *outErrMsg, NSString *__autoreleasing *outPaths) {
-            [weakSelf executeMethod:method params:params outResult:outResult outErrCode:outErrCode outErrMsg:outErrMsg outPaths:outPaths];
-        }];
+                                                                    executor:nestedExecutor];
 
         _isRunning = NO;
         _serverFd = -1;
@@ -359,6 +358,33 @@ static NSString* DietCodeReadTextFileForControlServer(NSString* path) {
     return MacControlIsReadQueueMethod(method);
 }
 
+- (void)executeNestedMethod:(NSString*)method
+                     params:(NSDictionary*)params
+                  outResult:(NSDictionary**)outResult
+                 outErrCode:(NSString**)outErrCode
+                    outErrMsg:(NSString**)outErrMsg
+                   outPaths:(NSString**)outPaths {
+    if (MacControlIsReadQueueMethod(method)) {
+        dispatch_semaphore_t sem = dispatch_semaphore_create(0);
+        __block NSDictionary* result = nil;
+        __block NSString* errCode = nil;
+        __block NSString* errMsg = nil;
+        __block NSString* paths = nil;
+        dispatch_async(_readQueue, ^{
+            [self executeMethod:method params:params outResult:&result outErrCode:&errCode outErrMsg:&errMsg outPaths:&paths];
+            dispatch_semaphore_signal(sem);
+        });
+        dispatch_semaphore_wait(sem, DISPATCH_TIME_FOREVER);
+        if (outResult) *outResult = result;
+        if (outErrCode) *outErrCode = errCode;
+        if (outErrMsg) *outErrMsg = errMsg;
+        if (outPaths) *outPaths = paths;
+        return;
+    }
+
+    [self executeMethod:method params:params outResult:outResult outErrCode:outErrCode outErrMsg:outErrMsg outPaths:outPaths];
+}
+
 - (dispatch_queue_t)queueForRequestLine:(const std::string&)line {
     NSData* data = [NSData dataWithBytes:line.data() length:line.size()];
     NSDictionary* req = [NSJSONSerialization JSONObjectWithData:data options:0 error:nil];
@@ -447,8 +473,10 @@ static NSString* DietCodeReadTextFileForControlServer(NSString* path) {
 }
 
 - (void)processRequest:(const std::string&)requestStr connection:(DietCodeClientConnection*)conn {
+    NSString* reqId = @"unknown";
+    NSString* method = @"unknown";
+    int clientFd = conn.fd;
     @try {
-        int clientFd = conn.fd;
         auto startTime = std::chrono::high_resolution_clock::now();
         if (requestStr.size() > kMaxRequestBytes) {
             [self sendError:@"unknown" code:@"request_too_large" message:@"Request exceeds maximum allowed size." clientFd:clientFd];
@@ -648,6 +676,11 @@ static NSString* DietCodeReadTextFileForControlServer(NSString* path) {
             [self logAuditMethod:method caller:caller permission:permission duration:duration result:@"success" paths:affectedPaths];
             [self appendLogLine:[NSString stringWithFormat:@"[%@] %@ -> Success in %lldms", caller, method, duration]];
         }
+    } @catch (NSException* exception) {
+        NSString* message = exception.reason ?: @"Unhandled server exception.";
+        NSString* failedMethod = method.length > 0 ? method : @"unknown";
+        [self sendError:(reqId.length > 0 ? reqId : @"unknown") code:@"internal_error" message:message clientFd:clientFd];
+        [self appendLogLine:[NSString stringWithFormat:@"[Exception] %@ -> %@", failedMethod, message]];
     } @finally {
         [self decrementPendingRequestsForConnection:conn];
     }
@@ -1254,7 +1287,26 @@ static NSString* DietCodeReadTextFileForControlServer(NSString* path) {
 - (void)sendResponse:(NSDictionary*)responseObj clientFd:(int)clientFd {
     NSError* err = nil;
     NSData* data = [NSJSONSerialization dataWithJSONObject:responseObj options:0 error:&err];
-    if (err || !data) return;
+    if (err || !data) {
+        NSDictionary* failResp = @{
+            @"id": responseObj[@"id"] ?: @"unknown",
+            @"ok": @NO,
+            @"error": @{
+                @"code": @(-32603),
+                @"string_code": @"response_serialization_failed",
+                @"message": err.localizedDescription ?: @"Failed to serialize RPC response."
+            }
+        };
+        NSData* failData = [NSJSONSerialization dataWithJSONObject:failResp options:0 error:nil];
+        if (failData) {
+            NSMutableData* lineData = [failData mutableCopy];
+            [lineData appendBytes:"\n" length:1];
+            @synchronized(self) {
+                write(clientFd, lineData.bytes, lineData.length);
+            }
+        }
+        return;
+    }
     if (data.length > kMaxResponseBytes && [responseObj[@"ok"] boolValue]) {
         NSDictionary* limitResp = @{
             @"id": responseObj[@"id"] ?: @"unknown",

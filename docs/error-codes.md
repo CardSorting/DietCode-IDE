@@ -32,6 +32,12 @@ rg 'string_code' scripts/test_*.py
 | `invalid_params` | -32602 | Params failed validation |
 | `internal_error` | -32603 | Unhandled server failure |
 
+## Response serialization
+
+| string_code | numeric `code` | Meaning |
+|-------------|----------------|---------|
+| `response_serialization_failed` | -32603 | Server could not JSON-encode a success payload |
+
 ## Client-local codes (no live server)
 
 | string_code | numeric `code` | Meaning |

@@ -63,6 +63,12 @@
 - (NSDictionary*)contextSnapshotPayload;
 - (NSDictionary*)repairContextForFailure:(NSString*)failure params:(NSDictionary*)params outErrCode:(NSString**)outErrCode outErrMsg:(NSString**)outErrMsg;
 - (void)logAuditMethod:(NSString*)method caller:(NSString*)caller permission:(NSString*)permission duration:(long long)duration result:(NSString*)result paths:(NSString*)paths;
+- (void)executeNestedMethod:(NSString*)method
+                     params:(NSDictionary*)params
+                  outResult:(NSDictionary**)outResult
+                 outErrCode:(NSString**)outErrCode
+                    outErrMsg:(NSString**)outErrMsg
+                   outPaths:(NSString**)outPaths;
 
 @end
 

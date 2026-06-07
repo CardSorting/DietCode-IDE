@@ -81,7 +81,7 @@ MACOS_MM := \
 	src/filesystem/FileWatcher.mm \
 	src/core/LSPClient.mm
 
-.PHONY: all app run headless ensure-socket agent-ready agent-status agent-ping agent-methods agent-capabilities agent-self-test control-smoke test-ergonomics test-agent-integration agent-integration test clean
+.PHONY: all app run headless ensure-socket agent-ready agent-status agent-ping agent-methods agent-capabilities agent-self-test control-smoke test-task-health test-ergonomics test-agent-integration agent-integration test clean
 
 all: app test
 
@@ -129,6 +129,10 @@ agent-self-test:
 control-smoke: app
 	python3 scripts/dietcode_agent_client.py --wait-ready --compact --error-json --quiet
 	python3 scripts/control_smoke_test.py --compact
+
+test-task-health: app
+	python3 scripts/dietcode_agent_client.py --wait-ready --compact --error-json --quiet
+	python3 scripts/test_task_server_health.py --compact
 
 test-ergonomics: app
 	python3 scripts/dietcode_agent_client.py --wait-ready --compact --error-json --quiet

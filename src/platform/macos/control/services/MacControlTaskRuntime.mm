@@ -321,7 +321,7 @@
     copy[@"filesTouched"] = touched;
     [copy removeObjectForKey:@"filesTouchedSet"];
     [copy removeObjectForKey:@"startedAtDate"];
-    return copy;
+    return [NSDictionary dictionaryWithDictionary:copy];
 }
 
 - (NSDictionary*)primitiveForWorkbenchStep:(NSDictionary*)step {

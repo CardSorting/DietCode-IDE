@@ -134,7 +134,20 @@ def emit_test_line(payload: dict[str, Any], *, compact: bool = True) -> None:
 def finish_test_run(checks: list[dict[str, Any]], *, suite: str, compact: bool = True) -> int:
     """Print a final NDJSON summary and return 0/1."""
     ok = all(check.get("ok") for check in checks)
-    emit_test_line({"type": "summary", "suite": suite, "ok": ok, "checks": len(checks)}, compact=compact)
+    failed_names = [check["name"] for check in checks if not check.get("ok")]
+    passed = len(checks) - len(failed_names)
+    emit_test_line(
+        {
+            "type": "summary",
+            "suite": suite,
+            "ok": ok,
+            "checks": len(checks),
+            "passed": passed,
+            "failed": len(failed_names),
+            "failedNames": failed_names,
+        },
+        compact=compact,
+    )
     return 0 if ok else 1
 
 
