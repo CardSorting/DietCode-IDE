@@ -18,6 +18,7 @@ SUITES: list[tuple[str, list[str]]] = [
     ("rpc_transaction", [sys.executable, "scripts/test_rpc_transaction_health.py", "--compact"]),
     ("ergonomics", [sys.executable, "scripts/test_ergonomics.py", "--compact"]),
     ("operator_diagnostics", [sys.executable, "scripts/test_operator_diagnostics.py", "--compact"]),
+    ("runtime_safety", [sys.executable, "scripts/test_runtime_safety.py", "--compact"]),
 ]
 
 

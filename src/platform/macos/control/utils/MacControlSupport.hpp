@@ -23,6 +23,14 @@ extern const NSInteger kMaxSearchScanFiles;
 extern const NSUInteger kMaxSearchFileBytes;
 extern const NSInteger kMaxPlanSteps;
 extern const NSInteger kMaxActiveCombos;
+extern const NSInteger kMaxActiveConnections;
+extern const NSInteger kMaxPendingRequestsPerConnection;
+extern const NSInteger kMaxMalformedRequestsPerConnection;
+extern const NSInteger kMaxNestedCallWaitSeconds;
+extern const NSInteger kSocketListenBacklog;
+extern const NSUInteger kMaxRuntimeDiagnosticLogBytes;
+extern const NSUInteger kMaxAuditLogBytes;
+extern const NSUInteger kMaxFailureBundleBytes;
 extern NSString* const kDietCodeAppVersion;
 extern NSString* const kDietCodeTerminalOutputDidUpdateNotification;
 

@@ -20,7 +20,9 @@ from pathlib import Path
 from typing import Any
 
 
-SCHEMA_VERSION = "1.6.2"
+from release_versions import CLIENT_SCHEMA_VERSION, runtime_versions_payload
+
+SCHEMA_VERSION = CLIENT_SCHEMA_VERSION
 SOCKET_PATH = os.path.expanduser(os.environ.get("DIETCODE_SOCKET_PATH", "~/.dietcode/control.sock"))
 TOKEN_PATH = os.path.expanduser(os.environ.get("DIETCODE_TOKEN_PATH", "~/.dietcode/session.token"))
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -213,7 +215,7 @@ def _path_state(path: str) -> dict[str, Any]:
     expanded = os.path.expanduser(path)
     state: dict[str, Any] = {"path": expanded, "exists": False}
     try:
-        st = os.stat(expanded)
+        st = os.lstat(expanded)
     except FileNotFoundError:
         return state
     except OSError as exc:
@@ -222,6 +224,7 @@ def _path_state(path: str) -> dict[str, Any]:
     state.update(
         {
             "exists": True,
+            "isSymlink": stat.S_ISLNK(st.st_mode),
             "mode": oct(stat.S_IMODE(st.st_mode)),
             "uid": st.st_uid,
             "ownerIsCurrentUser": st.st_uid == os.getuid(),
@@ -369,6 +372,8 @@ def load_token(token_path: str = TOKEN_PATH) -> str:
 RUNTIME_DIAGNOSTIC_LOG = os.path.expanduser("~/.dietcode/agent-runtime.ndjson")
 DIAGNOSTIC_DOCS = {
     "operatorDiagnostics": "docs/operator-diagnostics.md",
+    "runtimeSafety": "docs/runtime-safety.md",
+    "operatorPolicy": "docs/operator-policy.md",
     "runtimeContracts": "docs/runtime-contracts.md",
     "errorCodes": "docs/error-codes.md",
     "queueContract": "docs/queue-contract.md",
@@ -420,6 +425,7 @@ def build_diagnostic_snapshot(
     app_path: str | os.PathLike[str] | None = None,
 ) -> dict[str, Any]:
     from agent_contracts import REQUIRED_MAKE_TARGETS
+    from runtime_safety import RUNTIME_LIMITS, audit_socket_path, redact_diagnostic_snapshot
 
     base = status(socket_path=socket_path, token_path=token_path, app_path=app_path)
     snapshot: dict[str, Any] = {
@@ -427,6 +433,8 @@ def build_diagnostic_snapshot(
         "repoRoot": str(REPO_ROOT),
         "schemaVersion": SCHEMA_VERSION,
         "environment": {key: os.environ.get(key) for key in ENV_REGISTRY},
+        "runtimeLimits": dict(RUNTIME_LIMITS),
+        "socketAudit": audit_socket_path(socket_path),
         "timeouts": {
             "defaultConnectSeconds": 10.0,
             "defaultRequestSeconds": 30.0,
@@ -438,14 +446,17 @@ def build_diagnostic_snapshot(
         "process": _process_status_for_dietcode(),
         "runtimeLogPath": RUNTIME_DIAGNOSTIC_LOG,
         "verificationCommands": [
+            "make release-check-agent-runtime",
             "make verify-agent-runtime",
+            "make test-runtime-safety",
             "make test-operator-diagnostics",
             "python3 scripts/dietcode_agent_client.py --diagnose --json",
-            "rg 'request_id|runtime_diagnostic|recovery_hint' src/ scripts/ docs/",
+            "rg 'RELEASE:|STABILITY:|CONTRACT_VERSION' src/ scripts/ docs/",
         ],
     }
     snapshot.update(base)
-    return snapshot
+    snapshot.update(runtime_versions_payload())
+    return redact_diagnostic_snapshot(snapshot)
 
 
 def response_for_output(response: Any) -> Any:
@@ -1339,6 +1350,14 @@ def run_self_test() -> dict[str, Any]:
         "name": "diagnostic.snapshot_shape",
         "ok": snapshot.get("type") == "diagnostic_snapshot" and isinstance(snapshot.get("makefileTargets"), list),
     })
+    try:
+        from release_versions import assert_versions_synced
+
+        versions_ok = True
+        assert_versions_synced()
+    except Exception:
+        versions_ok = False
+    checks.append({"name": "release.versions_synced", "ok": versions_ok})
     configured_workspace = os.environ.get(TEST_WORKSPACE_ENV)
     if configured_workspace:
         checks.append({
@@ -1445,6 +1464,7 @@ def main() -> int:
                 "environment": ENV_REGISTRY,
                 "precedence": ["CLI flag", "config file", "environment variable", "built-in default"],
             }
+            resolved.update(runtime_versions_payload())
             print(json_text(resolved, compact=args.compact))
             return 0
 

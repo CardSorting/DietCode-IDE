@@ -117,6 +117,13 @@ def check_source_invariants() -> None:
     client = _read(REPO_ROOT / "scripts" / "dietcode_agent_client.py")
     assert "--diagnose" in client, "client --diagnose required"
     assert "build_diagnostic_snapshot" in client, "diagnostic snapshot required"
+    limits = _read(REPO_ROOT / "src/domain/control/ControlRuntimeLimits.hpp")
+    assert "kMaxActiveConnections" in limits, "safety limits required"
+    assert (REPO_ROOT / "docs/runtime-safety.md").is_file(), "runtime-safety.md required"
+    assert (REPO_ROOT / "scripts/runtime_safety.py").is_file(), "runtime_safety.py required"
+    assert (REPO_ROOT / "scripts/release_versions.py").is_file(), "release_versions.py required"
+    assert (REPO_ROOT / "docs/maintainer-guide.md").is_file(), "maintainer-guide.md required"
+    assert "release-check-agent-runtime" in _read(MAKEFILE), "release-check target required"
 
 
 def check_self_test_in_make_test() -> None:

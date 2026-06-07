@@ -30,6 +30,14 @@ const NSInteger kMaxSearchScanFiles = dietcode::domain::control::kMaxSearchScanF
 const NSUInteger kMaxSearchFileBytes = dietcode::domain::control::kMaxSearchFileBytes;
 const NSInteger kMaxPlanSteps = dietcode::domain::control::kMaxPlanSteps;
 const NSInteger kMaxActiveCombos = dietcode::domain::control::kMaxActiveCombos;
+const NSInteger kMaxActiveConnections = dietcode::domain::control::kMaxActiveConnections;
+const NSInteger kMaxPendingRequestsPerConnection = dietcode::domain::control::kMaxPendingRequestsPerConnection;
+const NSInteger kMaxMalformedRequestsPerConnection = dietcode::domain::control::kMaxMalformedRequestsPerConnection;
+const NSInteger kMaxNestedCallWaitSeconds = dietcode::domain::control::kMaxNestedCallWaitSeconds;
+const NSInteger kSocketListenBacklog = dietcode::domain::control::kSocketListenBacklog;
+const NSUInteger kMaxRuntimeDiagnosticLogBytes = dietcode::domain::control::kMaxRuntimeDiagnosticLogBytes;
+const NSUInteger kMaxAuditLogBytes = dietcode::domain::control::kMaxAuditLogBytes;
+const NSUInteger kMaxFailureBundleBytes = dietcode::domain::control::kMaxFailureBundleBytes;
 NSString* const kDietCodeAppVersion = @"1.6.5";
 NSString* const kDietCodeTerminalOutputDidUpdateNotification = @"kDietCodeTerminalOutputDidUpdateNotification";
 

@@ -23,6 +23,7 @@ LADDER: list[tuple[str, list[str], bool]] = [
     ("live_rpc_transaction", [sys.executable, "scripts/test_rpc_transaction_health.py", "--compact"], True),
     ("live_ergonomics", [sys.executable, "scripts/test_ergonomics.py", "--compact"], True),
     ("live_operator_diagnostics", [sys.executable, "scripts/test_operator_diagnostics.py", "--compact"], True),
+    ("live_runtime_safety", [sys.executable, "scripts/test_runtime_safety.py", "--compact"], True),
 ]
 
 

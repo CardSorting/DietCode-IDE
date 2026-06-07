@@ -1,0 +1,24 @@
+{
+  "description": "Stable destructive RPC method anchors (grep: rg destructive_methods.json)",
+  "methods": [
+    "workspace.openFolder",
+    "editor.applyPatch",
+    "patch.apply",
+    "patch.applyBatch",
+    "changes.revertFile",
+    "git.discard",
+    "git.commit"
+  ],
+  "execute_methods": [
+    "verify.run",
+    "terminal.run",
+    "terminal.stop",
+    "terminal.clear",
+    "language.format",
+    "language.lint",
+    "task.step",
+    "task.runLoop",
+    "edit.executePlan",
+    "combo.run"
+  ]
+}

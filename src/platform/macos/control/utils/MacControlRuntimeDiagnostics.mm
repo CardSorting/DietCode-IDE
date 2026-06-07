@@ -1,6 +1,8 @@
 #import "MacControlRuntimeDiagnostics.hpp"
 #import "MacControlSerialization.hpp"
 
+#include "domain/control/ControlRuntimeLimits.hpp"
+
 #include <fstream>
 #include <sys/stat.h>
 #include <unistd.h>
@@ -34,7 +36,7 @@ static void RotateRuntimeDiagnosticLogIfNeeded(NSString* logPath) {
     NSDictionary* attrs = [fm attributesOfItemAtPath:logPath error:nil];
     if (!attrs) return;
     unsigned long long size = [attrs fileSize];
-    if (size < 5 * 1024 * 1024) return;
+    if (size < dietcode::domain::control::kMaxRuntimeDiagnosticLogBytes) return;
 
     NSString* path3 = [logPath stringByAppendingString:@".3"];
     NSString* path2 = [logPath stringByAppendingString:@".2"];
@@ -72,6 +74,19 @@ NSDictionary* MacControlRpcErrorDiagnosticMetadata(NSString* stringCode) {
         category = @"transport";
         retryable = YES;
         recoveryHint = @"dietcode_agent_client.py --diagnose";
+    } else if ([code isEqualToString:@"connection_limit_exceeded"] ||
+               [code isEqualToString:@"too_many_pending"] ||
+               [code isEqualToString:@"malformed_request_flood"] ||
+               [code isEqualToString:@"nested_call_timeout"]) {
+        category = @"validation";
+        recoveryHint = @"reduce_concurrency_or_retry_later";
+    } else if ([code isEqualToString:@"socket_symlink"] ||
+               [code isEqualToString:@"socket_wrong_owner"] ||
+               [code isEqualToString:@"socket_unsafe_permissions"] ||
+               [code isEqualToString:@"socket_unsafe_type"] ||
+               [code isEqualToString:@"socket_unsafe_path"]) {
+        category = @"auth";
+        recoveryHint = @"runtime_safety_socket_cleanup";
     } else if ([code isEqualToString:@"not_found"] || [code isEqualToString:@"task_not_active"]) {
         category = @"resource";
         recoveryHint = @"verify_task_or_resource_id";

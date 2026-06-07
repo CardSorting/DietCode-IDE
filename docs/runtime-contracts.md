@@ -3,8 +3,37 @@
 Plain-text operational contracts for the DietCode control kernel. Grep inventory:
 
 ```bash
-rg 'CONTRACT:|INVARIANT:' docs/runtime-contracts.md scripts/agent_contracts.py src/platform/macos/control
+rg 'CONTRACT:|INVARIANT:|RELEASE:' docs/runtime-contracts.md scripts/agent_contracts.py src/platform/macos/control
 ```
+
+---
+
+## RELEASE: Contract versions
+
+Canonical surfaces (keep C++ and Python in sync — `test_release_readiness.py` → `release.versions_synced`):
+
+| Version ID | Current | Surface |
+|------------|---------|---------|
+| `contractInventory` | **1.0.0** | This document's contract index |
+| `controlProtocol` | 1.6 | RPC transport |
+| `transactionSchema` | 1.6.2 | Request `schemaVersion` |
+| `clientSchema` | 1.6.2 | Python client `SCHEMA_VERSION` |
+| `rpcEnvelope` | 1.0 | `id`, `ok`, `result` / `error` keys |
+| `errorTaxonomy` | 1.0 | `string_code` + numeric mapping |
+| `diagnostics` | 1.0 | NDJSON `runtime_diagnostic` lines |
+| `safetyLimits` | 1.0 | `ControlRuntimeLimits.hpp` |
+| `harnessSummary` | 1.0 | NDJSON `type:summary` schema |
+
+Expose via:
+
+```bash
+python3 scripts/dietcode_agent_client.py --emit-config --json | rg contractVersions
+python3 scripts/dietcode_agent_client.py --raw-response --json rpc.version
+python3 scripts/dietcode_agent_client.py --raw-response --json rpc.describe '{"method":"rpc.ping"}'
+make release-check-agent-runtime
+```
+
+Stability classification: `scripts/fixtures/release/surface_classification.json` (grep `STABILITY:`).
 
 ---
 
@@ -236,9 +265,10 @@ git diff src/platform/macos/control scripts/ docs/ Makefile
 ## Strongest local ladder
 
 ```bash
+make release-check-agent-runtime
 make verify-agent-runtime
 # offline only:
-python3 scripts/verify_agent_runtime.py --compact --skip-live
+python3 scripts/release_check_agent_runtime.py --compact --skip-live
 ```
 
 ---
@@ -271,6 +301,8 @@ This pass freezes contracts with grep/diff-first tooling only. The following wer
 - Machine-readable audit log beyond plain NDJSON harness output
 
 Operator diagnostics pass (separate): see [Operator Diagnostics](operator-diagnostics.md) intentionally-not-added section for tracing/metrics exclusions.
+
+Release readiness pass: see [Maintainer Guide](maintainer-guide.md) intentionally-not-added section for release framework exclusions.
 
 Regressions should surface as **grep misses**, **diff-visible contract drift**, or **nonzero harness exit** — not silent behavioral change.
 

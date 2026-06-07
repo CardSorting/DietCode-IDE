@@ -1,0 +1,97 @@
+{
+  "description": "STABILITY: Agent-facing surface classification (grep: rg 'STABILITY:' scripts/fixtures/release/)",
+  "version": "1.0.0",
+  "cli_flags": {
+    "stable": [
+      "--compact",
+      "--json",
+      "--raw-response",
+      "--error-json",
+      "--self-test",
+      "--emit-config",
+      "--diagnose",
+      "--status",
+      "--wait-ready",
+      "--request-id",
+      "--config",
+      "--socket",
+      "--token-file",
+      "--timeout",
+      "--request-timeout"
+    ],
+    "experimental": [
+      "--listen",
+      "--listen-type",
+      "--search-semantic"
+    ],
+    "internal": [
+      "--pretty"
+    ],
+    "deprecated": []
+  },
+  "rpc_methods": {
+    "stable": [
+      "rpc.ping",
+      "rpc.version",
+      "rpc.methods",
+      "rpc.describe",
+      "file.read",
+      "workspace.grep",
+      "patch.validate",
+      "task.start",
+      "task.runLoop",
+      "task.result",
+      "verify.status"
+    ],
+    "experimental": [
+      "search.semantic",
+      "combo.run"
+    ],
+    "internal": [
+      "chip.list",
+      "chip.describe"
+    ],
+    "deprecated": []
+  },
+  "envelope_keys": {
+    "stable": ["id", "ok", "result", "error", "code", "string_code", "message"],
+    "experimental": ["request_id", "category", "retryable", "phase", "queue", "recovery_hint"],
+    "internal": ["_client_duration_ms"],
+    "deprecated": []
+  },
+  "diagnostic_line_keys": {
+    "stable": ["type", "timestamp", "request_id", "method", "phase", "ok"],
+    "experimental": ["string_code", "queue", "duration_ms"],
+    "internal": [],
+    "deprecated": []
+  },
+  "makefile_targets": {
+    "stable": [
+      "agent-self-test",
+      "test-agent-offline",
+      "test-rpc-transaction",
+      "test-task-health",
+      "test-operator-diagnostics",
+      "test-runtime-safety",
+      "verify-agent-runtime",
+      "release-check-agent-runtime",
+      "agent-integration"
+    ],
+    "experimental": [],
+    "internal": ["test-ergonomics"],
+    "deprecated": []
+  },
+  "fixtures": {
+    "stable": [
+      "scripts/fixtures/rpc/request_ping.json",
+      "scripts/fixtures/rpc/expected_error_codes.json",
+      "scripts/fixtures/rpc/malformed_line.txt",
+      "scripts/fixtures/rpc/envelope_success.schema.json",
+      "scripts/fixtures/safety/destructive_methods.json",
+      "scripts/fixtures/release/surface_classification.json"
+    ],
+    "experimental": [],
+    "internal": [],
+    "deprecated": []
+  }
+}

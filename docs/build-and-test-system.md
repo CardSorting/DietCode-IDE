@@ -35,9 +35,11 @@ DietCode employs a **Zero-Dependency Testing** approach. Tests are designed to b
 | `make test-task-health` | Yes | Task/socket survival regression (`test_task_server_health.py`) |
 | `make test-rpc-transaction` | Yes | RPC envelope + failure containment (`test_rpc_transaction_health.py`) |
 | `make test-operator-diagnostics` | Yes | Request correlation + error envelope diagnostics (`test_operator_diagnostics.py`) |
+| `make test-runtime-safety` | Yes | Abuse-resistance limits, socket audit, redaction (`test_runtime_safety.py`) |
 | `make test-agent-offline` | No | Client self-test + contract lockdown (`test_contract_lockdown.py`) |
 | `make agent-integration` | Yes | NDJSON rollup via `run_agent_integration_tests.py` |
 | `make verify-agent-runtime` | Yes | Full verification ladder (`verify_agent_runtime.py`) |
+| `make release-check-agent-runtime` | Yes | Release-grade ladder (`release_check_agent_runtime.py`) |
 | `make test-agent-integration` | Yes | Alias for `agent-integration` |
 
 - **`make agent-self-test`**: Runs offline parser/transport checks in `scripts/dietcode_agent_client.py --self-test`. Does **not** connect to a live server.

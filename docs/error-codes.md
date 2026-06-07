@@ -67,6 +67,27 @@ rg 'string_code' scripts/test_*.py
 | `transport_error` | -32603 | Socket connect/read/write failure |
 | `rpc_error` | -32000 | Unclassified client-side failure |
 
+## Local safety / concurrency codes
+
+| string_code | numeric `code` | Meaning |
+|-------------|----------------|---------|
+| `connection_limit_exceeded` | 429 | Active connection cap (`kMaxActiveConnections`) |
+| `too_many_pending` | 429 | Per-connection in-flight request cap |
+| `malformed_request_flood` | 429 | Too many malformed lines on one connection |
+| `nested_call_timeout` | 429 | Nested executor exceeded `kMaxNestedCallWaitSeconds` |
+
+## Socket safety codes (startup / audit)
+
+| string_code | Meaning |
+|-------------|---------|
+| `socket_symlink` | Socket or `~/.dietcode` is a symlink |
+| `socket_wrong_owner` | Path owned by another user |
+| `socket_unsafe_permissions` | Unexpected file mode (expect `0600` socket, `0700` dir) |
+| `socket_unsafe_type` | Path is not the expected file type |
+| `socket_unsafe_path` | Invalid or empty socket path |
+
+See [Runtime Safety](runtime-safety.md).
+
 ## Size and limit codes
 
 | string_code | numeric `code` | Meaning |

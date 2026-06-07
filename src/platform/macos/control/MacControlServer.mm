@@ -29,6 +29,8 @@
 
 #import "MacControlSupport.hpp"
 #import "MacControlRuntimeDiagnostics.hpp"
+#import "MacControlSocketSafety.hpp"
+#import "MacControlReleaseVersions.hpp"
 #import "MacControlPathSecurity.hpp"
 #import "MacControlSerialization.hpp"
 #import "MacControlDiffParsing.hpp"
@@ -53,6 +55,7 @@ static NSString* DietCodeReadTextFileForControlServer(NSString* path) {
 @property (nonatomic, assign) int fd;
 @property (nonatomic, assign) BOOL readEOF;
 @property (nonatomic, assign) NSInteger pendingRequestsCount;
+@property (nonatomic, assign) NSInteger malformedRequestCount;
 @property (nonatomic, strong) NSMutableSet<NSString*>* subscriptions;
 @end
 
@@ -79,6 +82,7 @@ static NSString* DietCodeReadTextFileForControlServer(NSString* path) {
 - (void)sendSuccess:(NSString*)reqId result:(NSDictionary*)result clientFd:(int)clientFd;
 - (void)sendSuccess:(NSString*)reqId result:(NSDictionary*)result method:(NSString*)method phase:(NSString*)phase queue:(NSString*)queue durationMs:(long long)durationMs clientFd:(int)clientFd;
 - (void)logRuntimeDiagnostic:(NSString*)requestId method:(NSString*)method phase:(NSString*)phase ok:(BOOL)ok stringCode:(NSString*)stringCode queue:(NSString*)queue durationMs:(long long)durationMs;
+- (void)recordMalformedRequestOnConnection:(DietCodeClientConnection*)conn clientFd:(int)clientFd reqId:(NSString*)reqId;
 - (NSString*)queueLabelForMethod:(NSString*)method background:(BOOL)background;
 - (NSString*)chipNameForStep:(NSDictionary*)step;
 - (NSDictionary*)paramsForComboStep:(NSDictionary*)step;
@@ -220,17 +224,13 @@ static const void* kDietCodeReadQueueKey = &kDietCodeReadQueueKey;
     NSString* homeDir = NSHomeDirectory();
     NSString* dcDir = [homeDir stringByAppendingPathComponent:@".dietcode"];
     
-    struct stat st;
-    if (lstat([dcDir UTF8String], &st) == 0) {
-        if (S_ISLNK(st.st_mode)) {
-            [self appendLogLine:@"[Error] ~/.dietcode is a symbolic link. Aborting for security."];
-            return;
-        }
-        if (st.st_uid != getuid()) {
-            [self appendLogLine:@"[Error] ~/.dietcode is owned by a different user. Aborting for security."];
-            return;
-        }
-    } else {
+    NSString* dirIssue = MacControlDietcodeDirIssue(dcDir);
+    if (dirIssue) {
+        [self appendLogLine:[NSString stringWithFormat:@"[Error] ~/.dietcode unsafe (%@). Aborting for security.", dirIssue]];
+        [self logRuntimeDiagnostic:@"startup" method:@"socket" phase:@"socket_unsafe" ok:NO stringCode:dirIssue queue:nil durationMs:-1];
+        return;
+    }
+    if (![[NSFileManager defaultManager] fileExistsAtPath:dcDir]) {
         [[NSFileManager defaultManager] createDirectoryAtPath:dcDir withIntermediateDirectories:YES attributes:@{NSFilePosixPermissions: @(0700)} error:nil];
     }
     [[NSFileManager defaultManager] setAttributes:@{NSFilePosixPermissions: @(0700)} ofItemAtPath:dcDir error:nil];
@@ -275,6 +275,16 @@ static const void* kDietCodeReadQueueKey = &kDietCodeReadQueueKey;
         return;
     }
     strncpy(addr.sun_path, sockPath, sizeof(addr.sun_path) - 1);
+
+    NSString* sockIssue = MacControlSocketPathIssue(sockPathStr);
+    if (sockIssue) {
+        [self appendLogLine:[NSString stringWithFormat:@"[Error] control socket path unsafe (%@). Aborting.", sockIssue]];
+        [self logRuntimeDiagnostic:@"startup" method:@"socket" phase:@"socket_unsafe" ok:NO stringCode:sockIssue queue:nil durationMs:-1];
+        close(_serverFd);
+        _serverFd = -1;
+        umask(oldUmask);
+        return;
+    }
     
     unlink(sockPath);
     
@@ -289,7 +299,7 @@ static const void* kDietCodeReadQueueKey = &kDietCodeReadQueueKey;
     chmod(sockPath, 0600);
     umask(oldUmask);
     
-    if (listen(_serverFd, 5) < 0) {
+    if (listen(_serverFd, (int)kSocketListenBacklog) < 0) {
         [self appendLogLine:@"[Error] Failed to listen on socket."];
         close(_serverFd);
         _serverFd = -1;
@@ -349,9 +359,13 @@ static const void* kDietCodeReadQueueKey = &kDietCodeReadQueueKey;
                 conn.fd = clientFd;
                 conn.readEOF = NO;
                 conn.pendingRequestsCount = 0;
+                conn.malformedRequestCount = 0;
                 
                 @synchronized(self) {
                     if (!_isRunning) {
+                        close(clientFd);
+                    } else if (_activeConnections.count >= kMaxActiveConnections) {
+                        [self logRuntimeDiagnostic:@"unknown" method:@"connection" phase:@"connection_rejected" ok:NO stringCode:@"connection_limit_exceeded" queue:nil durationMs:-1];
                         close(clientFd);
                     } else {
                         _activeConnections[@(clientFd)] = conn;
@@ -391,7 +405,12 @@ static const void* kDietCodeReadQueueKey = &kDietCodeReadQueueKey;
         [self executeMethod:method params:params outResult:&result outErrCode:&errCode outErrMsg:&errMsg outPaths:&paths];
         dispatch_semaphore_signal(sem);
     });
-    dispatch_semaphore_wait(sem, DISPATCH_TIME_FOREVER);
+    long waitResult = dispatch_semaphore_wait(sem, dispatch_time(DISPATCH_TIME_NOW, (int64_t)(kMaxNestedCallWaitSeconds * NSEC_PER_SEC)));
+    if (waitResult != 0) {
+        if (outErrCode) *outErrCode = @"nested_call_timeout";
+        if (outErrMsg) *outErrMsg = [NSString stringWithFormat:@"Nested method call timed out after %ld seconds.", (long)kMaxNestedCallWaitSeconds];
+        return;
+    }
     if (outResult) *outResult = result;
     if (outErrCode) *outErrCode = errCode;
     if (outErrMsg) *outErrMsg = errMsg;
@@ -439,8 +458,17 @@ static const void* kDietCodeReadQueueKey = &kDietCodeReadQueueKey;
                             continue;
                         }
                         
+                        BOOL rejectPending = NO;
                         @synchronized(self) {
-                            conn.pendingRequestsCount++;
+                            if (conn.pendingRequestsCount >= kMaxPendingRequestsPerConnection) {
+                                rejectPending = YES;
+                            } else {
+                                conn.pendingRequestsCount++;
+                            }
+                        }
+                        if (rejectPending) {
+                            [self sendError:@"unknown" code:@"too_many_pending" message:@"Too many in-flight requests on this connection." clientFd:clientFd];
+                            continue;
                         }
                         
                         dispatch_async([self queueForRequestLine:line], ^{
@@ -503,6 +531,7 @@ static const void* kDietCodeReadQueueKey = &kDietCodeReadQueueKey;
         id reqObj = [NSJSONSerialization JSONObjectWithData:reqData options:0 error:&jsonErr];
         if (jsonErr || ![reqObj isKindOfClass:[NSDictionary class]]) {
             [self sendError:@"unknown" code:@"invalid_request" message:@"Malformed JSON request object." clientFd:clientFd];
+            [self recordMalformedRequestOnConnection:conn clientFd:clientFd reqId:@"unknown"];
             [self logAuditMethod:@"invalid" caller:@"unknown" permission:@"none" duration:0 result:@"failed" paths:@""];
             return;
         }
@@ -1189,8 +1218,9 @@ static const void* kDietCodeReadQueueKey = &kDietCodeReadQueueKey;
     if ([method isEqualToString:@"rpc.version"]) {
         *outResult = @{
             @"appVersion": kDietCodeAppVersion,
-            @"controlProtocolVersion": @"1.6",
-            @"transactionSchemaVersion": @"1.6.2",
+            @"controlProtocolVersion": MacControlContractVersionsDictionary()[@"controlProtocol"],
+            @"transactionSchemaVersion": MacControlContractVersionsDictionary()[@"transactionSchema"],
+            @"contractVersions": MacControlContractVersionsDictionary(),
             @"supportedRollbackSchemas": @[@"1.6.2"],
             @"supportedInspectOnlySchemas": @[@"1.6.1"]
         };
@@ -1208,6 +1238,7 @@ static const void* kDietCodeReadQueueKey = &kDietCodeReadQueueKey;
 
     if ([method isEqualToString:@"rpc.describe"]) {
         NSString* targetMethod = params[@"method"];
+        NSArray* methods = nil;
         if (targetMethod.length > 0) {
             NSDictionary* desc = [self descriptionForRPCMethod:targetMethod];
             if (desc.count == 0) {
@@ -1215,10 +1246,14 @@ static const void* kDietCodeReadQueueKey = &kDietCodeReadQueueKey;
                 *outErrMsg = [NSString stringWithFormat:@"The method '%@' is not defined.", targetMethod];
                 return;
             }
-            *outResult = @{ @"methods": @[desc] };
+            methods = @[desc];
         } else {
-            *outResult = @{ @"methods": [self rpcMethodDescriptions] };
+            methods = [self rpcMethodDescriptions];
         }
+        *outResult = @{
+            @"methods": methods,
+            @"contractVersions": MacControlContractVersionsDictionary(),
+        };
         return;
     }
 
@@ -1255,6 +1290,20 @@ static const void* kDietCodeReadQueueKey = &kDietCodeReadQueueKey;
     if (!*outErrCode && !*outResult) {
         *outErrCode = @"method_not_found";
         *outErrMsg = [NSString stringWithFormat:@"The method '%@' is not defined.", method];
+    }
+}
+
+- (void)recordMalformedRequestOnConnection:(DietCodeClientConnection*)conn clientFd:(int)clientFd reqId:(NSString*)reqId {
+    BOOL shouldClose = NO;
+    @synchronized(self) {
+        conn.malformedRequestCount++;
+        if (conn.malformedRequestCount > kMaxMalformedRequestsPerConnection) {
+            shouldClose = YES;
+        }
+    }
+    if (shouldClose) {
+        [self sendError:reqId code:@"malformed_request_flood" message:@"Too many malformed requests on this connection." method:@"invalid" phase:@"connection_close" queue:nil durationMs:-1 clientFd:clientFd];
+        shutdown(clientFd, SHUT_RDWR);
     }
 }
 
@@ -1349,6 +1398,10 @@ static const void* kDietCodeReadQueueKey = &kDietCodeReadQueueKey;
         else if ([stringCode isEqualToString:@"permission_denied"]) numericCode = @(4006);
         else if ([stringCode isEqualToString:@"task_not_active"]) numericCode = @(4007);
         else if ([stringCode isEqualToString:@"response_serialization_failed"]) numericCode = @(-32603);
+        else if ([stringCode isEqualToString:@"connection_limit_exceeded"] ||
+                 [stringCode isEqualToString:@"too_many_pending"] ||
+                 [stringCode isEqualToString:@"malformed_request_flood"] ||
+                 [stringCode isEqualToString:@"nested_call_timeout"]) numericCode = @(429);
     }
     
     NSString* resolvedReqId = reqId.length > 0 ? reqId : @"unknown";
@@ -1481,7 +1534,7 @@ static const void* kDietCodeReadQueueKey = &kDietCodeReadQueueKey;
         NSDictionary* attrs = [fm attributesOfItemAtPath:logPath error:&attrErr];
         if (attrs) {
             unsigned long long size = [attrs fileSize];
-            if (size >= 5 * 1024 * 1024) {
+            if (size >= kMaxAuditLogBytes) {
                 if ([fm fileExistsAtPath:logPath3]) {
                     [fm removeItemAtPath:logPath3 error:nil];
                 }

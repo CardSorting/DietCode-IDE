@@ -64,6 +64,8 @@ MACOS_MM := \
 	src/platform/macos/control/utils/MacControlPathSecurity.mm \
 	src/platform/macos/control/utils/MacControlSerialization.mm \
 	src/platform/macos/control/utils/MacControlRuntimeDiagnostics.mm \
+	src/platform/macos/control/utils/MacControlSocketSafety.mm \
+	src/platform/macos/control/utils/MacControlReleaseVersions.mm \
 	src/platform/macos/control/utils/MacControlDiffParsing.mm \
 	src/platform/macos/control/services/MacControlRecoveryStore.mm \
 	src/platform/macos/control/services/MacControlSearchService.mm \
@@ -146,6 +148,10 @@ test-operator-diagnostics: app
 	python3 scripts/dietcode_agent_client.py --wait-ready --compact --error-json --quiet
 	python3 scripts/test_operator_diagnostics.py --compact
 
+test-runtime-safety: app
+	python3 scripts/dietcode_agent_client.py --wait-ready --compact --error-json --quiet
+	python3 scripts/test_runtime_safety.py --compact
+
 test-ergonomics: app
 	python3 scripts/dietcode_agent_client.py --wait-ready --compact --error-json --quiet
 	python3 scripts/test_ergonomics.py --compact
@@ -158,6 +164,9 @@ test-agent-integration: agent-integration
 
 verify-agent-runtime:
 	python3 scripts/verify_agent_runtime.py --compact
+
+release-check-agent-runtime:
+	python3 scripts/release_check_agent_runtime.py --compact
 
 $(TEST_BIN): $(BUILD_DIR) $(CORE_CPP) tests/test_editor.cpp
 	$(CXX) $(CXXFLAGS) $(CORE_CPP) tests/test_editor.cpp -o $(TEST_BIN)

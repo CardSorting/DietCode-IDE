@@ -16,6 +16,7 @@ from pathlib import Path
 
 from agent_test_support import add_output_args, output_compact
 from dietcode_agent_client import REPO_ROOT, json_text
+from runtime_safety import redact_failure_bundle
 
 CONTRACT_IDS = [
     "C-RPC-01",
@@ -97,7 +98,7 @@ def build_bundle(command: list[str], *, cwd: Path, compact: bool) -> dict:
             "rg 'request_id|runtime_diagnostic' ~/.dietcode/agent-runtime.ndjson docs/ src/",
         ],
     }
-    return bundle
+    return redact_failure_bundle(bundle)
 
 
 def main() -> int:

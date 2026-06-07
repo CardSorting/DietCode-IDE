@@ -13,6 +13,11 @@
 - [ ] Runtime contracts documented in [Runtime Contracts](runtime-contracts.md)
 - [ ] `make test-operator-diagnostics` passes
 - [ ] `python3 scripts/dietcode_agent_client.py --diagnose --json` shows socket/RPC readiness
+- [ ] `make test-runtime-safety` passes
+- [ ] Runtime limits documented in [Runtime Safety](runtime-safety.md)
+- [ ] `make release-check-agent-runtime` passes before release
+- [ ] Contract versions documented in [Runtime Contracts](runtime-contracts.md)
+- [ ] Release notes filled from [template](templates/runtime-release-notes.md) when contracts change
 
 ---
 

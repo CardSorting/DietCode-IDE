@@ -51,6 +51,10 @@ DIAGNOSTIC_SNAPSHOT_KEYS = frozenset({
     "makefileTargets",
     "docs",
     "recentRuntimeLogs",
+    "runtimeLimits",
+    "socketAudit",
+    "contractVersions",
+    "contractInventoryVersion",
 })
 
 # CONTRACT: Stable golden failure string_code expectations (see scripts/fixtures/rpc/expected_error_codes.json).
@@ -68,8 +72,10 @@ REQUIRED_MAKE_TARGETS = frozenset({
     "test-rpc-transaction",
     "test-task-health",
     "test-operator-diagnostics",
+    "test-runtime-safety",
     "agent-integration",
     "verify-agent-runtime",
+    "release-check-agent-runtime",
     "agent-self-test",
     "control-smoke",
 })
@@ -81,12 +87,14 @@ INTEGRATION_SUITES = {
     "rpc_transaction": "scripts/test_rpc_transaction_health.py",
     "ergonomics": "scripts/test_ergonomics.py",
     "operator_diagnostics": "scripts/test_operator_diagnostics.py",
+    "runtime_safety": "scripts/test_runtime_safety.py",
 }
 
 # CONTRACT: Offline lockdown suites.
 OFFLINE_SUITES = {
     "agent_self_test": "scripts/dietcode_agent_client.py",
     "contract_lockdown": "scripts/test_contract_lockdown.py",
+    "release_readiness": "scripts/test_release_readiness.py",
 }
 
 
