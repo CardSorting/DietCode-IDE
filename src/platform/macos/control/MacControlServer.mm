@@ -507,29 +507,35 @@ static NSString* DietCodeReadTextFileForControlServer(NSString* path) {
         NSString* caller = agentId ?: @"unix_socket";
         NSString* permission = [self permissionLevelForMethod:method params:params];
         
-        if ([method isEqualToString:@"event.subscribe"]) {
+        if ([method isEqualToString:@"event.subscribe"] || [method isEqualToString:@"event.unsubscribe"]) {
+            NSArray* types = params[@"types"];
+            if (![types isKindOfClass:[NSArray class]] || types.count == 0) {
+                [self sendError:reqId code:@"invalid_params" message:@"types must be a non-empty array of strings." clientFd:clientFd];
+                return;
+            }
+            NSMutableArray<NSString*>* normalizedTypes = [NSMutableArray array];
+            for (id typeValue in types) {
+                if (![typeValue isKindOfClass:[NSString class]] || [(NSString*)typeValue length] == 0) {
+                    [self sendError:reqId code:@"invalid_params" message:@"types must contain only non-empty strings." clientFd:clientFd];
+                    return;
+                }
+                [normalizedTypes addObject:(NSString*)typeValue];
+            }
+            BOOL subscribe = [method isEqualToString:@"event.subscribe"];
             @synchronized(self) {
-                NSArray* types = params[@"types"];
-                if ([types isKindOfClass:[NSArray class]]) {
-                    for (NSString* t in types) {
-                        if ([t isKindOfClass:[NSString class]]) [conn.subscriptions addObject:t];
+                for (NSString* t in normalizedTypes) {
+                    if (subscribe) {
+                        [conn.subscriptions addObject:t];
+                    } else {
+                        [conn.subscriptions removeObject:t];
                     }
                 }
             }
-            [self sendSuccess:reqId result:@{ @"subscribed": @YES } clientFd:clientFd];
-            return;
-        }
-        
-        if ([method isEqualToString:@"event.unsubscribe"]) {
-            @synchronized(self) {
-                NSArray* types = params[@"types"];
-                if ([types isKindOfClass:[NSArray class]]) {
-                    for (NSString* t in types) {
-                        if ([t isKindOfClass:[NSString class]]) [conn.subscriptions removeObject:t];
-                    }
-                }
+            if (subscribe) {
+                [self sendSuccess:reqId result:@{ @"subscribed": @YES, @"types": normalizedTypes } clientFd:clientFd];
+            } else {
+                [self sendSuccess:reqId result:@{ @"unsubscribed": @YES, @"types": normalizedTypes } clientFd:clientFd];
             }
-            [self sendSuccess:reqId result:@{ @"unsubscribed": @YES } clientFd:clientFd];
             return;
         }
         

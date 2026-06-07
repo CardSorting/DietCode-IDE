@@ -10,8 +10,10 @@ import socket
 import stat
 import subprocess
 import sys
+import threading
 import time
 import uuid
+import weakref
 from pathlib import Path
 from typing import Any
 
@@ -23,6 +25,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_APP_PATH = REPO_ROOT / "build" / "DietCode.app" / "Contents" / "MacOS" / "DietCode"
 MAX_REQUEST_BYTES = 1024 * 1024
 MAX_RESPONSE_BYTES = 4 * 1024 * 1024
+_SOCKET_READ_BUFFERS: weakref.WeakKeyDictionary[socket.socket, bytearray] = weakref.WeakKeyDictionary()
 
 READ_METHODS = {
     "rpc.ping", "rpc.version", "rpc.methods", "rpc.describe", "chip.list", "chip.describe",
@@ -391,6 +394,46 @@ def batch_requests_from_lines(lines: list[str]) -> list[dict[str, Any]]:
     return requests
 
 
+def _socket_read_buffer(sock: socket.socket) -> bytearray:
+    buffer = _SOCKET_READ_BUFFERS.get(sock)
+    if buffer is None:
+        buffer = bytearray()
+        _SOCKET_READ_BUFFERS[sock] = buffer
+    return buffer
+
+
+def _discard_socket_read_buffer(sock: socket.socket) -> None:
+    try:
+        del _SOCKET_READ_BUFFERS[sock]
+    except KeyError:
+        pass
+
+
+def _read_json_frame(sock: socket.socket, method: str, max_response_bytes: int) -> dict[str, Any]:
+    buffer = _socket_read_buffer(sock)
+    while b"\n" not in buffer:
+        chunk = sock.recv(65536)
+        if not chunk:
+            raise DietCodeTransportError(f"socket closed while waiting for {method}")
+        buffer.extend(chunk)
+        if len(buffer) > max_response_bytes + 1 and b"\n" not in buffer:
+            raise RuntimeError(f"response exceeds maximum allowed size of {max_response_bytes} bytes")
+
+    line, _, rest = buffer.partition(b"\n")
+    buffer[:] = rest
+    if not line:
+        return _read_json_frame(sock, method, max_response_bytes)
+    if len(line) > max_response_bytes:
+        raise RuntimeError(f"response exceeds maximum allowed size of {max_response_bytes} bytes")
+    try:
+        frame = json.loads(line.decode("utf-8"))
+    except json.JSONDecodeError as exc:
+        raise DietCodeTransportError(f"invalid JSON frame while waiting for {method}: {exc}") from exc
+    if not isinstance(frame, dict):
+        raise DietCodeTransportError(f"non-object JSON frame while waiting for {method}")
+    return frame
+
+
 def load_batch_requests(args: argparse.Namespace) -> list[dict[str, Any]]:
     if args.batch_file and args.batch_stdin:
         raise ValueError("provide only one of --batch-file or --batch-stdin")
@@ -416,8 +459,9 @@ def send_rpc(
     max_request_bytes: int = MAX_REQUEST_BYTES,
     max_response_bytes: int = MAX_RESPONSE_BYTES,
 ) -> dict[str, Any]:
+    expected_id = request_id or f"{method}:{uuid.uuid4().hex}"
     payload = {
-        "id": request_id or f"{method}:{uuid.uuid4().hex}",
+        "id": expected_id,
         "schemaVersion": SCHEMA_VERSION,
         "method": method,
         "params": params or {},
@@ -433,15 +477,14 @@ def send_rpc(
     if request_timeout is not None:
         sock.settimeout(request_timeout)
     sock.sendall(encoded)
-    data = bytearray()
-    while not data.endswith(b"\n"):
-        chunk = sock.recv(65536)
-        if not chunk:
-            raise DietCodeTransportError(f"socket closed while waiting for {method}")
-        data.extend(chunk)
-        if len(data) > max_response_bytes + 1:
-            raise RuntimeError(f"response exceeds maximum allowed size of {max_response_bytes} bytes")
-    return json.loads(data.decode("utf-8"))
+    while True:
+        frame = _read_json_frame(sock, method, max_response_bytes)
+        frame_id = frame.get("id")
+        if frame_id == expected_id:
+            return frame
+        if frame_id is None and isinstance(frame.get("method"), str):
+            continue
+        raise DietCodeTransportError(f"received response id {frame_id!r} while waiting for {expected_id!r}")
 
 
 def call(
@@ -505,6 +548,7 @@ class DietCodeAgentClient:
 
     def close(self) -> None:
         if self.sock is not None:
+            _discard_socket_read_buffer(self.sock)
             self.sock.close()
             self.sock = None
 
@@ -619,6 +663,31 @@ def connect(
     return sock
 
 
+def _socketpair_rpc_server(frames_by_request: list[list[dict[str, Any]]]) -> tuple[socket.socket, threading.Thread]:
+    client_sock, server_sock = socket.socketpair()
+
+    def serve() -> None:
+        try:
+            for frames in frames_by_request:
+                request_buffer = bytearray()
+                while b"\n" not in request_buffer:
+                    chunk = server_sock.recv(65536)
+                    if not chunk:
+                        return
+                    request_buffer.extend(chunk)
+                payload = b"".join(
+                    json.dumps(frame, separators=(",", ":")).encode("utf-8") + b"\n"
+                    for frame in frames
+                )
+                server_sock.sendall(payload)
+        finally:
+            server_sock.close()
+
+    thread = threading.Thread(target=serve, daemon=True)
+    thread.start()
+    return client_sock, thread
+
+
 def run_self_test() -> dict[str, Any]:
     checks: list[dict[str, Any]] = []
 
@@ -685,6 +754,41 @@ def run_self_test() -> dict[str, Any]:
     checks.append({"name": "read_methods.mutation", "ok": "patch.apply" not in READ_METHODS})
     diagnostic = _socket_probe_diagnostic("/tmp/control.sock", ["permission_denied: [Errno 1] Operation not permitted"])
     checks.append({"name": "socket_probe.permission_diagnostic", "ok": diagnostic is not None and "cannot connect" in diagnostic})
+
+    client_sock, server_thread = _socketpair_rpc_server([
+        [
+            {"id": "req-1", "ok": True, "result": {"one": 1}},
+            {"method": "event.emitted", "params": {"type": "terminal.output", "detail": {"text": "ready"}}},
+        ],
+        [{"id": "req-2", "ok": True, "result": {"two": 2}}],
+    ])
+    try:
+        first = send_rpc(client_sock, "token", "rpc.ping", request_id="req-1", request_timeout=2.0)
+        second = send_rpc(client_sock, "token", "rpc.version", request_id="req-2", request_timeout=2.0)
+        buffered_ok = first.get("result", {}).get("one") == 1 and second.get("result", {}).get("two") == 2
+    except Exception:
+        buffered_ok = False
+    finally:
+        _discard_socket_read_buffer(client_sock)
+        client_sock.close()
+        server_thread.join(timeout=2.0)
+    checks.append({"name": "transport.notification_buffering", "ok": buffered_ok})
+
+    mismatch_sock, mismatch_thread = _socketpair_rpc_server([
+        [{"id": "wrong-id", "ok": True, "result": {}}],
+    ])
+    try:
+        send_rpc(mismatch_sock, "token", "rpc.ping", request_id="expected-id", request_timeout=2.0)
+        mismatch_ok = False
+    except DietCodeTransportError as exc:
+        mismatch_ok = "wrong-id" in str(exc) and "expected-id" in str(exc)
+    except Exception:
+        mismatch_ok = False
+    finally:
+        _discard_socket_read_buffer(mismatch_sock)
+        mismatch_sock.close()
+        mismatch_thread.join(timeout=2.0)
+    checks.append({"name": "transport.response_id_mismatch", "ok": mismatch_ok})
 
     ok = all(check["ok"] for check in checks)
     return {"ok": ok, "checks": checks}

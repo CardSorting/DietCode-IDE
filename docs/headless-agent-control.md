@@ -109,10 +109,10 @@ DietCode features a deterministic execution runtime where individual operations 
 - `language.definition`: Return the definition location for a file location. In headless mode, this returns `location: null`, `heuristic: true`, and `headless: true` when UI-backed LSP state is unavailable.
 
 ### Events (Duplex)
-- `event.subscribe`: Listen for real-time notifications (e.g., `DocumentSaved`, `ActivityChanged`).
-- `event.unsubscribe`: Stop listening for events.
+- `event.subscribe`: Listen for real-time notifications (e.g., `DocumentSaved`, `ActivityChanged`). `types` must be a non-empty string array.
+- `event.unsubscribe`: Stop listening for events. `types` must be a non-empty string array.
 
-Use a dedicated socket connection for event subscriptions. Event notifications are delivered on the subscribed connection and can interleave with ordinary JSON-RPC responses, so sharing one socket between an event listener thread and synchronous request/response calls can consume frames out of order.
+Use a dedicated socket connection for long-running event subscriptions. Event notifications are delivered on the subscribed connection and can interleave with ordinary JSON-RPC responses; the bundled Python helper filters notification frames while waiting for a matching response id, but independent readers should not share one socket.
 
 ---
 

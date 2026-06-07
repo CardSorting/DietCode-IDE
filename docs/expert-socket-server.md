@@ -54,6 +54,6 @@ When an RPC method needs to interact with the UI (e.g., `editor.insertText`), th
 
 ## Event Stream Isolation
 
-`event.subscribe` turns a socket connection into a duplex stream: it still receives the subscription response, and then receives asynchronous `event.emitted` frames. Agent harnesses should use a dedicated connection for event listening and keep ordinary JSON-RPC calls on a separate request/response connection.
+`event.subscribe` turns a socket connection into a duplex stream: it still receives the subscription response, and then receives asynchronous `event.emitted` frames. `scripts/dietcode_agent_client.py` keeps a per-socket read buffer, skips notification frames while waiting for a matching response id, and fails fast if it receives a mismatched response id. This makes shared sockets safer for simple agents.
 
-This avoids a common race where a background event listener reads the next synchronous RPC response before the caller that issued the request can consume it.
+Dedicated event connections are still recommended for long-running listeners. They avoid a common race where two different readers in the same process compete for one socket and consume each other's frames.

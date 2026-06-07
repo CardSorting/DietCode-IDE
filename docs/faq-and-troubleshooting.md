@@ -35,8 +35,8 @@ This guide addresses common hurdles encountered when developing, building, or in
 - **Fix:** Use `workspace.openFolder` to switch the active workspace to the directory containing your target files.
 
 ### Q: Event subscriptions make later RPC calls return strange responses.
-**A:** `event.subscribe` sends asynchronous frames on the subscribed socket. If a background event listener and synchronous RPC caller share one socket, either reader can consume the other's frame.
-- **Fix:** Use two control connections: one dedicated to `event.subscribe` and one for ordinary request/response RPC calls.
+**A:** `event.subscribe` sends asynchronous frames on the subscribed socket. The bundled Python helper filters notification frames while waiting for the requested response id, but two independent readers sharing one socket can still consume each other's frames.
+- **Fix:** Use `scripts/dietcode_agent_client.py` for request/response calls and use two control connections for long-running event listeners: one dedicated to `event.subscribe` and one for ordinary RPC calls.
 
 ### Q: Headless `workspace.openFile` or language methods do not open a visible editor.
 **A:** In headless mode there is no initialized editor UI. `workspace.openFile` validates the file and updates recent-file state, while `language.hover`, `language.completions`, and `language.definition` return stable headless fallback results when UI-backed LSP state is unavailable.
