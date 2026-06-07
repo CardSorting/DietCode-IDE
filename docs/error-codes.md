@@ -8,6 +8,27 @@ Stable `string_code` values returned in JSON-RPC error envelopes (`ok: false`). 
 
 ---
 
+## Error taxonomy
+
+| Category | Numeric range | Retry? | Examples |
+|----------|---------------|--------|----------|
+| Transport | -32600..-32603, client-local | Sometimes | `invalid_request`, `transport_error`, `internal_error` |
+| Validation | -32602, 413 | No — fix params | `invalid_params`, `request_too_large`, `too_many_results` |
+| Resource | 404, 409 | No | `not_found`, `already_exists`, `method_not_found` |
+| Domain | 4001–4007 | Case-by-case | `outside_workspace`, `task_not_active`, `patch_failed` |
+| Serialization | -32603 | No — inspect payload | `response_serialization_failed`, `response_too_large` |
+| Recovery | -32603, 404 | Manual | `rollback_failed`, `backup_corrupt` |
+
+**Envelope contract:** every RPC returns exactly one terminal object with `id`, `ok`, and either `result` (success) or `error` with `code`, `string_code`, `message` (failure).
+
+**Diagnostic fields (failure only, optional but stable):** `request_id`, `category`, `retryable`, `phase`, `queue`, `recovery_hint`. See [Operator Diagnostics](operator-diagnostics.md).
+
+```bash
+rg 'assert_envelope_shape|REQUIRED_ERROR_KEYS' scripts/test_rpc_transaction_health.py
+```
+
+---
+
 ## Grep anchors
 
 ```bash

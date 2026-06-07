@@ -98,4 +98,30 @@ NSString* MacControlCanonicalJsonString(id obj, NSString** errorOut) {
     }
 }
 
+NSDictionary* MacControlJsonSanitizedDictionary(id value, NSError** errorOut) {
+    if (!value) {
+        return @{};
+    }
+    if (![NSJSONSerialization isValidJSONObject:value]) {
+        if (errorOut) {
+            *errorOut = [NSError errorWithDomain:@"MacControlSerialization"
+                                            code:1
+                                        userInfo:@{NSLocalizedDescriptionKey: @"Value is not JSON-serializable."}];
+        }
+        return nil;
+    }
+    NSData* data = [NSJSONSerialization dataWithJSONObject:value options:0 error:errorOut];
+    if (!data) return nil;
+    id decoded = [NSJSONSerialization JSONObjectWithData:data options:NSJSONReadingFragmentsAllowed error:errorOut];
+    if (![decoded isKindOfClass:[NSDictionary class]]) {
+        if (errorOut) {
+            *errorOut = [NSError errorWithDomain:@"MacControlSerialization"
+                                            code:2
+                                        userInfo:@{NSLocalizedDescriptionKey: @"Sanitized JSON root must be an object."}];
+        }
+        return nil;
+    }
+    return decoded;
+}
+
 } // namespace dietcode::platform::macos

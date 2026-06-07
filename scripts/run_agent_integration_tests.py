@@ -15,7 +15,9 @@ from dietcode_agent_client import REPO_ROOT, emit_test_line, finish_test_run
 SUITES: list[tuple[str, list[str]]] = [
     ("control_smoke", [sys.executable, "scripts/control_smoke_test.py", "--compact"]),
     ("task_server_health", [sys.executable, "scripts/test_task_server_health.py", "--compact"]),
+    ("rpc_transaction", [sys.executable, "scripts/test_rpc_transaction_health.py", "--compact"]),
     ("ergonomics", [sys.executable, "scripts/test_ergonomics.py", "--compact"]),
+    ("operator_diagnostics", [sys.executable, "scripts/test_operator_diagnostics.py", "--compact"]),
 ]
 
 

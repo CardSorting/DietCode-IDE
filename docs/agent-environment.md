@@ -102,6 +102,6 @@ build/DietCode.app/Contents/MacOS/DietCode --ensure-socket --ensure-timeout 15
 make agent-integration
 ```
 
-Task failure recovery: [Task Server Recovery](task-server-recovery.md).
+Task failure recovery: [Task Server Recovery](task-server-recovery.md). Queue contract: [Queue Contract](queue-contract.md). Frozen contracts: [Runtime Contracts](runtime-contracts.md).
 
 See [Build & Test System](build-and-test-system.md) and [Error Codes](error-codes.md).

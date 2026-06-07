@@ -1,0 +1,8 @@
+{
+  "malformed_json_line": "invalid_request",
+  "unknown_method": "method_not_found",
+  "event_subscribe_empty_types": "invalid_params",
+  "task_unknown_task_id": "invalid_params",
+  "oversized_response": "response_too_large",
+  "non_json_serializable_result": "response_serialization_failed"
+}

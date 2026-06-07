@@ -96,4 +96,6 @@ make agent-integration
 python3 scripts/run_agent_integration_tests.py --compact | rg '"failedNames"'
 ```
 
+Queue ownership and deadlock investigation: [Queue Contract](queue-contract.md).
+
 See [Agent Environment](agent-environment.md) and [Error Codes](error-codes.md).

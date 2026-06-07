@@ -22,11 +22,13 @@
 #include <set>
 #include <map>
 #include <signal.h>
+#include <cstring>
 #include <algorithm>
 #include <cctype>
 #include "filesystem/PathUtils.hpp"
 
 #import "MacControlSupport.hpp"
+#import "MacControlRuntimeDiagnostics.hpp"
 #import "MacControlPathSecurity.hpp"
 #import "MacControlSerialization.hpp"
 #import "MacControlDiffParsing.hpp"
@@ -73,7 +75,11 @@ static NSString* DietCodeReadTextFileForControlServer(NSString* path) {
 - (void)decrementPendingRequestsForConnection:(DietCodeClientConnection*)conn;
 - (NSString*)permissionLevelForMethod:(NSString*)method params:(NSDictionary*)params;
 - (void)sendError:(NSString*)reqId code:(id)code message:(NSString*)message clientFd:(int)clientFd;
+- (void)sendError:(NSString*)reqId code:(id)code message:(NSString*)message method:(NSString*)method phase:(NSString*)phase queue:(NSString*)queue durationMs:(long long)durationMs clientFd:(int)clientFd;
 - (void)sendSuccess:(NSString*)reqId result:(NSDictionary*)result clientFd:(int)clientFd;
+- (void)sendSuccess:(NSString*)reqId result:(NSDictionary*)result method:(NSString*)method phase:(NSString*)phase queue:(NSString*)queue durationMs:(long long)durationMs clientFd:(int)clientFd;
+- (void)logRuntimeDiagnostic:(NSString*)requestId method:(NSString*)method phase:(NSString*)phase ok:(BOOL)ok stringCode:(NSString*)stringCode queue:(NSString*)queue durationMs:(long long)durationMs;
+- (NSString*)queueLabelForMethod:(NSString*)method background:(BOOL)background;
 - (NSString*)chipNameForStep:(NSDictionary*)step;
 - (NSDictionary*)paramsForComboStep:(NSDictionary*)step;
 - (NSArray<NSDictionary*>*)rpcMethodDescriptions;
@@ -83,6 +89,9 @@ static NSString* DietCodeReadTextFileForControlServer(NSString* path) {
 - (NSDictionary*)primitiveForChip:(NSString*)chip params:(NSDictionary*)params;
 
 @end
+
+static const void* kDietCodeExecutionQueueKey = &kDietCodeExecutionQueueKey;
+static const void* kDietCodeReadQueueKey = &kDietCodeReadQueueKey;
 
 @implementation DietCodeControlServer
 
@@ -118,6 +127,8 @@ static NSString* DietCodeReadTextFileForControlServer(NSString* path) {
         _sessionToken = nil;
         _executionQueue = dispatch_queue_create("com.dietcode.runtime.execution", DISPATCH_QUEUE_SERIAL);
         _readQueue = dispatch_queue_create("com.dietcode.runtime.read", DISPATCH_QUEUE_CONCURRENT);
+        dispatch_queue_set_specific(_executionQueue, kDietCodeExecutionQueueKey, (void*)kDietCodeExecutionQueueKey, NULL);
+        dispatch_queue_set_specific(_readQueue, kDietCodeReadQueueKey, (void*)kDietCodeReadQueueKey, NULL);
         
         [[NSNotificationCenter defaultCenter] addObserver:self
                                                  selector:@selector(handleTerminalOutputUpdate:)
@@ -364,25 +375,27 @@ static NSString* DietCodeReadTextFileForControlServer(NSString* path) {
                  outErrCode:(NSString**)outErrCode
                     outErrMsg:(NSString**)outErrMsg
                    outPaths:(NSString**)outPaths {
-    if (MacControlIsReadQueueMethod(method)) {
-        dispatch_semaphore_t sem = dispatch_semaphore_create(0);
-        __block NSDictionary* result = nil;
-        __block NSString* errCode = nil;
-        __block NSString* errMsg = nil;
-        __block NSString* paths = nil;
-        dispatch_async(_readQueue, ^{
-            [self executeMethod:method params:params outResult:&result outErrCode:&errCode outErrMsg:&errMsg outPaths:&paths];
-            dispatch_semaphore_signal(sem);
-        });
-        dispatch_semaphore_wait(sem, DISPATCH_TIME_FOREVER);
-        if (outResult) *outResult = result;
-        if (outErrCode) *outErrCode = errCode;
-        if (outErrMsg) *outErrMsg = errMsg;
-        if (outPaths) *outPaths = paths;
+    dispatch_queue_t targetQueue = MacControlIsReadQueueMethod(method) ? _readQueue : _executionQueue;
+    const void* queueKey = MacControlIsReadQueueMethod(method) ? kDietCodeReadQueueKey : kDietCodeExecutionQueueKey;
+    if (dispatch_get_specific(queueKey)) {
+        [self executeMethod:method params:params outResult:outResult outErrCode:outErrCode outErrMsg:outErrMsg outPaths:outPaths];
         return;
     }
 
-    [self executeMethod:method params:params outResult:outResult outErrCode:outErrCode outErrMsg:outErrMsg outPaths:outPaths];
+    dispatch_semaphore_t sem = dispatch_semaphore_create(0);
+    __block NSDictionary* result = nil;
+    __block NSString* errCode = nil;
+    __block NSString* errMsg = nil;
+    __block NSString* paths = nil;
+    dispatch_async(targetQueue, ^{
+        [self executeMethod:method params:params outResult:&result outErrCode:&errCode outErrMsg:&errMsg outPaths:&paths];
+        dispatch_semaphore_signal(sem);
+    });
+    dispatch_semaphore_wait(sem, DISPATCH_TIME_FOREVER);
+    if (outResult) *outResult = result;
+    if (outErrCode) *outErrCode = errCode;
+    if (outErrMsg) *outErrMsg = errMsg;
+    if (outPaths) *outPaths = paths;
 }
 
 - (dispatch_queue_t)queueForRequestLine:(const std::string&)line {
@@ -454,6 +467,7 @@ static NSString* DietCodeReadTextFileForControlServer(NSString* path) {
         }
     }
     if (shouldClose) {
+        [self logRuntimeDiagnostic:@"unknown" method:@"connection" phase:@"connection_close" ok:YES stringCode:nil queue:nil durationMs:-1];
         close(conn.fd);
     }
 }
@@ -494,14 +508,17 @@ static NSString* DietCodeReadTextFileForControlServer(NSString* path) {
         }
         
         NSDictionary* req = (NSDictionary*)reqObj;
-        NSString* reqId = RequestIdString(req[@"id"]);
+        reqId = RequestIdString(req[@"id"]);
         id methodObj = req[@"method"];
+        [self logRuntimeDiagnostic:reqId method:@"unknown" phase:@"request_accepted" ok:YES stringCode:nil queue:nil durationMs:-1];
         if (![methodObj isKindOfClass:[NSString class]] || [methodObj length] == 0) {
             [self sendError:reqId code:@"invalid_request" message:@"Malformed JSON or missing method." clientFd:clientFd];
             [self logAuditMethod:@"invalid" caller:@"unknown" permission:@"none" duration:0 result:@"failed" paths:@""];
             return;
         }
-        NSString* method = (NSString*)methodObj;
+        method = (NSString*)methodObj;
+        NSString* queueLabel = [self queueLabelForMethod:method background:YES];
+        [self logRuntimeDiagnostic:reqId method:method phase:@"request_parsed" ok:YES stringCode:nil queue:queueLabel durationMs:-1];
         id paramsObj = req[@"params"];
         if (paramsObj && ![paramsObj isKindOfClass:[NSDictionary class]]) {
             [self sendError:reqId code:@"invalid_params" message:@"params must be a JSON object." clientFd:clientFd];
@@ -649,6 +666,8 @@ static NSString* DietCodeReadTextFileForControlServer(NSString* path) {
                                   [method isEqualToString:@"edit.plan"] ||
                                   [method isEqualToString:@"edit.executePlan"];
         
+        NSString* execQueue = isBackgroundMethod ? queueLabel : @"com.dietcode.runtime.main";
+        [self logRuntimeDiagnostic:reqId method:method phase:@"queue_dispatch" ok:YES stringCode:nil queue:execQueue durationMs:-1];
         if (isBackgroundMethod) {
             [self executeMethod:method params:params outResult:&result outErrCode:&errCode outErrMsg:&errMsg outPaths:&affectedPaths];
         } else {
@@ -668,18 +687,18 @@ static NSString* DietCodeReadTextFileForControlServer(NSString* path) {
         auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(endTime - startTime).count();
         
         if (errCode) {
-            [self sendError:reqId code:errCode message:errMsg clientFd:clientFd];
+            [self sendError:reqId code:errCode message:errMsg method:method phase:@"response_error" queue:execQueue durationMs:duration clientFd:clientFd];
             [self logAuditMethod:method caller:caller permission:permission duration:duration result:[NSString stringWithFormat:@"error: %@", errCode] paths:affectedPaths];
             [self appendLogLine:[NSString stringWithFormat:@"[%@] %@ -> Error (%@) in %lldms", caller, method, errMsg, duration]];
         } else {
-            [self sendSuccess:reqId result:result clientFd:clientFd];
+            [self sendSuccess:reqId result:result method:method phase:@"response_success" queue:execQueue durationMs:duration clientFd:clientFd];
             [self logAuditMethod:method caller:caller permission:permission duration:duration result:@"success" paths:affectedPaths];
             [self appendLogLine:[NSString stringWithFormat:@"[%@] %@ -> Success in %lldms", caller, method, duration]];
         }
     } @catch (NSException* exception) {
         NSString* message = exception.reason ?: @"Unhandled server exception.";
         NSString* failedMethod = method.length > 0 ? method : @"unknown";
-        [self sendError:(reqId.length > 0 ? reqId : @"unknown") code:@"internal_error" message:message clientFd:clientFd];
+        [self sendError:(reqId.length > 0 ? reqId : @"unknown") code:@"internal_error" message:message method:failedMethod phase:@"exception" queue:nil durationMs:-1 clientFd:clientFd];
         [self appendLogLine:[NSString stringWithFormat:@"[Exception] %@ -> %@", failedMethod, message]];
     } @finally {
         [self decrementPendingRequestsForConnection:conn];
@@ -1239,16 +1258,75 @@ static NSString* DietCodeReadTextFileForControlServer(NSString* path) {
     }
 }
 
+- (NSString*)queueLabelForMethod:(NSString*)method background:(BOOL)background {
+    if (!background) return @"com.dietcode.runtime.main";
+    return [self isReadQueueMethod:method] ? @"com.dietcode.runtime.read" : @"com.dietcode.runtime.execution";
+}
+
+- (void)logRuntimeDiagnostic:(NSString*)requestId
+                      method:(NSString*)method
+                       phase:(NSString*)phase
+                          ok:(BOOL)ok
+                  stringCode:(NSString*)stringCode
+                       queue:(NSString*)queue
+                  durationMs:(long long)durationMs {
+    NSMutableDictionary* fields = [NSMutableDictionary dictionary];
+    fields[@"request_id"] = requestId.length > 0 ? requestId : @"unknown";
+    fields[@"method"] = method.length > 0 ? method : @"unknown";
+    fields[@"phase"] = phase.length > 0 ? phase : @"unknown";
+    fields[@"ok"] = @(ok);
+    if (stringCode.length > 0) fields[@"string_code"] = stringCode;
+    if (queue.length > 0) fields[@"queue"] = queue;
+    if (durationMs >= 0) fields[@"duration_ms"] = @(durationMs);
+    MacControlAppendRuntimeDiagnosticLine(fields);
+}
+
+// INVARIANT: C-RPC-04 — success payloads are JSON-sanitized before sendResponse.
 - (void)sendSuccess:(NSString*)reqId result:(NSDictionary*)result clientFd:(int)clientFd {
+    [self sendSuccess:reqId result:result method:nil phase:@"response_success" queue:nil durationMs:-1 clientFd:clientFd];
+}
+
+- (void)sendSuccess:(NSString*)reqId
+             result:(NSDictionary*)result
+             method:(NSString*)method
+              phase:(NSString*)phase
+              queue:(NSString*)queue
+         durationMs:(long long)durationMs
+           clientFd:(int)clientFd {
+    NSError* sanitizeError = nil;
+    NSDictionary* safeResult = MacControlJsonSanitizedDictionary(result ?: @{}, &sanitizeError);
+    if (!safeResult) {
+        [self sendError:reqId
+                   code:@"response_serialization_failed"
+                message:sanitizeError.localizedDescription ?: @"Result payload is not JSON-serializable."
+                 method:method
+                  phase:@"serialization_fallback"
+                  queue:queue
+             durationMs:durationMs
+               clientFd:clientFd];
+        return;
+    }
     NSDictionary* resp = @{
         @"id": reqId,
         @"ok": @YES,
-        @"result": result ?: @{}
+        @"result": safeResult
     };
+    [self logRuntimeDiagnostic:reqId method:method ?: @"unknown" phase:phase ?: @"response_success" ok:YES stringCode:nil queue:queue durationMs:durationMs];
     [self sendResponse:resp clientFd:clientFd];
 }
 
 - (void)sendError:(NSString*)reqId code:(id)code message:(NSString*)message clientFd:(int)clientFd {
+    [self sendError:reqId code:code message:message method:nil phase:@"response_error" queue:nil durationMs:-1 clientFd:clientFd];
+}
+
+- (void)sendError:(NSString*)reqId
+             code:(id)code
+          message:(NSString*)message
+           method:(NSString*)method
+            phase:(NSString*)phase
+            queue:(NSString*)queue
+       durationMs:(long long)durationMs
+         clientFd:(int)clientFd {
     NSNumber* numericCode = @(-32603);
     NSString* stringCode = @"internal_error";
     if ([code isKindOfClass:[NSNumber class]]) {
@@ -1270,33 +1348,54 @@ static NSString* DietCodeReadTextFileForControlServer(NSString* path) {
         else if ([stringCode isEqualToString:@"rollback_conflict"] || [stringCode isEqualToString:@"rollback_failed"]) numericCode = @(4005);
         else if ([stringCode isEqualToString:@"permission_denied"]) numericCode = @(4006);
         else if ([stringCode isEqualToString:@"task_not_active"]) numericCode = @(4007);
+        else if ([stringCode isEqualToString:@"response_serialization_failed"]) numericCode = @(-32603);
     }
     
+    NSString* resolvedReqId = reqId.length > 0 ? reqId : @"unknown";
+    NSDictionary* meta = MacControlRpcErrorDiagnosticMetadata(stringCode);
+    NSMutableDictionary* error = [NSMutableDictionary dictionaryWithDictionary:@{
+        @"code": numericCode,
+        @"string_code": stringCode,
+        @"message": message ?: @"",
+        @"request_id": resolvedReqId,
+        @"category": meta[@"category"] ?: @"domain",
+        @"retryable": meta[@"retryable"] ?: @NO,
+        @"recovery_hint": meta[@"recovery_hint"] ?: @"rg string_code docs/error-codes.md",
+    }];
+    if (phase.length > 0) error[@"phase"] = phase;
+    if (queue.length > 0) error[@"queue"] = queue;
+
     NSDictionary* resp = @{
-        @"id": reqId ?: @"unknown",
+        @"id": resolvedReqId,
         @"ok": @NO,
-        @"error": @{
-            @"code": numericCode,
-            @"string_code": stringCode,
-            @"message": message ?: @""
-        }
+        @"error": error
     };
+    [self logRuntimeDiagnostic:resolvedReqId method:method ?: @"unknown" phase:phase ?: @"response_error" ok:NO stringCode:stringCode queue:queue durationMs:durationMs];
     [self sendResponse:resp clientFd:clientFd];
 }
 
+// INVARIANT: C-RPC-01 — every response path writes exactly one newline-terminated JSON line.
 - (void)sendResponse:(NSDictionary*)responseObj clientFd:(int)clientFd {
     NSError* err = nil;
     NSData* data = [NSJSONSerialization dataWithJSONObject:responseObj options:0 error:&err];
+    NSString* responseId = RequestIdString(responseObj[@"id"]);
     if (err || !data) {
+        NSDictionary* meta = MacControlRpcErrorDiagnosticMetadata(@"response_serialization_failed");
         NSDictionary* failResp = @{
-            @"id": responseObj[@"id"] ?: @"unknown",
+            @"id": responseId,
             @"ok": @NO,
             @"error": @{
                 @"code": @(-32603),
                 @"string_code": @"response_serialization_failed",
-                @"message": err.localizedDescription ?: @"Failed to serialize RPC response."
+                @"message": err.localizedDescription ?: @"Failed to serialize RPC response.",
+                @"request_id": responseId,
+                @"phase": @"serialization_fallback",
+                @"category": meta[@"category"] ?: @"serialization",
+                @"retryable": meta[@"retryable"] ?: @NO,
+                @"recovery_hint": meta[@"recovery_hint"] ?: @"reduce_response_payload",
             }
         };
+        [self logRuntimeDiagnostic:responseId method:@"unknown" phase:@"serialization_fallback" ok:NO stringCode:@"response_serialization_failed" queue:nil durationMs:-1];
         NSData* failData = [NSJSONSerialization dataWithJSONObject:failResp options:0 error:nil];
         if (failData) {
             NSMutableData* lineData = [failData mutableCopy];
@@ -1308,17 +1407,30 @@ static NSString* DietCodeReadTextFileForControlServer(NSString* path) {
         return;
     }
     if (data.length > kMaxResponseBytes && [responseObj[@"ok"] boolValue]) {
+        NSDictionary* meta = MacControlRpcErrorDiagnosticMetadata(@"response_too_large");
         NSDictionary* limitResp = @{
-            @"id": responseObj[@"id"] ?: @"unknown",
+            @"id": responseId,
             @"ok": @NO,
             @"error": @{
                 @"code": @(413),
                 @"string_code": @"response_too_large",
-                @"message": @"Response exceeds maximum allowed size."
+                @"message": @"Response exceeds maximum allowed size.",
+                @"request_id": responseId,
+                @"phase": @"serialization_fallback",
+                @"category": meta[@"category"] ?: @"serialization",
+                @"retryable": meta[@"retryable"] ?: @NO,
+                @"recovery_hint": meta[@"recovery_hint"] ?: @"reduce_response_payload",
             }
         };
+        [self logRuntimeDiagnostic:responseId method:@"unknown" phase:@"serialization_fallback" ok:NO stringCode:@"response_too_large" queue:nil durationMs:-1];
         data = [NSJSONSerialization dataWithJSONObject:limitResp options:0 error:&err];
-        if (err || !data) return;
+        if (err || !data) {
+            const char* fallback = "{\"id\":\"unknown\",\"ok\":false,\"error\":{\"code\":413,\"string_code\":\"response_too_large\",\"message\":\"Response exceeds maximum allowed size.\",\"request_id\":\"unknown\",\"phase\":\"serialization_fallback\",\"category\":\"serialization\",\"retryable\":false,\"recovery_hint\":\"reduce_response_payload\"}}\n";
+            @synchronized(self) {
+                write(clientFd, fallback, strlen(fallback));
+            }
+            return;
+        }
     }
     
     NSMutableData* lineData = [data mutableCopy];

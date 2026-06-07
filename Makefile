@@ -63,6 +63,7 @@ MACOS_MM := \
 	src/platform/macos/control/utils/MacControlSupport.mm \
 	src/platform/macos/control/utils/MacControlPathSecurity.mm \
 	src/platform/macos/control/utils/MacControlSerialization.mm \
+	src/platform/macos/control/utils/MacControlRuntimeDiagnostics.mm \
 	src/platform/macos/control/utils/MacControlDiffParsing.mm \
 	src/platform/macos/control/services/MacControlRecoveryStore.mm \
 	src/platform/macos/control/services/MacControlSearchService.mm \
@@ -81,7 +82,7 @@ MACOS_MM := \
 	src/filesystem/FileWatcher.mm \
 	src/core/LSPClient.mm
 
-.PHONY: all app run headless ensure-socket agent-ready agent-status agent-ping agent-methods agent-capabilities agent-self-test control-smoke test-task-health test-ergonomics test-agent-integration agent-integration test clean
+.PHONY: all app run headless ensure-socket agent-ready agent-status agent-ping agent-methods agent-capabilities agent-self-test test-agent-offline control-smoke test-task-health test-rpc-transaction test-ergonomics test-agent-integration agent-integration verify-agent-runtime test clean
 
 all: app test
 
@@ -126,6 +127,9 @@ agent-capabilities: app
 agent-self-test:
 	python3 scripts/dietcode_agent_client.py --self-test --compact
 
+test-agent-offline: agent-self-test
+	python3 scripts/test_contract_lockdown.py --compact
+
 control-smoke: app
 	python3 scripts/dietcode_agent_client.py --wait-ready --compact --error-json --quiet
 	python3 scripts/control_smoke_test.py --compact
@@ -133,6 +137,14 @@ control-smoke: app
 test-task-health: app
 	python3 scripts/dietcode_agent_client.py --wait-ready --compact --error-json --quiet
 	python3 scripts/test_task_server_health.py --compact
+
+test-rpc-transaction: app
+	python3 scripts/dietcode_agent_client.py --wait-ready --compact --error-json --quiet
+	python3 scripts/test_rpc_transaction_health.py --compact
+
+test-operator-diagnostics: app
+	python3 scripts/dietcode_agent_client.py --wait-ready --compact --error-json --quiet
+	python3 scripts/test_operator_diagnostics.py --compact
 
 test-ergonomics: app
 	python3 scripts/dietcode_agent_client.py --wait-ready --compact --error-json --quiet
@@ -143,6 +155,9 @@ agent-integration: app
 	python3 scripts/run_agent_integration_tests.py --compact
 
 test-agent-integration: agent-integration
+
+verify-agent-runtime:
+	python3 scripts/verify_agent_runtime.py --compact
 
 $(TEST_BIN): $(BUILD_DIR) $(CORE_CPP) tests/test_editor.cpp
 	$(CXX) $(CXXFLAGS) $(CORE_CPP) tests/test_editor.cpp -o $(TEST_BIN)

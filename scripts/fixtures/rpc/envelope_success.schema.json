@@ -1,0 +1,5 @@
+{
+  "required": ["id", "ok", "result"],
+  "ok": true,
+  "resultType": "object"
+}

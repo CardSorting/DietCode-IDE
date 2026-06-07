@@ -33,7 +33,11 @@ DietCode employs a **Zero-Dependency Testing** approach. Tests are designed to b
 | `make agent-self-test` | No | Compact JSON self-test report |
 | `make control-smoke` | Yes | NDJSON check lines + summary |
 | `make test-task-health` | Yes | Task/socket survival regression (`test_task_server_health.py`) |
+| `make test-rpc-transaction` | Yes | RPC envelope + failure containment (`test_rpc_transaction_health.py`) |
+| `make test-operator-diagnostics` | Yes | Request correlation + error envelope diagnostics (`test_operator_diagnostics.py`) |
+| `make test-agent-offline` | No | Client self-test + contract lockdown (`test_contract_lockdown.py`) |
 | `make agent-integration` | Yes | NDJSON rollup via `run_agent_integration_tests.py` |
+| `make verify-agent-runtime` | Yes | Full verification ladder (`verify_agent_runtime.py`) |
 | `make test-agent-integration` | Yes | Alias for `agent-integration` |
 
 - **`make agent-self-test`**: Runs offline parser/transport checks in `scripts/dietcode_agent_client.py --self-test`. Does **not** connect to a live server.
@@ -43,6 +47,14 @@ DietCode employs a **Zero-Dependency Testing** approach. Tests are designed to b
 - **`make test-agent-integration`**: Alias for `agent-integration`.
 
 Environment variables and config precedence: [Agent Environment](agent-environment.md).
+
+Frozen runtime contracts: [Runtime Contracts](runtime-contracts.md). Operator workflows: [Operator Diagnostics](operator-diagnostics.md).
+
+```bash
+make test-agent-offline
+make verify-agent-runtime
+rg 'CONTRACT:' docs/runtime-contracts.md
+```
 
 ### Agent verification ladder
 

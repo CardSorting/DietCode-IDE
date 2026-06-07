@@ -1,5 +1,11 @@
 #import "MacControlRoutingPolicy.hpp"
 
+// Queue contract (grep: rg 'MacControlIsReadQueueMethod|executeNestedMethod' src/platform/macos/control):
+// - Methods listed here are read-affine and MUST run on com.dietcode.runtime.read.
+// - All other RPC methods default to com.dietcode.runtime.execution unless UI-bound.
+// - Nested runtime calls (task/combo executors) must use executeNestedMethod, not executeMethod.
+// - UI mutations inside workbench steps dispatch to the main queue via MacControlWindowBridge.
+
 BOOL MacControlIsReadQueueMethod(NSString* method) {
     static NSSet<NSString*>* readMethods = nil;
     static dispatch_once_t onceToken;

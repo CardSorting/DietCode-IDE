@@ -8,6 +8,11 @@
 - [ ] `make agent-integration` passes smoke + ergonomics rollup
 - [ ] `python3 scripts/dietcode_agent_client.py --emit-config --json` shows resolved paths
 - [ ] Error envelopes use stable `string_code` (see [Error Codes](error-codes.md))
+- [ ] `make test-agent-offline` passes (self-test + contract lockdown)
+- [ ] `make verify-agent-runtime` passes (full ladder)
+- [ ] Runtime contracts documented in [Runtime Contracts](runtime-contracts.md)
+- [ ] `make test-operator-diagnostics` passes
+- [ ] `python3 scripts/dietcode_agent_client.py --diagnose --json` shows socket/RPC readiness
 
 ---
 

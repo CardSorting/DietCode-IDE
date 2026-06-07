@@ -79,7 +79,21 @@ class DietCodeTransportError(RuntimeError):
     pass
 
 
-def local_error_response(request_id: str | None, code: str, message: str) -> dict[str, Any]:
+CLIENT_ERROR_DIAGNOSTICS: dict[str, dict[str, Any]] = {
+    "invalid_request": {"category": "validation", "retryable": False, "recovery_hint": "fix_request_json", "phase": "client_validate"},
+    "invalid_params": {"category": "validation", "retryable": False, "recovery_hint": "fix_request_params", "phase": "client_validate"},
+    "transport_error": {"category": "transport", "retryable": True, "recovery_hint": "dietcode_agent_client.py --diagnose", "phase": "client_transport"},
+    "rpc_error": {"category": "transport", "retryable": False, "recovery_hint": "inspect_client_trace", "phase": "client_rpc"},
+}
+
+
+def local_error_response(
+    request_id: str | None,
+    code: str,
+    message: str,
+    *,
+    phase: str | None = None,
+) -> dict[str, Any]:
     numeric_code = -32600
     if code == "invalid_params":
         numeric_code = -32602
@@ -87,14 +101,22 @@ def local_error_response(request_id: str | None, code: str, message: str) -> dic
         numeric_code = -32603
     elif code == "rpc_error":
         numeric_code = -32000
+    resolved_id = request_id or "unknown"
+    meta = CLIENT_ERROR_DIAGNOSTICS.get(code, {})
+    error: dict[str, Any] = {
+        "code": numeric_code,
+        "string_code": code,
+        "message": message,
+        "request_id": resolved_id,
+        "category": meta.get("category", "transport"),
+        "retryable": bool(meta.get("retryable", False)),
+        "recovery_hint": meta.get("recovery_hint", "rg string_code docs/error-codes.md"),
+        "phase": phase or meta.get("phase", "client_error"),
+    }
     return {
-        "id": request_id or "unknown",
+        "id": resolved_id,
         "ok": False,
-        "error": {
-            "code": numeric_code,
-            "string_code": code,
-            "message": message,
-        },
+        "error": error,
     }
 
 
@@ -342,6 +364,145 @@ def load_token(token_path: str = TOKEN_PATH) -> str:
         raise RuntimeError(f"session token not found: {token_path}")
     with open(token_path, "r", encoding="utf-8") as f:
         return f.read().strip()
+
+
+RUNTIME_DIAGNOSTIC_LOG = os.path.expanduser("~/.dietcode/agent-runtime.ndjson")
+DIAGNOSTIC_DOCS = {
+    "operatorDiagnostics": "docs/operator-diagnostics.md",
+    "runtimeContracts": "docs/runtime-contracts.md",
+    "errorCodes": "docs/error-codes.md",
+    "queueContract": "docs/queue-contract.md",
+    "taskServerRecovery": "docs/task-server-recovery.md",
+}
+
+
+def read_runtime_diagnostic_lines(path: str = RUNTIME_DIAGNOSTIC_LOG, limit: int = 10) -> list[dict[str, Any]]:
+    log_path = os.path.expanduser(path)
+    if not os.path.isfile(log_path):
+        return []
+    lines: list[dict[str, Any]] = []
+    try:
+        with open(log_path, "r", encoding="utf-8") as handle:
+            for raw in handle.readlines()[-limit:]:
+                raw = raw.strip()
+                if not raw:
+                    continue
+                try:
+                    payload = json.loads(raw)
+                except json.JSONDecodeError:
+                    continue
+                if isinstance(payload, dict):
+                    lines.append(payload)
+    except OSError:
+        return []
+    return lines
+
+
+def _process_status_for_dietcode() -> dict[str, Any] | None:
+    try:
+        completed = subprocess.run(
+            ["pgrep", "-lf", "DietCode.app/Contents/MacOS/DietCode"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+    except OSError:
+        return None
+    output = completed.stdout.strip()
+    if not output:
+        return {"running": False, "matches": []}
+    return {"running": True, "matches": output.splitlines()}
+
+
+def build_diagnostic_snapshot(
+    socket_path: str = SOCKET_PATH,
+    token_path: str = TOKEN_PATH,
+    app_path: str | os.PathLike[str] | None = None,
+) -> dict[str, Any]:
+    from agent_contracts import REQUIRED_MAKE_TARGETS
+
+    base = status(socket_path=socket_path, token_path=token_path, app_path=app_path)
+    snapshot: dict[str, Any] = {
+        "type": "diagnostic_snapshot",
+        "repoRoot": str(REPO_ROOT),
+        "schemaVersion": SCHEMA_VERSION,
+        "environment": {key: os.environ.get(key) for key in ENV_REGISTRY},
+        "timeouts": {
+            "defaultConnectSeconds": 10.0,
+            "defaultRequestSeconds": 30.0,
+            "socketProbeSeconds": 2.0,
+        },
+        "makefileTargets": sorted(REQUIRED_MAKE_TARGETS),
+        "docs": {name: str(REPO_ROOT / rel) for name, rel in DIAGNOSTIC_DOCS.items()},
+        "recentRuntimeLogs": read_runtime_diagnostic_lines(limit=10),
+        "process": _process_status_for_dietcode(),
+        "runtimeLogPath": RUNTIME_DIAGNOSTIC_LOG,
+        "verificationCommands": [
+            "make verify-agent-runtime",
+            "make test-operator-diagnostics",
+            "python3 scripts/dietcode_agent_client.py --diagnose --json",
+            "rg 'request_id|runtime_diagnostic|recovery_hint' src/ scripts/ docs/",
+        ],
+    }
+    snapshot.update(base)
+    return snapshot
+
+
+def response_for_output(response: Any) -> Any:
+    if isinstance(response, dict):
+        cleaned = dict(response)
+        cleaned.pop("_client_duration_ms", None)
+        return cleaned
+    return response
+
+
+def log_rpc_client_diagnostic(
+    response: dict[str, Any],
+    *,
+    method: str,
+    request_id: str | None,
+    verbose: bool,
+    error_json: bool,
+    compact: bool,
+) -> None:
+    if not verbose and not error_json and rpc_succeeded(response):
+        return
+    req_id = str(response.get("id") or request_id or "unknown")
+    error = response.get("error", {}) if isinstance(response.get("error"), dict) else {}
+    emit_client_diagnostic(
+        request_id=req_id,
+        method=method,
+        phase="rpc_response",
+        ok=rpc_succeeded(response),
+        string_code=error.get("string_code"),
+        duration_ms=response.get("_client_duration_ms"),
+        compact=compact,
+    )
+
+
+def emit_client_diagnostic(
+    *,
+    request_id: str,
+    method: str,
+    phase: str,
+    ok: bool,
+    string_code: str | None = None,
+    duration_ms: float | None = None,
+    compact: bool = True,
+) -> None:
+    payload: dict[str, Any] = {
+        "type": "client_diagnostic",
+        "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        "request_id": request_id,
+        "method": method,
+        "phase": phase,
+        "ok": ok,
+    }
+    if string_code:
+        payload["string_code"] = string_code
+    if duration_ms is not None:
+        payload["duration_ms"] = round(duration_ms, 2)
+    print(json_text(payload, compact=compact), file=sys.stderr)
 
 
 def status(
@@ -612,6 +773,7 @@ def send_rpc(
     encoded = json.dumps(payload, separators=(",", ":")).encode("utf-8") + b"\n"
     if len(encoded) > max_request_bytes:
         raise RuntimeError(f"request exceeds maximum allowed size of {max_request_bytes} bytes")
+    started = time.monotonic()
     with _socket_lock(sock):
         with _scoped_socket_timeout(sock, request_timeout):
             sock.sendall(encoded)
@@ -619,6 +781,7 @@ def send_rpc(
                 frame = _read_json_frame(sock, method, max_response_bytes)
                 frame_id = frame.get("id")
                 if frame_id == expected_id:
+                    frame["_client_duration_ms"] = round((time.monotonic() - started) * 1000.0, 2)
                     return frame
                 if frame_id is None and isinstance(frame.get("method"), str):
                     continue
@@ -1140,6 +1303,42 @@ def run_self_test() -> dict[str, Any]:
     checks.append({"name": "workspace.default_test_path", "ok": default_test_workspace() == str(REPO_ROOT)})
     checks.append({"name": "env.registry_documented", "ok": TEST_WORKSPACE_ENV in ENV_REGISTRY})
     checks.append({"name": "env.registry_socket", "ok": "DIETCODE_SOCKET_PATH" in ENV_REGISTRY})
+    probe_checks = [{"name": "a", "ok": True}, {"name": "b", "ok": False}]
+    probe_failed = [c["name"] for c in probe_checks if not c.get("ok")]
+    checks.append({
+        "name": "harness.summary_accounting",
+        "ok": len(probe_checks) == 2 and len(probe_failed) == 1 and probe_failed == ["b"],
+    })
+    try:
+        from agent_contracts import SUMMARY_SCHEMA_KEYS, validate_summary_line
+
+        schema_ok = not validate_summary_line(
+            {
+                "type": "summary",
+                "suite": "probe",
+                "ok": True,
+                "checks": 0,
+                "passed": 0,
+                "failed": 0,
+                "failedNames": [],
+            }
+        ) and len(SUMMARY_SCHEMA_KEYS) >= 7
+    except Exception:
+        schema_ok = False
+    checks.append({"name": "contract.summary_schema_import", "ok": schema_ok})
+    local_err = local_error_response("diag-req", "transport_error", "probe")
+    checks.append({
+        "name": "diagnostic.local_error_fields",
+        "ok": all(
+            local_err["error"].get(key) is not None
+            for key in ("request_id", "category", "retryable", "recovery_hint", "phase")
+        ),
+    })
+    snapshot = build_diagnostic_snapshot()
+    checks.append({
+        "name": "diagnostic.snapshot_shape",
+        "ok": snapshot.get("type") == "diagnostic_snapshot" and isinstance(snapshot.get("makefileTargets"), list),
+    })
     configured_workspace = os.environ.get(TEST_WORKSPACE_ENV)
     if configured_workspace:
         checks.append({
@@ -1165,6 +1364,7 @@ def main() -> int:
     parser.add_argument("--verbose", action="store_true", help="Print diagnostic messages on stderr (overrides --quiet).")
     parser.add_argument("--ensure-only", action="store_true", help="Only ensure the socket is active, then exit.")
     parser.add_argument("--status", action="store_true", help="Print local socket/token/app readiness JSON, then exit.")
+    parser.add_argument("--diagnose", action="store_true", help="Print a local diagnostic snapshot safe to paste into an issue.")
     parser.add_argument("--wait-ready", action="store_true", help="Ensure the socket, then wait for authenticated RPC readiness.")
     parser.add_argument("--self-test", action="store_true", help="Run client-only parser/format checks without connecting to DietCode.")
     parser.add_argument("--emit-config", action="store_true", help="Print resolved config JSON without connecting to DietCode.")
@@ -1252,6 +1452,11 @@ def main() -> int:
             state = status(socket_path=socket_path, token_path=token_path, app_path=app_path)
             print(json_text(state, compact=args.compact))
             return 0 if state["ok"] else 1
+
+        if args.diagnose:
+            snapshot = build_diagnostic_snapshot(socket_path=socket_path, token_path=token_path, app_path=app_path)
+            print(json_text(snapshot, compact=args.compact))
+            return 0 if snapshot.get("rpcReady") else 1
 
         if args.wait_ready:
             state = wait_ready(
@@ -1406,7 +1611,15 @@ def main() -> int:
                     response = client.raw_call(shortcut_method, shortcut_params, args.request_id)
                 else:
                     response = client.call(shortcut_method, shortcut_params, args.request_id)
-            print(json_text(response, compact=args.compact))
+            log_rpc_client_diagnostic(
+                response,
+                method=shortcut_method,
+                request_id=args.request_id,
+                verbose=args.verbose,
+                error_json=args.error_json,
+                compact=args.compact,
+            )
+            print(json_text(response_for_output(response), compact=args.compact))
             return rpc_exit_code(response, raw_response=args.raw_response)
 
         effective_method = args.method
@@ -1428,7 +1641,15 @@ def main() -> int:
                 response = client.raw_call(effective_method, params, args.request_id)
             else:
                 response = client.call(effective_method, params, args.request_id)
-        print(json_text(response, compact=args.compact))
+        log_rpc_client_diagnostic(
+            response,
+            method=effective_method,
+            request_id=args.request_id,
+            verbose=args.verbose,
+            error_json=args.error_json,
+            compact=args.compact,
+        )
+        print(json_text(response_for_output(response), compact=args.compact))
         return rpc_exit_code(response, raw_response=args.raw_response)
     except Exception as exc:
         if getattr(args, "error_json", False):
