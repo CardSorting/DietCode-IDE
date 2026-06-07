@@ -49,6 +49,7 @@ We prioritize **predictability** and **sovereignty**:
 
 ```text
 docs/                 Technical specs, agent protocol, and architectural guides.
+docs/expert-tier/     Expert-tier deep dives into tokenizer, search, and socket logic.
 scripts/              Python SDK and integration test suites for the agent API.
 src/core/             The portable C++20 editor core.
 src/platform/macos/   AppKit shell, PTY terminal, and JSON-RPC control server.

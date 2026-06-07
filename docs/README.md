@@ -35,6 +35,13 @@ Welcome to the DietCode documentation. This directory contains detailed specific
 - **[Headless Agent Control](headless-agent-control.md)**: Deep dive into the JSON-RPC socket interface for automation.
 - **[Deterministic Combo Runtime Spec](deterministic-combo-runtime-spec.md)**: Specification for the command execution runtime.
 
+## 🎓 Expert-Tier Deep Dives
+
+- **[Tokenizer Logic](expert-tokenizer-logic.md)**: Greedy regex matching and stateless line-based tokenization.
+- **[Search Algorithms](expert-search-algorithms.md)**: Optimized substring search and case-insensitivity strategies.
+- **[Socket Server Architecture](expert-socket-server.md)**: Threading models, security tokens, and socket hardening.
+- **[Design Patterns & Governance](expert-governance.md)**: PIMPL, asynchronous observers, and project coding standards.
+
 ## 🛠️ Developer Guides
 
 - **[Build Instructions](build-instructions.md)**: How to compile, test, and run DietCode from source.
