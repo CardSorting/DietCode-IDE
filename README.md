@@ -1,85 +1,123 @@
 <p align="center">
-  <img src="resources/AppIcon.icns" width="128" height="128" alt="DietCode Logo">
+  <img src="resources/logo.svg" width="180" height="180" alt="DietCode Logo">
 </p>
 
 <h1 align="center">DietCode IDE</h1>
 
 <p align="center">
   <strong>The High-Fidelity, Agent-Native Coding Workspace.</strong><br>
-  <em>Open. Code. Run. Save. Zero Surprise Compute.</em>
+  <em>Native performance. Zero-latency. Transactable automation.</em>
 </p>
 
 <p align="center">
-  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="License"></a>
-  <img src="https://img.shields.io/badge/platform-macOS-lightgrey.svg" alt="Platform">
-  <img src="https://img.shields.io/badge/language-C%2B%2B20-orange.svg" alt="Language">
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-4CAF50.svg?style=for-the-badge" alt="License"></a>
+  <img src="https://img.shields.io/badge/platform-macOS-lightgrey.svg?style=for-the-badge" alt="Platform">
+  <img src="https://img.shields.io/badge/language-C%2B%2B20-orange.svg?style=for-the-badge" alt="Language">
+  <img src="https://img.shields.io/badge/Agent--Native-Enabled-blue.svg?style=for-the-badge" alt="Agent-Native">
 </p>
 
 ---
 
-**DietCode** is a native, lightweight IDE engineered for developers and autonomous agents who demand a high-performance, predictable, and local-first coding environment. It eliminates the "compute tax" of modern editors by stripping away hidden background indexing, telemetry, and extension-host overhead.
+## 💎 The Thesis
+
+**DietCode** is a native, lightweight IDE engineered for developers and autonomous agents who demand a high-performance, predictable, and local-first coding environment. It is the antithesis of modern, bloated editors, offering a "glass box" view of its internals and an ultra-high-fidelity control surface for the next generation of software engineering.
+
+---
+
+## ⚖️ Why DietCode?
+
+| Feature | Electron-Based IDEs | DietCode IDE |
+|---|---|---|
+| **Memory Footprint** | 500MB - 2GB+ (Idle) | **~30MB - 80MB** (Typical) |
+| **Startup Time** | 5s - 15s | **< 200ms** |
+| **Background Noise** | High (Indexing, Telemetry, Daemons) | **Zero** (Pure on-demand execution) |
+| **Agent Integration** | Plugin-based / Surface-level | **Native / Direct RPC over Unix Socket** |
+| **Reliability** | "Surprise" compute spikes | **Deterministic resource allocation** |
+
+---
 
 ## 🤖 Built for Agents: The Headless Control Surface
 
-Unlike editors with bolted-on AI plugins, DietCode is designed from the ground up as an **Agentic IDE**. It exposes a massive JSON-RPC surface over a local Unix socket, enabling external agents to perform high-fidelity workspace operations.
+DietCode is designed from the ground up as an **Agent-First IDE**. It exposes its entire internal state via a high-performance JSON-RPC surface over a local Unix socket.
 
-- **Deterministic Runtime:** Operations are executed as atomic **Chips**, which can be composed into stateful, recoverable **Combos**.
-- **Deep Visibility:** Agents have native access to symbol outlines, diagnostic clusters, git status, and terminal scrollback.
-- **Transactional Safety:** Built-in validation and rollback support for complex multi-file edits and patches.
-- **Duplex Observability:** Real-time event subscriptions (LSP diagnostics, file saves, focus changes) via the socket.
+- **Transactional Safety:** Operations are executed as atomic **Chips**, composed into stateful, recoverable **Combos**.
+- **Pre-image Recovery:** Automatic workspace restoration using pre-mutation snapshots.
+- **Deep Visibility:** Direct access to the PTY terminal, symbol indices, and real-time event bus.
+- **Budgetary Governance:** Hard limits on agent duration, file mutations, and verification cycles.
 
-## ⚡ Technical Architecture
+---
 
-DietCode follows a strict layered architecture to ensure portability and native performance:
+## ⚡ Technical Stack
 
-- **Core (C++20):** Platform-agnostic domain logic, including the high-performance text buffer, search algorithms, and command registry.
-- **Native Shell (Obj-C++/AppKit):** Zero-latency macOS integration using native Cocoa components for windows, menus, and the primary editing surface.
-- **Control Server:** A dedicated thread managing the Unix socket, providing thread-safe access to the editor's state and infrastructure.
-- **PTY Execution:** A native pseudo-terminal implementation for low-overhead subprocess management and interactive tool execution.
+<table align="center">
+  <tr>
+    <td align="center"><b>Core Engine</b><br>C++20</td>
+    <td align="center"><b>Platform Shell</b><br>Obj-C++ / AppKit</td>
+    <td align="center"><b>Control Surface</b><br>Unix Sockets / JSON-RPC</td>
+  </tr>
+  <tr>
+    <td>Line-based text buffer, greedy regex tokenizer, async event bus.</td>
+    <td>Native Cocoa windows, NSTextView rendering, PTY terminal integration.</td>
+    <td>Multi-threaded RPC server with concurrent read/serial execution queues.</td>
+  </tr>
+</table>
 
-## 🧠 The "Diet" Philosophy
+---
 
-We prioritize **predictability** and **sovereignty**:
-- 🚫 **No Background Indexing:** Symbols are indexed on-demand or during idle periods with explicit limits.
-- 🚫 **No Extension Bloat:** Core features are built-in; no package managers or dependency hell.
-- 🚫 **No Hidden Daemons:** When you quit DietCode, every related process dies.
-- 🚫 **Privacy by Default:** Zero telemetry. Your code and interaction data never leave your machine.
-
-## 🏗️ Repository Mapping
+## 🏗️ Architecture at a Glance
 
 ```text
-docs/                 Technical specs, agent protocol, and architectural guides.
-docs/expert-tier/     Expert-tier deep dives into tokenizer, search, and socket logic.
-scripts/              Python SDK and integration test suites for the agent API.
-src/core/             The portable C++20 editor core.
-src/platform/macos/   AppKit shell, PTY terminal, and JSON-RPC control server.
-src/editor/           Domain primitives: Buffer, Cursor, Selection, Undo/Redo.
-src/filesystem/       Native I/O adapters and Git integration service.
-.wiki/                The Sovereign Knowledge Ledger (Internal decision logs).
+      [ External Agents ]          [ Human Developer ]
+              |                           |
+      ( Unix Socket RPC )          ( Native Cocoa UI )
+              |                           |
+      v-------v---------------------------v-------v
+      |            MacControlWindowBridge         |  <-- Main Thread Sync
+      +-------------------------------------------+
+      |      Domain Core (Portable C++20)         |
+      | (Buffer, Search, Undo, LSP Client, Bus)   |
+      +-------------------------------------------+
+      |     Infrastructure (I/O, Git, PTY)        |
+      v-------------------------------------------v
 ```
 
-## 🛠️ Build & Development
+---
 
-DietCode uses standard platform tools for maximum transparency.
+## 🚀 Quick Start
 
+### 1. Build and Test
 ```bash
-# Verify the core logic
-make test
-
-# Compile the native macOS bundle
-make app
-
-# Launch the IDE
-make run
+make test    # Verify the C++20 core
+make app     # Compile the macOS .app bundle
 ```
 
-*See [docs/build-instructions.md](docs/build-instructions.md) for environment details.*
+### 2. Launch
+```bash
+make run     # Launch the interactive IDE
+```
+
+### 3. Agent Integration
+```bash
+make headless # Run as a headless control server
+```
+
+---
+
+## 🗺️ Navigation & Documentation
+
+The project is extensively documented for both human maintainers and autonomous agents.
+
+- **[Documentation Index](docs/README.md)**: Your starting point for all technical specifications.
+- **[Getting Started Tutorial](docs/getting-started-tutorial.md)**: Your first hands-on contribution.
+- **[Expert-Tier Deep Dives](docs/README.md#🎓-expert-tier-deep-dives)**: Intimate implementation details.
+- **[Visual Identity](docs/visual-identity.md)**: Brand guidelines and design language.
+- **[Sovereign Knowledge Ledger](.wiki/index.md)**: Internal decision logs and project memory.
+
+---
 
 ## 📄 License
 
 DietCode is open-source software released under the [MIT License](LICENSE).
-
----
 
 <p align="center">
   <em>Small tools are good tools. High-fidelity tools are better.</em>

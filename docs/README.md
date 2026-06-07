@@ -6,10 +6,11 @@ Welcome to the DietCode documentation. This directory contains detailed specific
 
 - **[First Contribution Tutorial](getting-started-tutorial.md)**: A hands-on guide to building, running, and modifying DietCode.
 - **[Agent Integration Cookbook](agent-integration-cookbook.md)**: Practical recipes and Python examples for building autonomous agents.
+- **[Visual Identity](visual-identity.md)**: Brand guidelines and design language.
 - **[FAQ & Troubleshooting](faq-and-troubleshooting.md)**: Solutions to common hurdles in setup and development.
 
 ## 📋 Product & UX
-
+...
 - **[Product Specification](product-spec.md)**: The core thesis, positioning, and hard constraints of DietCode.
 - **[MVP Scope](mvp-scope.md)**: Defines what is included in the Minimum Viable Product.
 - **[Anti-Scope Checklist](anti-scope-checklist.md)**: A list of features we intentionally exclude to maintain a "diet" footprint.
