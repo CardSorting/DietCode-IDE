@@ -113,6 +113,18 @@ Audit context: [Agent Runtime Audit](agent-runtime-audit.md). Full ladder: `make
 
 ---
 
+## Agent bridge (TypeScript)
+
+- [ ] `make agent-bridge-fast` compiles without errors
+- [ ] `make test-agent-bridge-fast` passes (offline mocks)
+- [ ] `make test-agent-bridge` passes (offline + live workflows + audit)
+- [ ] `make test-agent-bridge-audit` passes after `make app`
+- [ ] Bundled launcher works: `build/DietCode.app/Contents/Resources/bin/dietcode-agent-client verify fast`
+- [ ] `MockRpcTransport` not exported from public `agent-bridge/src/index.ts`
+- [ ] Docs: [Agent Bridge](agent-bridge.md), [Agent Bridge Audit](agent-bridge-audit.md)
+
+---
+
 ## Verification ladders
 
 - [ ] `make verify-agent-runtime-fast` passes during iteration (no rebuild/restart)

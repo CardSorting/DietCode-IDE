@@ -17,6 +17,7 @@ rg 'CONTRACT:|INVARIANT:' docs/
 | [Build Instructions](build-instructions.md) | Compile and launch from source |
 | [FAQ & Troubleshooting](faq-and-troubleshooting.md) | Build failures, socket issues, agent errors |
 | [Agent Integration Cookbook](agent-integration-cookbook.md) | Python automation recipes |
+| [Agent Bridge](agent-bridge.md) | Bundled TypeScript agent client (preferred for new agents) |
 | [Testing Checklist](testing-checklist.md) | Pre-merge verification |
 
 ---
@@ -35,6 +36,15 @@ The headless control surface is documented as a deterministic local transaction 
 | [Error Codes](error-codes.md) | `string_code` catalog with `recovery_hint` and `nextRecommendedCommand` |
 | [Agent Environment](agent-environment.md) | Config precedence and environment variables |
 | [Deprecation Policy](deprecation-policy.md) | Quarantined surfaces (`search.semantic`, `analysis.searchRanked`) |
+
+### Agent bridge (bundled TypeScript client)
+
+| Doc | Contents |
+|-----|----------|
+| [Agent Bridge](agent-bridge.md) | Overview, public API, CLI, quick start |
+| [Agent Bridge Architecture](agent-bridge-architecture.md) | Layers, transport, connect lifecycle, workflows |
+| [Agent Bridge Integration Guide](agent-bridge-integration-guide.md) | TypeScript recipes, error handling, migration |
+| [Agent Bridge Audit](agent-bridge-audit.md) | Pass I–II audit record and verification ladder |
 
 ### Verification and release
 

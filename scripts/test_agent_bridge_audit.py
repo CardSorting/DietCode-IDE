@@ -19,6 +19,9 @@ from agent_test_support import CheckRecorder, add_output_args, output_compact
 REPO_ROOT = Path(__file__).resolve().parents[1]
 BRIDGE = REPO_ROOT / "agent-bridge"
 DOCS = REPO_ROOT / "docs" / "agent-bridge.md"
+DOCS_AUDIT = REPO_ROOT / "docs" / "agent-bridge-audit.md"
+DOCS_ARCH = REPO_ROOT / "docs" / "agent-bridge-architecture.md"
+DOCS_GUIDE = REPO_ROOT / "docs" / "agent-bridge-integration-guide.md"
 PACKAGED = (
     REPO_ROOT
     / "build"
@@ -58,6 +61,17 @@ def test_docs_forbid_raw_rpc() -> None:
     text = DOCS.read_text(encoding="utf-8")
     assert "should not call raw DietCode RPC" in text or "Do not" in text
     assert "patch.apply" in text
+
+
+def test_extended_docs_exist() -> None:
+    for path in (DOCS_AUDIT, DOCS_ARCH, DOCS_GUIDE):
+        assert path.is_file(), f"missing {path.name}"
+    audit = DOCS_AUDIT.read_text(encoding="utf-8")
+    assert "Pass I" in audit and "Pass II" in audit
+    assert "test_agent_bridge_audit" in audit
+    index = (REPO_ROOT / "docs" / "README.md").read_text(encoding="utf-8")
+    for name in ("agent-bridge-architecture.md", "agent-bridge-integration-guide.md", "agent-bridge-audit.md"):
+        assert name in index, f"docs/README.md missing link to {name}"
 
 
 def test_client_exports_no_mock_transport() -> None:
@@ -113,6 +127,7 @@ def main() -> int:
     checks = [
         ("audit.docs_public_api", test_docs_list_public_api),
         ("audit.docs_forbid_raw_rpc", test_docs_forbid_raw_rpc),
+        ("audit.extended_docs", test_extended_docs_exist),
         ("audit.no_mock_in_public_index", test_client_exports_no_mock_transport),
         ("audit.testing_subpath", test_testing_subpath_exists),
         ("audit.makefile_targets", test_makefile_has_bridge_targets),

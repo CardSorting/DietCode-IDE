@@ -11,7 +11,38 @@ python3 scripts/control_smoke_test.py --compact
 
 CLI grep/diff/patch shortcuts and the verification ladder live in [Headless Agent Control](headless-agent-control.md). Stable error codes: [Error Codes](error-codes.md). Full audit record: [Agent Runtime Audit](agent-runtime-audit.md).
 
+**New agent integrations** should use the bundled [Agent Bridge](agent-bridge.md) (`DietCodeBridgeClient` / `dietcode-agent-client`) instead of raw RPC. See [Integration Guide](agent-bridge-integration-guide.md).
+
 **Agent-safe surfaces:** prefer `search.literal`, `workspace.grep`, `search.references` — not `search.semantic` or score-ranked results.
+
+## 🌉 Bridge recipe: Safe patch (TypeScript)
+
+Preferred path for external agents:
+
+```typescript
+import { DietCodeBridgeClient } from '@dietcode/agent-bridge';
+
+const bridge = new DietCodeBridgeClient({ startApp: false });
+await bridge.connect();
+
+const outcome = await bridge.safePatchFile('src/foo.ts', unifiedDiff, {
+  idempotencyKey: 'my-agent:foo:v1',
+});
+
+if (outcome.applied) {
+  console.log(outcome.mutationReceipt, outcome.revisionAfter);
+} else if (outcome.stale) {
+  console.log('revalidate:', outcome.recoveryHint);
+}
+
+await bridge.close();
+```
+
+CLI equivalent:
+
+```bash
+build/DietCode.app/Contents/Resources/bin/dietcode-agent-client patch safe-file src/foo.ts /tmp/foo.patch
+```
 
 ## 🥣 Recipe 1: The "Self-Healing" Loop
 

@@ -371,10 +371,18 @@ See [Deprecation Policy](deprecation-policy.md).
 
 ---
 
+## Agent bridge (bundled TypeScript client)
+
+External agents should use the [Agent Bridge](agent-bridge.md) instead of raw RPC. Audit record: [Agent Bridge Audit](agent-bridge-audit.md) (Passes I–II). Verify: `make test-agent-bridge`.
+
+---
+
 ## Related docs
 
 | Doc | Contents |
 |-----|----------|
+| [Agent Bridge](agent-bridge.md) | Bundled TypeScript client — preferred agent surface |
+| [Agent Bridge Audit](agent-bridge-audit.md) | Bridge pass record and verification |
 | [Agent Tooling](agent-tooling.md) | Grep/diff/patch/retrieval contracts |
 | [Runtime Invariants](runtime-invariants.md) | Frozen behavioral rules |
 | [Runtime Contracts](runtime-contracts.md) | Contract IDs and versions |

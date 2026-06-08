@@ -1,155 +1,154 @@
 # DietCode Agent Bridge
 
-Stable client-facing layer between external or local agents and the DietCode runtime. Agents should **not** call raw DietCode RPC methods directly.
+Stable client-facing layer between external or local agents and the DietCode runtime.
 
 ```text
 agent → DietCode Agent Bridge → DietCode Runtime RPC → C++ mutation kernel + runtime journal
 ```
 
-The bridge absorbs runtime churn, normalizes envelopes and errors, and exposes stable workflows. The C++ runtime remains the sole mutation authority.
+Agents should **not** call raw DietCode RPC methods directly. The bridge absorbs runtime churn, normalizes envelopes and errors, and exposes stable workflows. The C++ runtime remains the sole mutation authority.
 
 ```bash
 make agent-bridge-fast              # build TypeScript bridge only
 make test-agent-bridge-fast         # offline bridge tests (mocks)
-make test-agent-bridge              # rebuild/restart + offline + live (BRIDGE_LIVE=1)
+make test-agent-bridge              # rebuild/restart + offline + live + audit
 make verify-agent-runtime-full      # release ladder (includes live_agent_bridge)
 ```
 
 ---
 
-## Package layout
+## Documentation map
+
+| Doc | When to read |
+|-----|--------------|
+| **This page** | Quick reference, API table, CLI one-liners |
+| [Agent Bridge Architecture](agent-bridge-architecture.md) | Layer model, connect lifecycle, transport design, workflows |
+| [Agent Bridge Integration Guide](agent-bridge-integration-guide.md) | TypeScript recipes, error handling, migration from Python |
+| [Agent Bridge Audit](agent-bridge-audit.md) | Pass I–II audit record, verification ladder, source index |
+
+---
+
+## Packaging
+
+Users install **one** DietCode app. The bridge ships inside the bundle:
 
 | Path | Role |
 |------|------|
-| `agent-bridge/src/client/` | `DietCodeBridgeClient`, `RpcTransport`, `RuntimeProfile` |
-| `agent-bridge/src/capabilities/` | Runtime capability detection on `connect()` |
-| `agent-bridge/src/adapters/` | Thin RPC adapters (search, patch, runtime, diagnostics) |
-| `agent-bridge/src/workflows/` | Safe patch, batch patch, stale recovery, post-mutation verify |
-| `agent-bridge/src/contracts/` | Types, error mapping, partial-result normalization |
-| `agent-bridge/src/cli/` | `dietcode-agent-client` JSON CLI |
-| `agent-bridge/tests/` | Offline mocks + optional live socket tests |
+| `DietCode.app/Contents/Resources/agent-bridge/` | Compiled `@dietcode/agent-bridge` |
+| `DietCode.app/Contents/Resources/bin/dietcode-agent-client` | CLI launcher → Node bridge CLI |
 
-Built output is copied into the app bundle:
-
-- `DietCode.app/Contents/Resources/agent-bridge/`
-- `DietCode.app/Contents/Resources/bin/dietcode-agent-client` (launcher → bundled Node CLI)
-
-Users install **one** DietCode app; the bridge is an internal module boundary, not a separate package to install.
+Repo source: `agent-bridge/`
 
 ---
 
 ## Public bridge API
 
-Import from `@dietcode/agent-bridge` (repo path `agent-bridge/`) or use the CLI.
+Import from `@dietcode/agent-bridge` or use the bundled CLI.
 
 | Method | Purpose |
 |--------|---------|
-| `connect()` | Open control socket, detect capabilities, build `RuntimeProfile` |
+| `connect()` | Socket + readiness + capabilities + workspace bootstrap |
 | `getRuntimeProfile()` | Cached profile after `connect()` |
-| `getDiagnostics()` | Unified `runtime.diagnostics` envelope (normalized) |
+| `getDiagnostics()` | `runtime.diagnostics` (normalized) |
 | `searchLiteral(query, options?)` | Deterministic literal search |
 | `searchTokens(tokens, options?)` | Deterministic token search |
 | `searchPaths(query, options?)` | Deterministic path search |
-| `getFileStat(path)` | Workspace file metadata |
+| `getFileStat(path)` | Workspace file metadata + `contentHash` |
 | `safePatchFile(path, unifiedDiff, options?)` | Validated apply with receipts and stale recovery |
 | `safePatchBatch(patches, options?)` | Atomic batch apply with batch receipts |
 | `getOperationStatus(idempotencyKey)` | Timeout / replay recovery |
 | `getTimeline(options?)` | `runtime.timeline` stream |
-| `getRecentActivity(options?)` | `workspace.activity` (mutation-focused timeline) |
+| `getRecentActivity(options?)` | `workspace.activity` (mutation-focused) |
 | `verifyFast()` | Quick RPC + runtime health probe |
 
-Raw RPC names are **not** part of the public agent API. Adapters may call RPC internally; agent code should stay on the methods above.
+Test-only export: `@dietcode/agent-bridge/testing` → `MockRpcTransport` (not for production agents).
+
+### TypeScript quick start
+
+```typescript
+import { DietCodeBridgeClient } from '@dietcode/agent-bridge';
+
+const bridge = new DietCodeBridgeClient({ startApp: false });
+await bridge.connect();
+
+const profile = bridge.getRuntimeProfile();
+const search = await bridge.searchLiteral('CONTRACT:', { maxResults: 5 });
+
+await bridge.close();
+```
+
+Full recipes: [Integration Guide](agent-bridge-integration-guide.md).
 
 ---
 
-## Runtime compatibility model
+## Runtime compatibility
 
-On `connect()` the bridge:
+On `connect()` the bridge calls `tool.capabilities` and `runtime.diagnostics`, validates contract keys, and builds a `RuntimeProfile`.
 
-1. Calls `tool.capabilities`
-2. Calls `runtime.diagnostics`
-3. Builds a `RuntimeProfile` with detected features
-
-**Required** runtime features (missing → `unsupported_runtime_capability`):
+**Required** features (missing → `unsupported_runtime_capability`):
 
 - Deterministic search (`search.literal`, `search.tokens`, `search.paths`)
-- Patch receipts (`patch.apply`)
-- Batch receipts (`patch.applyBatch`)
+- Patch receipts (`patch.apply`) and batch receipts (`patch.applyBatch`)
 - Runtime timeline (`runtime.timeline`)
-- BroccoliQ / runtime journal signals in diagnostics
+- BroccoliQ / runtime journal (`runtime.diagnostics` with mutation + record authority)
 - `operation.status` replay
-- Partial-success envelope fields (`complete`, `partial`, warnings, recovery hints)
+- Partial-success envelope fields
 
-The profile also records `semanticSearchDisabled: true` — the bridge does not add semantic search, fuzzy ranking, or embeddings.
+`semanticSearchDisabled: true` — the bridge does not add semantic search, fuzzy ranking, or embeddings.
 
 ---
 
-## Safe patch workflow (`safePatchFile`)
+## Safe patch workflow
 
-1. `patch.validate` for the target path and unified diff
-2. Capture `beforeContentHash` and workspace revision
-3. Generate or accept an `idempotencyKey`
-4. `patch.apply` with `expectBeforeHash` from validation (never blind retry)
-5. On success: `mutationReceipt`, `revisionBefore` / `revisionAfter`, `nextRecommendedCommand`
-6. On `nested_call_timeout`: `operation.status` with the same idempotency key
-7. On `stale_content`: structured stale recovery (current hash, hints) — **no** silent re-apply
+`safePatchFile()`:
 
-`safePatchBatch` mirrors this for multiple files: per-file validation, one batch idempotency key, `patch.applyBatch`, batch receipt required, partial stale failures verified without silent mutation.
+1. `patch.validate` → capture `beforeContentHash`
+2. Generate or accept `idempotencyKey`
+3. `patch.apply` with `expectBeforeHash` (never blind retry)
+4. On success: `mutationReceipt`, `revisionBefore` / `revisionAfter`
+5. On `nested_call_timeout`: `operation.status` with same key
+6. On `stale_content`: structured stale recovery — re-validate, do not re-apply
+
+`safePatchBatch()` mirrors for multiple files with atomic rollback verification.
+
+Diagram: [Architecture — safe patch](agent-bridge-architecture.md#workflow-safe-patch).
 
 ---
 
 ## Partial results and errors
 
-Bridge results extend a common partial-success shape:
+Bridge results include: `complete`, `partial`, `warnings`, `fallbackUsed`, `truncated`, `recoveryHint`, `nextRecommendedCommand`. Set `includeRaw: true` to include the raw RPC payload.
 
-- `complete`, `partial`, `warnings`, `fallbackUsed`, `truncated`
-- `recoveryHint`, `nextRecommendedCommand`
-- `raw` only when `includeRaw: true`
-
-Stable bridge error codes include:
+Errors throw `DietCodeBridgeError` with stable `code`, `recoveryHint`, `nextRecommendedCommand`, `retrySafe`.
 
 | Code | Typical cause |
 |------|----------------|
 | `stale_content` | Content drift vs validated hash |
-| `semantic_disabled` | Semantic search not available (by design) |
-| `ranked_search_disabled` | Ranking not available |
-| `symlink_target` | Symlink policy violation |
+| `semantic_disabled` | Semantic search quarantined |
 | `patch_failed` | Validation or apply failure |
-| `nested_call_timeout` | RPC timeout (retry via `operation.status` when safe) |
+| `nested_call_timeout` | RPC timeout — use `getOperationStatus` |
 | `runtime_unavailable` | Socket / app not ready |
 | `unsupported_runtime_capability` | Runtime missing required features |
 
-Each error includes `message`, `recoveryHint`, `nextRecommendedCommand`, `retrySafe`, and optional `rawError`.
+Full catalog: [Error Codes](error-codes.md).
 
 ---
 
 ## CLI usage
 
-Bundled launcher (after `make app`):
-
 ```bash
+# Bundled (after make app)
 build/DietCode.app/Contents/Resources/bin/dietcode-agent-client profile
-build/DietCode.app/Contents/Resources/bin/dietcode-agent-client diagnostics --pretty
 build/DietCode.app/Contents/Resources/bin/dietcode-agent-client search literal "RuntimeProfile"
-build/DietCode.app/Contents/Resources/bin/dietcode-agent-client stat agent-bridge/package.json
-build/DietCode.app/Contents/Resources/bin/dietcode-agent-client verify fast
-```
+build/DietCode.app/Contents/Resources/bin/dietcode-agent-client verify fast --pretty
 
-During development:
-
-```bash
+# Development
 cd agent-bridge && npm run cli -- profile --no-start
 ```
 
 Commands: `profile`, `diagnostics`, `search literal|tokens|paths`, `stat`, `patch safe-file`, `patch safe-batch`, `timeline recent`, `activity recent`, `verify fast`.
 
-Default output is compact JSON; pass `--pretty` for indentation. Use `--no-start` when the control socket is already up (`make restart-agent-server`).
-
-Environment:
-
-- Control socket: `~/.dietcode/control.sock`
-- Session token: `~/.dietcode/session.token`
-- Optional `DIETCODE_APP_PATH` for auto `--ensure-socket` when using `startApp: true`
+Environment: `~/.dietcode/control.sock`, `~/.dietcode/session.token`, optional `DIETCODE_APP_PATH`.
 
 ---
 
@@ -157,30 +156,30 @@ Environment:
 
 **Do**
 
-- Use `DietCodeBridgeClient` or `dietcode-agent-client` for all runtime interaction
-- Respect `expectBeforeHash` / stale recovery flows from `safePatchFile`
+- Use `DietCodeBridgeClient` or `dietcode-agent-client`
+- Respect stale recovery from `safePatchFile` — re-validate before retry
 - Read `RuntimeProfile` before relying on timeline or batch features
-- Treat partial envelopes as first-class (`complete: false`, `warnings`)
+- Treat `complete: false` as a first-class partial outcome
 
 **Do not**
 
 - Call `patch.apply`, `search.*`, or `runtime.*` RPC directly from agent code
-- Re-implement mutation, hashing, or receipt validation in the agent
+- Re-implement mutation hashing or receipt validation
 - Expect semantic or ranked search from the bridge
-- Retry failed patches without revalidation or `operation.status`
+- Import `MockRpcTransport` in production agent code
 
 ---
 
-## Tests
+## Tests and verification
 
 | Target | Scope |
 |--------|--------|
-| `make test-agent-bridge-fast` | Mock transport: capabilities, safe patch, stale recovery, partial results |
-| `npm test` (in `agent-bridge`) | Fast tests + packaging artifact check (requires `make app`) |
-| `BRIDGE_LIVE=1 npm run test:live` | Live socket integration (`bridge.live.test.ts`) |
-| `make test-agent-bridge` | `restart-agent-server`, full `npm test`, then live suite |
-
-Live tests are skipped unless `BRIDGE_LIVE=1` is set (the Makefile sets this for the full target).
+| `make test-agent-bridge-fast` | Offline mocks: capabilities, patch, stale, partial results |
+| `npm test` (in `agent-bridge/`) | Offline + packaging artifact check |
+| `BRIDGE_LIVE=1 npm run test:live` | Live socket + workflows A–D |
+| `make test-agent-bridge` | Full: offline + packaging + live + audit |
+| `make test-agent-bridge-audit` | Docs, API surface, packaging audit |
+| `python3 scripts/test_agent_bridge_audit.py` | Same audit harness (NDJSON) |
 
 ---
 
@@ -188,28 +187,26 @@ Live tests are skipped unless `BRIDGE_LIVE=1` is set (the Makefile sets this for
 
 | Control | Implementation |
 |---------|----------------|
-| RPC serialization | `RpcTransport` serializes calls via `callChain`; no interleaved frames |
-| Frame matching | Reads until matching `requestId`; skips server push notifications |
-| Transport retry | Configurable `transportRetries` with reconnect on transport failures |
-| Token refresh | Reloads session token once on `permission_denied` |
-| Throwable errors | `DietCodeBridgeError extends Error` with `toJSON()` recovery metadata |
-| Contract validation | `validators.ts` mirrors frozen Python `agent_contracts.py` keys |
-| Workspace bootstrap | `ensureWorkspaceRoot` on `connect()` when no folder is open |
-| App path resolution | Bundled binary discovery, `DIETCODE_APP_PATH`, repo `build/` fallback |
-| Test boundary | `MockRpcTransport` exported only from `@dietcode/agent-bridge/testing` |
-| Live workflows | `bridge.live.workflows.test.ts` mirrors Python workflow smoke A–D |
-| Audit harness | `scripts/test_agent_bridge_audit.py` + `make test-agent-bridge` |
+| RPC serialization | `callChain` — no interleaved socket frames |
+| Frame matching | Wait for `requestId`; skip server notifications |
+| Transport retry | `transportRetries` + reconnect |
+| Token refresh | Reload token on `permission_denied` |
+| Throwable errors | `DietCodeBridgeError extends Error` |
+| Contract validation | `validators.ts` ↔ `agent_contracts.py` |
+| Workspace bootstrap | `ensureWorkspaceRoot` on connect |
+| Live workflows | Python smoke parity (A–D) |
 
-```bash
-make test-agent-bridge-fast     # offline contract + workflow mocks
-make test-agent-bridge          # live socket + packaging + audit harness
-python3 scripts/test_agent_bridge_audit.py --compact
-```
+Details: [Agent Bridge Audit — Pass II](agent-bridge-audit.md#pass-ii--production-hardening).
 
 ---
 
 ## Related
 
-- [Runtime Native Integration](runtime-native-integration.md) — timeline, identity, diagnostics parity
-- [BroccoliQ Runtime Memory](broccoliq-runtime-memory.md) — journal semantics
-- [Agent Runtime Audit](agent-runtime-audit.md) — broader runtime verification map
+| Doc | Contents |
+|-----|----------|
+| [Agent Bridge Architecture](agent-bridge-architecture.md) | Layers, transport, connect lifecycle |
+| [Agent Bridge Integration Guide](agent-bridge-integration-guide.md) | Recipes, CLI, migration |
+| [Agent Bridge Audit](agent-bridge-audit.md) | Pass record and verification |
+| [Agent Runtime Audit](agent-runtime-audit.md) | C++ runtime Passes I–VI |
+| [Headless Agent Control](headless-agent-control.md) | Raw RPC reference (maintainers) |
+| [Build & Test System](build-and-test-system.md) | Makefile targets |

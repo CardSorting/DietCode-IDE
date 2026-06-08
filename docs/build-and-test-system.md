@@ -7,7 +7,7 @@ DietCode is designed to be built and verified using only platform-native tools, 
 The build process is orchestrated by a single, transparent `Makefile`.
 
 ### Primary Targets
-- **`make app`**: Compiles the portable C++20 core and the Objective-C++ macOS shell, then bundles them into `build/DietCode.app`.
+- **`make app`**: Compiles the portable C++20 core and the Objective-C++ macOS shell, bundles `agent-bridge/` into `DietCode.app/Contents/Resources/agent-bridge/`, and installs the `dietcode-agent-client` launcher.
 - **`make test`**: Compiles and executes the unit test suite and agent self-tests.
 - **`make clean`**: Wipes the `build/` directory for a fresh start.
 
@@ -69,6 +69,17 @@ Full audit context: [Agent Runtime Audit](agent-runtime-audit.md) (Passes I–VI
 | `make test-ergonomics` | `test_ergonomics.py` | — |
 | `make agent-integration` | `run_agent_integration_tests.py` | — |
 | `make test-agent-integration` | Alias for `agent-integration` | — |
+
+#### Agent bridge (TypeScript)
+
+| Target | Script / action | Notes |
+|--------|-----------------|-------|
+| `make agent-bridge-fast` | `npm install` + `tsc` in `agent-bridge/` | No socket |
+| `make test-agent-bridge-fast` | Offline mock tests | Fast CI loop |
+| `make test-agent-bridge` | `npm test` + `BRIDGE_LIVE=1 npm run test:live` + audit | Rebuilds/restarts server |
+| `make test-agent-bridge-audit` | `test_agent_bridge_audit.py` | Docs, packaging, API surface |
+
+Docs: [Agent Bridge](agent-bridge.md), [Agent Bridge Audit](agent-bridge-audit.md).
 
 #### Verification ladders
 

@@ -19,6 +19,7 @@ DietCode-IDE/
     Info.plist
     logo.svg
   docs/                    # Specifications and guides (see docs/README.md)
+  agent-bridge/            # Bundled TypeScript agent bridge (@dietcode/agent-bridge)
   scripts/                 # Python agent client, harnesses, fixtures
   src/                     # Portable C++20 core + macOS shell
   tests/
@@ -67,6 +68,22 @@ Domain limits: `src/domain/control/ControlRuntimeLimits.hpp`
 
 ---
 
+## `agent-bridge/` — bundled TypeScript client
+
+| Path | Role |
+|------|------|
+| `src/client/DietCodeBridgeClient.ts` | Stable public API (13 methods) |
+| `src/client/RpcTransport.ts` | Serialized Unix-socket JSON-RPC |
+| `src/workflows/` | `safePatchFile`, `safePatchBatch`, stale recovery |
+| `src/contracts/` | Types, `DietCodeBridgeError`, validators, partial-result normalization |
+| `src/cli/dietcode-agent-client.ts` | Bundled CLI |
+| `src/testing/MockRpcTransport.ts` | Test-only transport (not public export) |
+| `tests/` | Offline mocks + live socket suites |
+
+Packaged into `DietCode.app/Contents/Resources/agent-bridge/`. Docs: [Agent Bridge](agent-bridge.md).
+
+---
+
 ## `scripts/` — agent client and harnesses
 
 | Path | Role |
@@ -77,6 +94,7 @@ Domain limits: `src/domain/control/ControlRuntimeLimits.hpp`
 | `harness_support.py` | Symlink fixtures, transport mocks (Pass IV) |
 | `verify_agent_runtime.py` | `make verify-agent-runtime` ladder |
 | `verify_agent_runtime_full.py` | `make verify-agent-runtime-full` ladder |
+| `test_agent_bridge_audit.py` | `make test-agent-bridge-audit` bridge audit harness |
 | `release_check_agent_runtime.py` | `make release-check-agent-runtime` |
 | `test_*.py` | Per-suite NDJSON harnesses (one check line + summary per suite) |
 
