@@ -45,6 +45,7 @@ The headless control surface is documented as a deterministic local transaction 
 | [Agent Bridge Architecture](agent-bridge-architecture.md) | Layers, transport, connect lifecycle, workflows |
 | [Agent Bridge Integration Guide](agent-bridge-integration-guide.md) | TypeScript recipes, error handling, migration |
 | [Agent Bridge Audit](agent-bridge-audit.md) | Pass I–II audit record and verification ladder |
+| [Agent Chat Sidebar](agent-chat-sidebar.md) | Native Hermes chat UI; four-authority trust loop (workspace, mutation, diff, verification) |
 
 ### Verification and release
 

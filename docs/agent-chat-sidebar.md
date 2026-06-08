@@ -8,6 +8,45 @@ Sidebar → dietcode-agent-chat → Hermes → dietcode_ide → agent bridge →
 
 DietCode ships a **bundled agent integration artifact**, not merely a benchmark bridge.
 
+Agent Chat is **auditable** — not just a chat shell. Each run emits four authority layers that together answer: *did the agent edit the right workspace, through the approved path, with an inspectable diff, and pass executable verification afterward?*
+
+## Trust loop (four authorities)
+
+| Layer | When | Invariant |
+|-------|------|-----------|
+| **Workspace authority** | Before Hermes | `requestedWorkspace == workspaceRootObserved` |
+| **Mutation authority** | After Hermes | Changed files explained by bridge patch telemetry |
+| **Diff authority** | After mutation audit | Visible diff changed set == mutation reported files |
+| **Verification authority** | After diff audit | Executable verify runs and passes after final mutation |
+
+```text
+open folder
+  → workspace authority (fail fast on mismatch)
+  → Hermes + dietcode_ide.patch
+  → mutation authority (bridge telemetry vs disk)
+  → diff authority (unified diff vs mutation set)
+  → verification authority (verify.sh after mutation)
+  → sidebar status + persisted run artifacts
+```
+
+Run artifacts (never written inside the workspace):
+
+```text
+~/.dietcode/agent-chat/runs/<run_id>/
+  diff.patch
+  verify.stdout.log
+  verify.stderr.log
+  verification.json
+```
+
+Bridge patch telemetry (ephemeral per run, outside workspace):
+
+```text
+~/.dietcode/agent-chat/events/<run_id>.jsonl
+```
+
+The difference between “agent chat exists” and “agent chat is auditable” is this loop.
+
 ## Open the sidebar
 
 - **View → Toggle Agent Sidebar**
@@ -35,8 +74,41 @@ Both live in `DietCode.app/Contents/Resources/bin/`.
 
 ```bash
 dietcode-agent-chat --workspace /path --prompt "request" --format text
-dietcode-agent-chat --doctor --format json
+dietcode-agent-chat --doctor --workspace /path --format json
 dietcode-agent-chat --version
+
+# Authority enforcement (smoke / CI)
+dietcode-agent-chat --workspace /path --prompt "..." \
+  --enforce-mutation-authority \
+  --enforce-verification-authority \
+  --verify-command "./verify.sh" \
+  --format json
+```
+
+| Flag | Role |
+|------|------|
+| `--workspace` | Required for chat; drives workspace authority |
+| `--prompt` | User request passed to Hermes |
+| `--format text\|json` | Text transcript or full authority payload |
+| `--doctor` | Readiness only (no Hermes) |
+| `--enforce-mutation-authority` | Exit 11 if mutation authority is `unknown` or `violated` |
+| `--enforce-verification-authority` | Exit 12 if verification fails or does not run |
+| `--verify-command` | Override verify command (default: `./verify.sh` if present) |
+| `--max-turns` | Hermes turn budget (default 25) |
+| `--app-bundle` | Explicit `DietCode.app` path |
+
+After a successful chat, `--format json` includes all four authorities plus `runId`:
+
+```json
+{
+  "ok": true,
+  "action": "chat",
+  "runId": "abc123",
+  "workspaceAuthority": { "workspaceMatch": true },
+  "mutationAuthority": { "mode": "bridge_only", "mutatedFiles": ["src/foo.py"] },
+  "diffAuthority": { "matchesMutationAuthority": true, "changedFiles": ["src/foo.py"] },
+  "verificationAuthority": { "executed": true, "passed": true, "exitCode": 0 }
+}
 ```
 
 Readiness checks (fail early):
@@ -116,18 +188,6 @@ dietcode-agent-chat --workspace /path --prompt "..." --enforce-mutation-authorit
 
 Exits nonzero when `mode` is `unknown` or `violated`.
 
-**Trust guarantees**
-
-- Workspace authority enforced before chat
-- Mutation authority audited after chat
-- Live smoke proves real bridge-mediated mutation
-
-**Limitations**
-
-- Not full OS-level sandboxing
-- Raw-write detection is best-effort unless Hermes tool permissions are locked down
-- Bridge telemetry is authoritative only for DietCode-mediated patches
-
 **Invariant:** a successful agent edit is not trusted unless changed files are explained by bridge patch telemetry.
 
 ## Diff authority
@@ -153,8 +213,6 @@ Chat JSON includes:
 `matchesMutationAuthority` is true when `diffAuthority.changedFiles` equals `mutationAuthority.mutatedFiles`.
 
 The sidebar exposes **View Diff** (opens the stored patch) and reports diff authority in status/transcript.
-
-**Trust loop:** correct workspace → approved mutation path → visible diff.
 
 ## Verification authority
 
@@ -197,22 +255,11 @@ Enforcement (smoke / CI):
 dietcode-agent-chat --workspace /path --prompt "..." --enforce-verification-authority
 ```
 
-**Complete trust loop**
-
-The app can prove:
-
-1. The agent edited the intended workspace
-2. The edit occurred through the approved bridge path
-3. The exact diff is inspectable
-4. Executable verification passed afterward
+Verification runs **after** mutation and diff authority complete — never before.
 
 **Invariant:** a trusted agent mutation is incomplete unless executable verification runs successfully after the final mutation step.
 
-**Limitations**
-
-- Verification quality depends on the workspace `verify.sh` (or override command)
-- `verify.sh` may be incomplete or weak
-- This is verification authority, not formal correctness proof
+Optional fallback when `verify.sh` is absent: set `DIETCODE_AGENT_CHAT_FALLBACK_VERIFY` to a shell command.
 
 ## Sidebar UX (v1)
 
@@ -228,9 +275,18 @@ The app can prove:
 - **View Verify Log** opens persisted `verify.stdout.log` / `verify.stderr.log`
 - Verification failed → Send stays enabled (retry allowed); status marks workspace unverified
 
-Not in v1: streaming UI, markdown, model picker, persisted history, diff viewer.
+Not in v1: streaming UI, markdown, model picker, persisted history, in-app diff viewer.
 
-## Tests
+## Limitations (all four layers)
+
+- **Workspace:** relies on runtime `workspace.openFolder`; not a sandbox boundary
+- **Mutation:** raw-write detection is best-effort; bridge telemetry is authoritative only for DietCode-mediated patches
+- **Diff:** text-file snapshot scope matches mutation manifest (binary/large files may differ)
+- **Verification:** quality depends on workspace `verify.sh` or override; not formal correctness proof
+
+## Tests and release ladder
+
+Unit / contract tests:
 
 ```bash
 make test-dietcode-agent-chat
@@ -239,8 +295,21 @@ make test-mutation-authority
 make test-diff-authority
 make test-verification-authority
 make verify-agent-chat-sidebar
-make verify-hermes-bridge
 ```
+
+Hermes + bridge integration ladder (`make verify-hermes-bridge`):
+
+```bash
+make verify-hermes-bridge   # includes all authority unit tests + sidebar verify
+```
+
+Full agent runtime ladder (`make verify-agent-runtime-full`):
+
+```bash
+make verify-agent-runtime-full   # includes test-verification-authority + smoke-agent-chat-live
+```
+
+`verify-hermes-bridge` and `verify-agent-runtime-full` enforce all four authorities before release.
 
 ## Live smoke (bounded edit proof)
 
@@ -254,13 +323,13 @@ Proves the installed app path can perform a real Hermes edit through `dietcode_i
 
 The smoke harness:
 
-1. Creates a temp workspace with `smoke_probe.py` (`VALUE = 1`)
-2. Runs `dietcode-agent-chat --prompt "fix VALUE to 2"`
-3. Verifies disk + bridge read show `VALUE = 2`
-4. Checks runtime timeline for patch activity
-5. Asserts `mutationAuthority.mode == bridge_only`, `bridgePatchCount >= 1`, `smoke_probe.py` in `mutatedFiles`, `rawWriteSuspected == false`
-6. Asserts `diffAuthority.matchesMutationAuthority == true` and diff includes `smoke_probe.py`
-7. Asserts `verificationAuthority.executed/passed/checkedAfterMutation == true` and verify logs exist
+1. Creates a temp workspace with `smoke_probe.py` (`VALUE = 1`) and executable `verify.sh`
+2. Asserts workspace authority (`workspaceMatch == true`)
+3. Runs Hermes via `dietcode-agent-chat` prompt to fix `VALUE` to `2`
+4. Asserts mutation authority (`mode == bridge_only`, `bridgePatchCount >= 1`, `smoke_probe.py` in `mutatedFiles`)
+5. Asserts diff authority (`matchesMutationAuthority == true`, `smoke_probe.py` in `diff.patch`)
+6. Asserts verification authority (`executed`, `passed`, `checkedAfterMutation`; logs exist)
+7. Verifies disk + bridge read show `VALUE = 2` and runtime timeline mentions patch activity
 8. Prints a compact transcript and cleans up
 
 Skip live Hermes (CI / offline): `AGENT_CHAT_LIVE=0 make smoke-agent-chat-live` or `--skip-live`.

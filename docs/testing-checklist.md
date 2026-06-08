@@ -137,6 +137,20 @@ Audit context: [Agent Runtime Audit](agent-runtime-audit.md). Full ladder: `make
 
 ---
 
+## Agent Chat (four-authority trust loop)
+
+- [ ] `make test-dietcode-agent-chat` passes
+- [ ] `make test-agent-chat-workspace-switch` passes (workspace authority)
+- [ ] `make test-mutation-authority` passes
+- [ ] `make test-diff-authority` passes
+- [ ] `make test-verification-authority` passes
+- [ ] `make verify-agent-chat-sidebar` passes (32 checks)
+- [ ] `make verify-hermes-bridge` passes (includes authority unit tests)
+- [ ] `make smoke-agent-chat-live` passes (live Hermes + all four authorities)
+- [ ] Docs: [Agent Chat Sidebar](agent-chat-sidebar.md)
+
+---
+
 ## Verification ladders
 
 - [ ] `make verify-agent-runtime-fast` passes during iteration (no rebuild/restart)

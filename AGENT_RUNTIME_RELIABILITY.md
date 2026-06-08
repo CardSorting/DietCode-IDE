@@ -6,6 +6,25 @@ Start here.
 
 Bounded agent code mutation requires observable contracts, safe execution protocols, semantic repair discipline, and replayable mutation evidence.
 
+## Agent Chat trust loop (installed app)
+
+The native Agent Chat sidebar (`dietcode-agent-chat`) adds a four-layer authority chain on every run:
+
+| Layer | Invariant |
+|-------|-----------|
+| Workspace authority | Requested workspace == observed runtime workspace |
+| Mutation authority | Changed files explained by bridge patch telemetry |
+| Diff authority | Visible diff changed set == mutation reported files |
+| Verification authority | Executable verify passes after final mutation |
+
+```bash
+make smoke-agent-chat-live          # live proof of all four layers
+make verify-hermes-bridge           # integration ladder
+make verify-agent-runtime-full      # full release ladder
+```
+
+Details: [Agent Chat Sidebar](docs/agent-chat-sidebar.md).
+
 ## Run the release gate
 
 ```bash

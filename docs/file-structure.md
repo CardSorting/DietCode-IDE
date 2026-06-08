@@ -89,6 +89,13 @@ Packaged into `DietCode.app/Contents/Resources/agent-bridge/`. Docs: [Agent Brid
 | Path | Role |
 |------|------|
 | `dietcode_agent_client.py` | Python RPC client, CLI shortcuts, `--self-test` |
+| `dietcode_agent_chat.py` | Bounded Hermes chat CLI (`dietcode-agent-chat`) |
+| `dietcode_agent_bundle.py` | App bundle resolution, workspace authority, Hermes launch |
+| `dietcode_mutation_authority.py` | Post-run mutation audit (bridge telemetry vs disk) |
+| `dietcode_diff_authority.py` | Post-run unified diff audit |
+| `dietcode_verification_authority.py` | Post-mutation executable verification |
+| `smoke_agent_chat_live.py` | Live smoke — all four authority layers |
+| `verify_agent_chat_sidebar.py` | Sidebar + bundled CLI artifact checks |
 | `agent_contracts.py` | **Frozen contract key sets** (source of truth for schemas) |
 | `agent_tooling.py` | Offline grep/diff mirrors for contract tests |
 | `harness_support.py` | Symlink fixtures, transport mocks (Pass IV) |

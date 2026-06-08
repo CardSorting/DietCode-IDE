@@ -31,12 +31,15 @@ build/DietCode.app/Contents/Resources/bin/dietcode-agent-chat \
   --workspace /path/to/project --prompt "inspect this project"
 ```
 
-Agent Chat sidebar in the IDE uses `dietcode-agent-chat` for real Hermes sessions.
+Agent Chat sidebar in the IDE uses `dietcode-agent-chat` for real Hermes sessions. Each run is auditable through four authorities (workspace, mutation, diff, verification). See [Agent Chat Sidebar](../docs/agent-chat-sidebar.md).
 
-Live bounded-edit proof:
+Live bounded-edit proof (all four authorities):
 
 ```bash
 make smoke-agent-chat-live
+make test-mutation-authority
+make test-diff-authority
+make test-verification-authority
 ```
 
 Trust guarantees:
@@ -45,5 +48,6 @@ Trust guarantees:
 - Backs up `~/.hermes/config.yaml`, `.env`, and the plugin before writes
 - Prints an exact JSON change log of env/config/plugin updates
 - Version manifest: `dietcode-agent-bundle.manifest.json`
+- Agent Chat: workspace match before Hermes; bridge-only mutation telemetry; persisted diff + verify logs outside workspace
 
 Hermes itself installs to `~/.hermes` on demand — it is never vendored into this repo.

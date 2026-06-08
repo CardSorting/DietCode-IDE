@@ -182,21 +182,33 @@ Full API and recipes: [Agent Bridge](docs/agent-bridge.md) · [Integration Guide
 
 DietCode includes a native **Agent Chat sidebar** (⌘⇧A) wired to the bundled `dietcode-agent-chat` CLI — real Hermes + `dietcode_ide` + agent bridge, not a mock doctor shell.
 
+Each run is **auditable** through four authority layers:
+
+| Authority | Proves |
+|-----------|--------|
+| Workspace | Agent edited the intended workspace |
+| Mutation | Edit went through the approved bridge path |
+| Diff | Exact changed-file set is inspectable |
+| Verification | Executable `verify.sh` passed after mutation |
+
 ```bash
 build/DietCode.app/Contents/Resources/bin/dietcode-enable-agent --doctor
 build/DietCode.app/Contents/Resources/bin/dietcode-agent-chat \
-  --workspace /path/to/project --prompt "inspect this project"
+  --workspace /path/to/project --prompt "inspect this project" --format json
 ```
 
 See [Agent Chat Sidebar](docs/agent-chat-sidebar.md).
 
-Live bounded-edit proof (sidebar/chat → Hermes → `dietcode_ide` → bridge → runtime mutation) with mutation authority audit:
+Release verification (all four authorities):
 
 ```bash
-make smoke-agent-chat-live
+make smoke-agent-chat-live              # live bounded edit + full authority chain
 make test-agent-chat-workspace-switch
 make test-mutation-authority
+make test-diff-authority
 make test-verification-authority
+make verify-hermes-bridge               # integration ladder
+make verify-agent-runtime-full          # full release ladder
 ```
 
 ---

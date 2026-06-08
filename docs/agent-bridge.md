@@ -69,19 +69,41 @@ Trust + update safety:
 
 Agent Chat sidebar (native UI): [Agent Chat Sidebar](agent-chat-sidebar.md)
 
-`safePatchFile` emits `mutation.patch.applied` telemetry (stderr marker + optional `DIETCODE_MUTATION_EVENT_LOG` JSONL outside the workspace). Agent Chat audits changed files against these events after each run.
+### Agent Chat trust loop
+
+Agent Chat is auditable end-to-end. Each run emits four authorities:
+
+1. **Workspace** — `requestedWorkspace == workspaceRootObserved` (bridge `workspace.openFolder` before Hermes)
+2. **Mutation** — disk changes explained by `mutation.patch.applied` telemetry from `safePatchFile`
+3. **Diff** — unified diff at `~/.dietcode/agent-chat/runs/<run_id>/diff.patch` matches mutation set
+4. **Verification** — `./verify.sh` (or override) runs after mutation; logs persisted outside workspace
+
+`safePatchFile` emits `mutation.patch.applied` telemetry (stderr marker + optional `DIETCODE_MUTATION_EVENT_LOG` JSONL). Agent Chat audits changed files against these events after each run.
 
 ```bash
 build/DietCode.app/Contents/Resources/bin/dietcode-agent-chat \
   --workspace /path/to/project \
-  --prompt "inspect this project"
+  --prompt "inspect this project" \
+  --format json
+
+# CI / smoke enforcement
+build/DietCode.app/Contents/Resources/bin/dietcode-agent-chat \
+  --workspace /path/to/project \
+  --prompt "fix the bug" \
+  --enforce-mutation-authority \
+  --enforce-verification-authority \
+  --verify-command "./verify.sh"
 ```
 
-Live bounded-edit smoke (temp workspace, real Hermes patch via bridge):
+Release verification:
 
 ```bash
 make smoke-agent-chat-live
 make test-agent-chat-workspace-switch
+make test-mutation-authority
+make test-diff-authority
+make test-verification-authority
+make verify-hermes-bridge
 ```
 
 Workspace authority: when `--workspace` is passed, the bridge calls `workspace.openFolder` even if another folder is already open. `dietcode-agent-chat` refuses Hermes if `requestedWorkspace != workspaceRootObserved`.

@@ -138,12 +138,22 @@ make test-agent-workflow-smoke     # Pass VI
 make test-cli-agent-failures
 make test-partial-success-closure  # Pass VI closure
 
-# 5. Full ladders
+# 5. Agent Chat authority (Hermes + bridge + four-layer audit)
+make test-dietcode-agent-chat
+make test-agent-chat-workspace-switch
+make test-mutation-authority
+make test-diff-authority
+make test-verification-authority
+make verify-agent-chat-sidebar
+make verify-hermes-bridge          # includes authority unit tests
+make smoke-agent-chat-live         # live bounded edit + all four authorities
+
+# 6. Full ladders
 make verify-agent-runtime
-make verify-agent-runtime-full
+make verify-agent-runtime-full     # includes test-verification-authority + smoke-agent-chat-live
 make release-check-agent-runtime
 
-# 6. Grep/diff CLI shortcuts (literal search, no semantic layer)
+# 7. Grep/diff CLI shortcuts (literal search, no semantic layer)
 python3 scripts/dietcode_agent_client.py --grep DietCode --max-results 3 --compact
 python3 scripts/dietcode_agent_client.py --grep DietCode --grep-format rg
 python3 scripts/dietcode_agent_client.py --search-literal CONTRACT --max-results 3 --compact
