@@ -1,0 +1,6 @@
+#!/bin/bash
+# Reconnect Hermes agents to the DietCode IDE runtime (idempotent).
+set -euo pipefail
+DIR="$(cd "$(dirname "$0")" && pwd)"
+IDE_ROOT="$(cd "$DIR/../../.." && pwd)"
+exec "$IDE_ROOT/scripts/setup-hermes-bridge.sh" "$@"

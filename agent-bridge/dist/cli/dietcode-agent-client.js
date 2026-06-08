@@ -41,6 +41,12 @@ function parseFlags(argv) {
         else if (arg === '--workspace' && argv[i + 1]) {
             flags.workspaceRoot = argv[++i];
         }
+        else if (arg === '--max-results' && argv[i + 1]) {
+            flags.maxResults = Number(argv[++i]);
+        }
+        else if (arg === '--idempotency-key' && argv[i + 1]) {
+            flags.idempotencyKey = argv[++i];
+        }
         else {
             args.push(arg);
         }
@@ -67,8 +73,9 @@ Commands:
   stat <path>
   patch safe-file <path> <diff-file>
   patch safe-batch <patch-json>
-  timeline recent
-  activity recent
+  operation status <idempotencyKey>
+  timeline recent [--limit N] [--since-revision N]
+  activity recent [--limit N]
   verify fast
   shell pwd
   shell cd <path>
@@ -88,6 +95,8 @@ Options:
   --token PATH     Session token path
   --app PATH       DietCode binary for --ensure-socket
   --workspace PATH Workspace root to open when none is active
+  --max-results N  Cap search result count
+  --idempotency-key KEY  Replay-safe key for patch commands
 `);
 }
 async function main() {
@@ -113,6 +122,8 @@ async function main() {
         await client.connect({ startApp: !flags.noStart, appPath, workspaceRoot: flags.workspaceRoot });
         const [command, subcommand, ...rest] = args;
         let result;
+        const searchOptions = flags.maxResults && flags.maxResults > 0 ? { maxResults: flags.maxResults } : undefined;
+        const patchOptions = flags.idempotencyKey ? { idempotencyKey: flags.idempotencyKey } : undefined;
         switch (command) {
             case 'profile':
                 result = client.getRuntimeProfile();
@@ -122,13 +133,13 @@ async function main() {
                 break;
             case 'search': {
                 if (subcommand === 'literal' && rest[0]) {
-                    result = await client.searchLiteral(rest.join(' '));
+                    result = await client.searchLiteral(rest.join(' '), searchOptions);
                 }
                 else if (subcommand === 'tokens' && rest.length > 0) {
-                    result = await client.searchTokens(rest);
+                    result = await client.searchTokens(rest, searchOptions);
                 }
                 else if (subcommand === 'paths' && rest[0]) {
-                    result = await client.searchPaths(rest.join(' '));
+                    result = await client.searchPaths(rest.join(' '), searchOptions);
                 }
                 else {
                     usage();
@@ -146,11 +157,11 @@ async function main() {
             case 'patch': {
                 if (subcommand === 'safe-file' && rest[0] && rest[1]) {
                     const diff = await readFile(rest[1], 'utf8');
-                    result = await client.safePatchFile(rest[0], diff);
+                    result = await client.safePatchFile(rest[0], diff, patchOptions);
                 }
                 else if (subcommand === 'safe-batch' && rest[0]) {
                     const parsed = JSON.parse(rest[0]);
-                    result = await client.safePatchBatch(parsed);
+                    result = await client.safePatchBatch(parsed, patchOptions);
                 }
                 else {
                     usage();
@@ -158,9 +169,25 @@ async function main() {
                 }
                 break;
             }
+            case 'operation':
+                if (subcommand === 'status' && rest[0]) {
+                    result = await client.getOperationStatus(rest[0]);
+                }
+                else {
+                    usage();
+                    return 1;
+                }
+                break;
             case 'timeline':
                 if (subcommand === 'recent') {
-                    result = await client.getTimeline();
+                    const limitIdx = rest.indexOf('--limit');
+                    const sinceIdx = rest.indexOf('--since-revision');
+                    const limit = limitIdx >= 0 ? Number(rest[limitIdx + 1]) : undefined;
+                    const sinceRevision = sinceIdx >= 0 ? Number(rest[sinceIdx + 1]) : undefined;
+                    result = await client.getTimeline({
+                        ...(limit && limit > 0 ? { limit } : {}),
+                        ...(sinceRevision && sinceRevision > 0 ? { sinceRevision } : {}),
+                    });
                 }
                 else {
                     usage();
@@ -169,7 +196,9 @@ async function main() {
                 break;
             case 'activity':
                 if (subcommand === 'recent') {
-                    result = await client.getRecentActivity();
+                    const limitIdx = rest.indexOf('--limit');
+                    const limit = limitIdx >= 0 ? Number(rest[limitIdx + 1]) : undefined;
+                    result = await client.getRecentActivity(limit && limit > 0 ? { limit } : {});
                 }
                 else {
                     usage();

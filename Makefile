@@ -96,7 +96,7 @@ MACOS_MM := \
 	src/filesystem/FileWatcher.mm \
 	src/core/LSPClient.mm
 
-.PHONY: all app agent-bridge agent-bridge-fast run headless ensure-socket restart-agent-server restart-agent-server-fast agent-ready agent-status agent-ping agent-methods agent-capabilities agent-self-test test-agent-offline control-smoke test-task-health test-rpc-transaction test-ergonomics test-grep-diff-tooling test-runtime-determinism test-transaction-kernel test-harness-realism test-deterministic-retrieval test-agent-workflow-smoke test-agent-shell-tooling test-agent-shell-tooling-fast test-agent-shell-workflows test-agent-shell-workflows-fast test-authority-boundaries test-authority-boundaries-fast test-agent-bridge-authority test-cli-agent-failures test-docs-code-drift test-partial-success-closure test-broccoliq-runtime-memory test-broccoliq-runtime-memory-fast test-runtime-native-integration test-runtime-native-integration-fast test-agent-bridge test-agent-bridge-fast test-agent-integration agent-integration verify-agent-runtime verify-agent-runtime-fast verify-agent-runtime-full verify-agent-runtime-full-fast benchmark-agent-success benchmark-agent-success-fast benchmark-agent-success-report test-agent-success-report test clean
+.PHONY: all app agent-bridge agent-bridge-fast run headless ensure-socket restart-agent-server restart-agent-server-fast agent-ready agent-status agent-ping agent-methods agent-capabilities agent-self-test test-agent-offline control-smoke test-task-health test-rpc-transaction test-ergonomics test-grep-diff-tooling test-runtime-determinism test-transaction-kernel test-harness-realism test-deterministic-retrieval test-agent-workflow-smoke test-agent-shell-tooling test-agent-shell-tooling-fast test-agent-shell-workflows test-agent-shell-workflows-fast test-authority-boundaries test-authority-boundaries-fast test-agent-bridge-authority test-cli-agent-failures test-docs-code-drift test-partial-success-closure test-broccoliq-runtime-memory test-broccoliq-runtime-memory-fast test-runtime-native-integration test-runtime-native-integration-fast test-agent-bridge test-agent-bridge-fast test-agent-integration setup-hermes-bridge test-hermes-bridge-audit test-hermes-bridge-workflows hermes-ide-watchdog verify-hermes-bridge agent-integration verify-agent-runtime verify-agent-runtime-fast verify-agent-runtime-full verify-agent-runtime-full-fast benchmark-agent-success benchmark-agent-success-fast benchmark-agent-success-report test-agent-success-report test clean
 
 all: app test
 
@@ -279,6 +279,23 @@ test-agent-bridge-fast: agent-bridge-fast
 
 test-agent-bridge-audit: app
 	python3 scripts/test_agent_bridge_audit.py --compact
+
+setup-hermes-bridge:
+	./scripts/setup-hermes-bridge.sh
+
+test-hermes-bridge-audit: agent-bridge-fast
+	python3 scripts/test_hermes_bridge_audit.py --compact
+
+test-hermes-bridge-workflows: agent-bridge-fast app
+	python3 scripts/test_hermes_bridge_workflows.py --compact
+
+hermes-ide-watchdog:
+	chmod +x scripts/hermes-ide-watchdog.sh
+	./scripts/hermes-ide-watchdog.sh
+
+verify-hermes-bridge: setup-hermes-bridge
+	python3 scripts/test_hermes_bridge_audit.py --compact
+	python3 scripts/test_hermes_bridge_workflows.py --compact
 
 test-agent-bridge: restart-agent-server
 	cd $(AGENT_BRIDGE_DIR) && npm test
