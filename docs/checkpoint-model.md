@@ -2,9 +2,20 @@
 
 > **DietCode gives agents bounded autonomy through visible checkpoints.**
 
+[← Doc index](README.md) · [← README overview](../README.md#the-six-checkpoints)
+
 A checkpoint is a **single question** the control plane must answer before the agent proceeds or before a task can be called done. Every governed feature maps to exactly one checkpoint. If it does not map cleanly, it is control-plane hygiene or observability noise — not a new gate.
 
 ## The six checkpoints
+
+| # | Name | Plain English | Technical question |
+|---|------|---------------|-------------------|
+| 1 | **Context** | Did the agent read the right files? | Did the agent read valid state? |
+| 2 | **Drift** | Did the repo change while the agent worked? | Did the workspace change underneath it? |
+| 3 | **Approval** | Are you OK with this edit? | Is this mutation allowed? |
+| 4 | **Mutation** | Did the patch apply cleanly? | Did the patch apply without error? |
+| 5 | **Verification** | Do tests still pass? | Did the result pass? |
+| 6 | **Completion** | Can we mark this task finished? | Can this task be called done? |
 
 ```text
 1. Context   — Did the agent read valid state?

@@ -1,5 +1,18 @@
 # Testing and release gates
 
+> **“Is my install healthy?”** → `make checkpoint-core`
+
+[← Doc index](README.md) · [getting-started](getting-started.md) · [troubleshooting](troubleshooting.md)
+
+| I want to… | Command |
+|------------|---------|
+| Prove full baseline on my Mac | `make checkpoint-core` |
+| Run only the 53-check vertical slice | `make cockpit-smoke` |
+| Quick kernel smoke | `make agent-self-test` |
+| Full agent-runtime ladder (separate track) | `make verify-agent-runtime-full` |
+
+---
+
 ## Primary gate: checkpoint core
 
 ```bash
