@@ -1,67 +1,131 @@
 # DietCode Documentation Index
 
-Welcome to the DietCode documentation. This directory contains detailed specifications, architectural overviews, and guides for the project.
+Map of all documentation in `docs/`. For a project overview and quick start, see the [root README](../README.md).
 
-## 🚀 Getting Started
-
-- **[First Contribution Tutorial](getting-started-tutorial.md)**: A hands-on guide to building, running, and modifying DietCode.
-- **[Agent Integration Cookbook](agent-integration-cookbook.md)**: Practical recipes and Python examples for building autonomous agents.
-- **[Agent Runtime Audit](agent-runtime-audit.md)**: Canonical record of Passes I–VI (grep reliability, determinism, transaction kernel, harness realism, semantic removal, failure traps).
-- **[Visual Identity](visual-identity.md)**: Brand guidelines and design language.
-- **[FAQ & Troubleshooting](faq-and-troubleshooting.md)**: Solutions to common hurdles in setup and development.
-
-## 📋 Product & UX
-...
-- **[Product Specification](product-spec.md)**: The core thesis, positioning, and hard constraints of DietCode.
-- **[MVP Scope](mvp-scope.md)**: Defines what is included in the Minimum Viable Product.
-- **[Anti-Scope Checklist](anti-scope-checklist.md)**: A list of features we intentionally exclude to maintain a "diet" footprint.
-- **[UX Navigation Map](ux-navigation-map.md)**: The layout and flow of the IDE's interface.
-- **[Beginner Onboarding Flow](beginner-onboarding-flow.md)**: How we guide new users through their first experience.
-- **[Accessibility Checklist](accessibility-checklist.md)**: Standards and goals for making DietCode usable by everyone.
-
-## 🏗️ Architecture & Engineering
-
-- **[Technical Architecture](technical-architecture.md)**: Layer models, domain logic, and platform shell strategy.
-- **[Technical Data Flow](technical-data-flow.md)**: Visualizing the lifecycle of RPC calls and asynchronous events.
-- **[Editor Internals](editor-internals.md)**: Deep dive into the line-based buffer, undo stack, and tokenization.
-- **[Runtime Mechanics](runtime-mechanics.md)**: Details on the Chip/Combo architecture, mutation locking, and safety rollbacks.
-- **[LSP Integration](lsp-integration.md)**: How the custom client manages Language Servers for diagnostics and navigation.
-- **[Event Orchestration](event-orchestration.md)**: The asynchronous Event Bus for decoupled internal communication.
-- **[State & Configuration Management](state-and-config.md)**: Persistence of user preferences and transient application state.
-- **[Symbol Indexing Strategy](symbol-indexing-strategy.md)**: The "diet" regex/brace-counting parser and reference scoring.
-- **[Terminal & Process Management](terminal-process-management.md)**: Native PTY integration and subprocess execution.
-- **[Filesystem & Git Integration](filesystem-and-git.md)**: Native file watching and git repository state tracking.
-- **[File Structure](file-structure.md)**: Detailed breakdown of the repository's directory layout.
-- **[Performance Budget](performance-budget.md)**: Constraints on CPU, RAM, and binary size.
-- **[MacOS Implementation Plan](macos-implementation-plan.md)**: Platform-specific details for the primary target.
-- **[Headless Agent Control](headless-agent-control.md)**: Deep dive into the JSON-RPC socket interface for automation.
-- **[Agent Tooling](agent-tooling.md)**: Deterministic grep/diff/patch/retrieval contracts.
-- **[Runtime Invariants](runtime-invariants.md)**: Frozen behavioral rules for the agent transaction kernel.
-- **[Runtime Contracts](runtime-contracts.md)**: Contract IDs, versions, and verification commands.
-- **[Error Codes](error-codes.md)**: Stable `string_code` catalog with recovery hints.
-- **[Deterministic Combo Runtime Spec](deterministic-combo-runtime-spec.md)**: Specification for the command execution runtime.
-
-## 🎓 Expert-Tier Deep Dives
-
-- **[Tokenizer Logic](expert-tokenizer-logic.md)**: Greedy regex matching and stateless line-based tokenization.
-- **[Search Algorithms](expert-search-algorithms.md)**: Optimized substring search and case-insensitivity strategies.
-- **[Socket Server Architecture](expert-socket-server.md)**: Threading models, security tokens, and socket hardening.
-- **[Design Patterns & Governance](expert-governance.md)**: PIMPL, asynchronous observers, and project coding standards.
-
-## 🛠️ Developer Guides
-
-- **[Build Instructions](build-instructions.md)**: How to compile, test, and run DietCode from source.
-- **[Build & Test System](build-and-test-system.md)**: Detailed overview of the Makefile targets and zero-dependency testing.
-- **[Command Catalog](command-catalog.md)**: A list of supported IDE commands and their keyboard shortcuts.
-- **[Testing Checklist](testing-checklist.md)**: How to verify changes and maintain the stability of the core.
-- **[Phase Roadmap](phase-roadmap.md)**: The long-term plan for project milestones.
-- **[Trust and Safety Rules](trust-and-safety-rules.md)**: Security guidelines for development.
-
-## 💡 Other Resources
-
-- **[First Prototype Code Plan](first-prototype-code-plan.md)**: The original implementation strategy for the vertical slice.
-- **[Navigation Audit](navigation-audit.md)**: A review of the keyboard and mouse navigation patterns.
+```bash
+make verify-agent-runtime-full     # docs stay aligned via test-docs-code-drift
+rg 'CONTRACT:|INVARIANT:' docs/
+```
 
 ---
 
-*For historical context and internal decision logs, see the [Sovereign Knowledge Ledger](../.wiki/index.md) in the `.wiki` directory.*
+## Start here
+
+| Doc | When to read |
+|-----|--------------|
+| [Getting Started Tutorial](getting-started-tutorial.md) | First build, run, and UI change |
+| [Build Instructions](build-instructions.md) | Compile and launch from source |
+| [FAQ & Troubleshooting](faq-and-troubleshooting.md) | Build failures, socket issues, agent errors |
+| [Agent Integration Cookbook](agent-integration-cookbook.md) | Python automation recipes |
+| [Testing Checklist](testing-checklist.md) | Pre-merge verification |
+
+---
+
+## Agent runtime (Passes I–VI)
+
+The headless control surface is documented as a deterministic local transaction kernel. Start with the audit, then drill into contracts and operations.
+
+| Doc | Contents |
+|-----|----------|
+| [Agent Runtime Audit](agent-runtime-audit.md) | **Canonical** Pass I–VI record: grep, determinism, transactions, harness realism, semantic removal, failure traps |
+| [Headless Agent Control](headless-agent-control.md) | RPC method reference, CLI flags, partial-success model |
+| [Agent Tooling](agent-tooling.md) | Grep/diff/patch/retrieval contracts and frozen key sets |
+| [Runtime Invariants](runtime-invariants.md) | Stale writes, sort order, symlink policy, revision surfaces |
+| [Runtime Contracts](runtime-contracts.md) | Contract IDs (`C-*`), versions, verification commands |
+| [Error Codes](error-codes.md) | `string_code` catalog with `recovery_hint` and `nextRecommendedCommand` |
+| [Agent Environment](agent-environment.md) | Config precedence and environment variables |
+| [Deprecation Policy](deprecation-policy.md) | Quarantined surfaces (`search.semantic`, `analysis.searchRanked`) |
+
+### Verification and release
+
+| Doc | Contents |
+|-----|----------|
+| [Build & Test System](build-and-test-system.md) | Makefile targets by pass, verification ladders |
+| [Release Upgrade & Rollback](release-upgrade-rollback.md) | Rebuild, socket cleanup, release gates |
+| [Maintainer Guide](maintainer-guide.md) | How to add RPC methods, error codes, enrichment, tool registry entries |
+
+---
+
+## Safety and operations
+
+| Doc | Contents |
+|-----|----------|
+| [Runtime Safety](runtime-safety.md) | Socket hardening, size limits, abuse resistance |
+| [Operator Policy](operator-policy.md) | Permission tiers, agent-safe vs internal namespaces |
+| [Operator Diagnostics](operator-diagnostics.md) | Request correlation, NDJSON runtime log |
+| [Task Server Recovery](task-server-recovery.md) | Socket and task lifecycle recovery |
+| [Queue Contract](queue-contract.md) | Read vs execution queue affinity |
+| [Trust and Safety Rules](trust-and-safety-rules.md) | Development security guidelines |
+
+---
+
+## Product and UX
+
+| Doc | Contents |
+|-----|----------|
+| [Product Specification](product-spec.md) | Thesis, positioning, hard constraints |
+| [MVP Scope](mvp-scope.md) | Phase 1 features and acceptance criteria |
+| [Anti-Scope Checklist](anti-scope-checklist.md) | Features intentionally excluded |
+| [UX Navigation Map](ux-navigation-map.md) | IDE layout and navigation flow |
+| [Beginner Onboarding Flow](beginner-onboarding-flow.md) | First-run user guidance |
+| [Accessibility Checklist](accessibility-checklist.md) | Accessibility standards and goals |
+| [Visual Identity](visual-identity.md) | Brand guidelines and design language |
+| [Command Catalog](command-catalog.md) | IDE commands and keyboard shortcuts |
+| [Phase Roadmap](phase-roadmap.md) | Long-term milestones |
+
+---
+
+## Architecture and engineering
+
+| Doc | Contents |
+|-----|----------|
+| [Technical Architecture](technical-architecture.md) | Layer model, domain logic, platform shell |
+| [Technical Data Flow](technical-data-flow.md) | RPC lifecycle and async events |
+| [File Structure](file-structure.md) | Repository directory layout |
+| [Editor Internals](editor-internals.md) | Line-based buffer, undo, tokenization |
+| [Runtime Mechanics](runtime-mechanics.md) | Chip/Combo architecture, mutation locking |
+| [Deterministic Combo Runtime Spec](deterministic-combo-runtime-spec.md) | Combo execution specification |
+| [Event Orchestration](event-orchestration.md) | Internal event bus |
+| [State & Configuration Management](state-and-config.md) | Preferences and transient state |
+| [LSP Integration](lsp-integration.md) | Language server client |
+| [Symbol Indexing Strategy](symbol-indexing-strategy.md) | Regex/brace-counting symbol parser |
+| [Terminal & Process Management](terminal-process-management.md) | PTY and subprocess execution |
+| [Filesystem & Git Integration](filesystem-and-git.md) | File watching and git state |
+| [Performance Budget](performance-budget.md) | CPU, RAM, and binary size limits |
+| [macOS Implementation Plan](macos-implementation-plan.md) | Platform-specific implementation notes |
+
+---
+
+## Expert deep dives
+
+| Doc | Contents |
+|-----|----------|
+| [Tokenizer Logic](expert-tokenizer-logic.md) | Greedy regex, line-based tokenization |
+| [Search Algorithms](expert-search-algorithms.md) | Substring search strategies |
+| [Socket Server Architecture](expert-socket-server.md) | Threading, tokens, socket hardening |
+| [Design Patterns & Governance](expert-governance.md) | PIMPL, observers, coding standards |
+
+---
+
+## Historical and planning
+
+| Doc | Contents |
+|-----|----------|
+| [First Prototype Code Plan](first-prototype-code-plan.md) | Original vertical-slice strategy |
+| [Navigation Audit](navigation-audit.md) | Keyboard and mouse navigation review |
+| [Runtime release notes template](templates/runtime-release-notes.md) | Template for contract version bumps |
+
+---
+
+## Related resources outside `docs/`
+
+| Path | Contents |
+|------|----------|
+| [`.wiki/index.md`](../.wiki/index.md) | Sovereign Knowledge Ledger — decision logs |
+| [`scripts/agent_contracts.py`](../scripts/agent_contracts.py) | Frozen contract key sets (source of truth) |
+| [`scripts/dietcode_agent_client.py`](../scripts/dietcode_agent_client.py) | Python RPC client and CLI |
+| [`Makefile`](../Makefile) | Build and verification targets |
+
+---
+
+*When adding documentation for a new agent-runtime surface, update [Agent Runtime Audit](agent-runtime-audit.md), the relevant contract doc, and run `make test-docs-code-drift`.*
