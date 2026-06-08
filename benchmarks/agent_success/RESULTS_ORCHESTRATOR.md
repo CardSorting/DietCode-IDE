@@ -149,7 +149,26 @@ The product is not “match the table.” The product is **measured minimal suff
 
 ---
 
-## 7. Semantic repair matrix
+## 7. Retry / Escalation Honesty
+
+Retries are explicit — not hidden behind a single pass bit.
+
+| task | firstAttemptPassed | attemptCount | passedOnRetry | firstFailureClass | finalProtocol |
+|------|-------------------:|-------------:|:-------------:|-------------------|---------------|
+| 051 | ✓ | 1 | — | — | `single_shot_patch` |
+| 052 | — | 2 | ✓ | `hidden_invariant_missing` | `single_shot_patch` |
+| 053 | ✓ | 1 | — | — | `single_shot_patch` |
+| 054 | ✓ | 1 | — | — | `single_shot_patch` |
+| 055 | — | 2 | ✓ | `behavior_check_failed` | `semantic_repair_loop` |
+| 056 | ✓ | 1 | — | — | `single_shot_patch` |
+| 057 | — | 2 | ✓ | `concurrent_mutation_detected` | `lock_read_validate_apply` |
+| 058 | ✓ | 1 | — | — | `single_shot_patch` |
+| 059 | — | 2 | ✓ | `behavior_check_failed` | `semantic_repair_loop` |
+| 060 | ✓ | 1 | — | — | `single_shot_patch` |
+
+---
+
+## 8. Semantic repair matrix
 
 | task | behaviorFailureCaptured | apiShapeChanged | semanticRepairSucceeded | rollbackTriggered | finalVerifyPassed |
 |------|------------------------:|----------------:|------------------------:|------------------:|------------------:|
@@ -160,7 +179,7 @@ Tasks 055 and 059 route through `semantic_repair_loop` after `behavior_check_fai
 
 ---
 
-## 8. Telemetry emitted per run
+## 9. Telemetry emitted per run
 
 Each orchestrated row in JSONL includes:
 
@@ -181,7 +200,7 @@ Each orchestrated row in JSONL includes:
 
 ---
 
-## 9. What this does not claim
+## 10. What this does not claim
 
 - **Not** a measure of raw model intelligence or context-window size.
 - **Not** proof that minimal visibility always beats maximal — only that **adaptive escalation** can reach the same reliability with measured, task-specific sufficiency.
@@ -189,7 +208,7 @@ Each orchestrated row in JSONL includes:
 
 ---
 
-## 10. Example escalation traces
+## 11. Example escalation traces
 
 **Task 052 (visibility axis):**
 

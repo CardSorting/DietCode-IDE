@@ -61,9 +61,15 @@ def run_orchestrated_agent(
     from mutation_trace import MutationTraceRecorder
 
     ctx.agent_profile = "orchestrated"
+    broker = ContractBroker()
     if ctx.mutation_trace is None:
         ctx.mutation_trace = MutationTraceRecorder()
-    broker = ContractBroker()
+    ctx.mutation_trace.observability.emit(
+        "orchestration.started",
+        task_id=task_id,
+        attempt=1,
+        protocol=broker.active_protocol,
+    )
     fixture_snap = _snapshot_workspace(workspace)
 
     last_error: str | None = None
@@ -101,6 +107,12 @@ def run_orchestrated_agent(
                     protocol=protocol,
                     result="pass",
                 )
+                ctx.mutation_trace.observability.emit(
+                    "orchestration.passed",
+                    task_id=task_id,
+                    attempt=step + 1,
+                    protocol=protocol,
+                )
                 _finalize_orchestration(ctx, broker, task_id, succeeded=True)
                 return
             last_error = (
@@ -129,7 +141,31 @@ def run_orchestrated_agent(
             failure_class=failure_class,
         )
         granted = broker.escalate(failure_class, step=step)
+        if granted and broker.escalation_path:
+            last = broker.escalation_path[-1]
+            if last.get("grantedContract"):
+                ctx.mutation_trace.observability.emit(
+                    "contract.escalated",
+                    task_id=task_id,
+                    attempt=step + 1,
+                    contract=last["grantedContract"],
+                    failure_class=failure_class,
+                )
+            if last.get("grantedProtocol"):
+                ctx.mutation_trace.observability.emit(
+                    "protocol.escalated",
+                    task_id=task_id,
+                    attempt=step + 1,
+                    protocol=last["grantedProtocol"],
+                    failure_class=failure_class,
+                )
         if not granted:
+            ctx.mutation_trace.observability.emit(
+                "orchestration.failed",
+                task_id=task_id,
+                attempt=step + 1,
+                failure_class=failure_class,
+            )
             break
 
     ctx.metrics.failure_code = ctx.metrics.failure_code or "OrchestrationExhausted"

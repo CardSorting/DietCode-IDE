@@ -75,6 +75,13 @@ class RunMetrics:
     semantic_rollback_triggered: bool = False
     mcs_reference_match: dict[str, Any] = field(default_factory=dict)
     mutation_trace_file: str | None = None
+    workspace_hash_before: str = ""
+    workspace_hash_after: str = ""
+    attempt_count: int = 0
+    passed_on_retry: bool = False
+    first_failure_class: str | None = None
+    final_failure_class: str | None = None
+    agent_input_manifest: dict[str, bool] = field(default_factory=dict)
 
     def to_json(self) -> dict[str, Any]:
         payload: dict[str, Any] = {
@@ -121,6 +128,20 @@ class RunMetrics:
             "mcsReferenceMatch": self.mcs_reference_match,
             "timestamp": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
         }
+        if self.workspace_hash_before:
+            payload["workspaceHashBefore"] = self.workspace_hash_before
+        if self.workspace_hash_after:
+            payload["workspaceHashAfter"] = self.workspace_hash_after
+        if self.attempt_count:
+            payload["attemptCount"] = self.attempt_count
+        if self.passed_on_retry:
+            payload["passedOnRetry"] = self.passed_on_retry
+        if self.first_failure_class:
+            payload["firstFailureClass"] = self.first_failure_class
+        if self.final_failure_class:
+            payload["finalFailureClass"] = self.final_failure_class
+        if self.agent_input_manifest:
+            payload["agentInputManifest"] = self.agent_input_manifest
         if self.mutation_trace_file:
             payload["mutationTraceFile"] = self.mutation_trace_file
         if self.agent_profile:
@@ -136,7 +157,10 @@ class WorkflowContext:
     metrics: RunMetrics
     agent_profile: str = "grep_only"
     run_id: str | None = None
+    parent_run_id: str | None = None
     mutation_trace: Any = None
+    workspace_hash_before: str = ""
+    external_agent: bool = False
     tool_calls: int = 0
     retries: int = 0
     hints: list[str] = field(default_factory=list)
@@ -1079,7 +1103,19 @@ def _write_orchestrator_mutation_trace(
 ) -> None:
     if ctx.run_id is None or ctx.mutation_trace is None:
         return
-    from mutation_trace import build_mutation_trace, write_mutation_trace
+    from agent_input_manifest import build_agent_input_manifest
+    from mutation_trace import build_mutation_trace, compute_retry_honesty, write_mutation_trace
+
+    ctx.metrics.workspace_hash_after = ctx.metrics.workspace_hash_after or ctx.workspace_hash_before
+    retry = compute_retry_honesty(ctx.mutation_trace.steps, succeeded=succeeded)
+    ctx.metrics.attempt_count = retry["attemptCount"]
+    ctx.metrics.passed_on_retry = retry["passedOnRetry"]
+    ctx.metrics.first_failure_class = retry["firstFailureClass"]
+    ctx.metrics.final_failure_class = retry["finalFailureClass"]
+    ctx.metrics.agent_input_manifest = build_agent_input_manifest(
+        external=ctx.external_agent,
+        profile=ctx.agent_profile,
+    )
 
     trace = build_mutation_trace(
         task_id=task_id,
@@ -1088,8 +1124,12 @@ def _write_orchestrator_mutation_trace(
         recorder=ctx.mutation_trace,
         metrics_json=ctx.metrics.to_json(),
         succeeded=succeeded,
+        workspace_hash_before=ctx.workspace_hash_before,
+        workspace_hash_after=ctx.metrics.workspace_hash_after,
+        parent_run_id=ctx.parent_run_id,
+        external_agent=ctx.external_agent,
     )
-    path = write_mutation_trace(ctx.run_id, task_id, trace)
+    path = write_mutation_trace(ctx.run_id, task_id, trace, workspace=ctx.workspace)
     ctx.metrics.mutation_trace_file = str(path)
 
 
@@ -1114,12 +1154,19 @@ def run_single_task(
         meta["id"] = task_id
         patch = load_expected_patch(task_id)
         workspace = copy_task_workspace(task_id)
+        from workspace_integrity import assert_workspace_isolated, hash_workspace
+
+        assert_workspace_isolated(workspace)
+        ws_hash_before = hash_workspace(workspace)
+        metrics.workspace_hash_before = ws_hash_before
         ctx = WorkflowContext(
             workspace=workspace,
             meta=meta,
             patch=patch,
             metrics=metrics,
             run_id=run_id,
+            workspace_hash_before=ws_hash_before,
+            external_agent=bool(os.environ.get("AGENT_BENCHMARK_AGENT_SCRIPT")),
         )
         if executor == "reference":
             if mode == "raw_rpc":
@@ -1144,6 +1191,9 @@ def run_single_task(
         metrics.duration_ms = (time.monotonic() - started) * 1000.0
         if workspace and executor == "agent":
             if agent_profile == "orchestrated" and ctx is not None:
+                from workspace_integrity import hash_workspace
+
+                metrics.workspace_hash_after = hash_workspace(workspace)
                 _finalize_agent_task_metrics(workspace, task_id, metrics)
                 _write_orchestrator_mutation_trace(
                     ctx,

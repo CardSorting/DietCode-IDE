@@ -17,7 +17,7 @@ def render_orchestrator_findings(
     generated_at: str,
     input_file: str,
     dietcode_version: str = "1.6.5",
-    benchmark_version: str = "v1.4",
+    benchmark_version: str = "v1.2",
 ) -> str:
     passed = sum(1 for r in rows if r.get("taskSuccess") and r.get("verifyPassed"))
     total = len(rows)
@@ -124,7 +124,32 @@ def render_orchestrator_findings(
             "",
             _MCS_INTERPRETATION,
             "",
-            "## 7. Semantic repair matrix",
+            "## 7. Retry / Escalation Honesty",
+            "",
+            "Retries are explicit — not hidden behind a single pass bit.",
+            "",
+            "| task | firstAttemptPassed | attemptCount | passedOnRetry | firstFailureClass | finalProtocol |",
+            "|------|-------------------:|-------------:|:-------------:|-------------------|---------------|",
+        ]
+    )
+
+    for row in sorted(rows, key=lambda r: r.get("taskId", "")):
+        tid = row.get("taskId", "").replace("task_", "")
+        attempts = row.get("attemptCount") or row.get("orchestrationSteps") or 1
+        first_pass = attempts == 1 and row.get("taskSuccess") and row.get("verifyPassed")
+        passed_retry = bool(row.get("passedOnRetry"))
+        first_fc = row.get("firstFailureClass") or "—"
+        protocols = row.get("executionProtocolPath") or ["single_shot_patch"]
+        final_proto = protocols[-1] if protocols else "single_shot_patch"
+        lines.append(
+            f"| {tid} | {'✓' if first_pass else '—'} | {attempts} | "
+            f"{'✓' if passed_retry else '—'} | {first_fc} | `{final_proto}` |"
+        )
+
+    lines.extend(
+        [
+            "",
+            "## 8. Semantic repair matrix",
             "",
             "| task | behaviorFailureCaptured | apiShapeChanged | semanticRepairSucceeded | "
             "rollbackTriggered | finalVerifyPassed |",
@@ -159,7 +184,7 @@ def render_orchestrator_findings(
             "",
             _NON_CLAIMS,
             "",
-            "## 10. Example escalation traces",
+            "## 11. Example escalation traces",
             "",
             "**Task 052 (visibility axis):**",
             "",
@@ -261,7 +286,7 @@ Reference MCS is a diagnostic baseline, not ground truth. `match: false` is info
 - **Pass at minimal:** trap solvable without escalation — no upfront contract layer required."""
 
 _TELEMETRY_SECTION = """\
-## 8. Telemetry emitted per run
+## 9. Telemetry emitted per run
 
 | Field | Meaning |
 |-------|---------|
@@ -276,7 +301,7 @@ _TELEMETRY_SECTION = """\
 See [WHITEPAPER.md](WHITEPAPER.md) §7 for full JSONL schema and CRI penalties (v1.4)."""
 
 _NON_CLAIMS = """\
-## 9. What this does not claim
+## 10. What this does not claim
 
 - **Not** raw model intelligence or context-window size.
 - **Not** proof that minimal visibility always beats maximal — only that adaptive escalation \

@@ -332,6 +332,11 @@ test-contract-orchestrator:
 	python3 benchmarks/agent_success/test_execution_protocols.py
 	python3 benchmarks/agent_success/test_semantic_repair.py
 	python3 benchmarks/agent_success/test_release_gates.py
+	python3 benchmarks/agent_success/test_benchmark_schema.py
+	python3 benchmarks/agent_success/test_isolation_audit.py
+	python3 benchmarks/agent_success/test_security_boundaries.py
+	python3 benchmarks/agent_success/test_external_agent_jail.py
+	python3 benchmarks/agent_success/test_release_gate_negative.py
 
 benchmark-contract-orchestrator: agent-bridge-fast
 	DIETCODE_REPO_ROOT=$(CURDIR) python3 benchmarks/agent_success/run_orchestrator_benchmark.py --assume-server-ready
@@ -342,6 +347,18 @@ benchmark-contract-release-check: agent-bridge-fast
 
 test-contract-release-gates:
 	python3 benchmarks/agent_success/test_release_gates.py
+
+# Phase 4.1 — schema stability, isolation, security, negative gates, replay verifier.
+test-agent-benchmark-schema:
+	python3 benchmarks/agent_success/test_benchmark_schema.py
+	python3 benchmarks/agent_success/test_isolation_audit.py
+	python3 benchmarks/agent_success/test_security_boundaries.py
+	python3 benchmarks/agent_success/test_external_agent_jail.py
+	python3 benchmarks/agent_success/test_release_gate_negative.py
+	python3 benchmarks/agent_success/test_replay_trace.py
+
+test-release-gate-negative:
+	python3 benchmarks/agent_success/test_release_gate_negative.py
 
 # Agent success benchmark: fast iteration — assumes server/binary/bridge already match HEAD.
 benchmark-agent-success-fast: agent-bridge-fast

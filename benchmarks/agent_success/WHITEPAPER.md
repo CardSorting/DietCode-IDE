@@ -391,6 +391,18 @@ Phase 4 hardens the architecture against regression:
 
 **Stability tiers:** tasks 001–030 and 051–060 are **stable**; CRI and MCS reference are **experimental**.
 
+### 6.9 Phase 4.1 — Production Hardening Audit
+
+Phase 4.1 audits the reliability stack for hostile review:
+
+- **Trace provenance** — `traceSchemaVersion`, `traceHash`, workspace hashes, `gitCommit`
+- **Schema freeze** — `make test-agent-benchmark-schema`
+- **Replay verifier** — `replay_trace.py`
+- **Negative gates** — `make test-release-gate-negative`
+- **Audit report** — [AUDIT_AGENT_RUNTIME_RELIABILITY_v1.0.md](AUDIT_AGENT_RUNTIME_RELIABILITY_v1.0.md)
+
+**Claim (Phase 4.1):** DietCode's agent reliability benchmark produces versioned, replayable mutation evidence with release gates, negative gate tests, and schema-stable telemetry for bounded code mutation research.
+
 ---
 
 ## 7. Metrics

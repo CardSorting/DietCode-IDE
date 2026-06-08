@@ -227,6 +227,16 @@ make test-contract-release-gates        # unit tests for gates + trace schema
 
 Orchestrated runs emit mutation traces: `results/traces/<run_id>/<task_id>.mutation_trace.json`
 
+### Phase 4.1 — production hardening audit
+
+```bash
+make test-agent-benchmark-schema   # schema freeze + isolation + security + negative gates
+make test-release-gate-negative    # prove gates fail when tampered
+python3 benchmarks/agent_success/replay_trace.py --trace results/traces/<run>/<task>.mutation_trace.json
+```
+
+Audit report: [AUDIT_AGENT_RUNTIME_RELIABILITY_v1.0.md](AUDIT_AGENT_RUNTIME_RELIABILITY_v1.0.md)
+
 ### Stability tiers
 
 | Surface | Stability |

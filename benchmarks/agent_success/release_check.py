@@ -16,6 +16,7 @@ RESULTS_DIR = BENCHMARK_ROOT / "results"
 
 from contract_ladder import NIGHTMARE_TASKS  # noqa: E402
 from mutation_trace import trace_path  # noqa: E402
+from replay_trace import verify_trace  # noqa: E402
 
 NIGHTMARE_MODE = "bridge"
 
@@ -113,11 +114,23 @@ def validate_release_gates(
     for tid in NIGHTMARE_TASKS:
         tp = trace_path(run_id, tid)
         if not tp.is_file():
-            violations.append(f"missing mutation trace: {tp.relative_to(BENCHMARK_ROOT)}")
+            try:
+                rel = tp.relative_to(BENCHMARK_ROOT)
+            except ValueError:
+                rel = tp
+            violations.append(f"missing mutation trace: {rel}")
             continue
         trace = json.loads(tp.read_text(encoding="utf-8"))
         if not trace.get("steps"):
             violations.append(f"empty mutation trace steps for {tid}")
+            continue
+        if not trace.get("traceSchemaVersion"):
+            violations.append(f"missing traceSchemaVersion for {tid}")
+        if not trace.get("traceHash"):
+            violations.append(f"missing traceHash for {tid}")
+        row = next((r for r in orch_nm if r.get("taskId") == tid), None)
+        for v in verify_trace(trace, jsonl_row=row):
+            violations.append(f"trace replay [{tid}]: {v}")
 
     return violations
 

@@ -1,7 +1,7 @@
 # Agent Runtime Reliability Case
 
 **DietCode Agent Success Benchmark · Phase 4**  
-**Version:** 1.4 · June 2026
+**Version:** 1.2 (benchmark) · June 2026 · Audit: [AUDIT_AGENT_RUNTIME_RELIABILITY_v1.0.md](../benchmarks/agent_success/AUDIT_AGENT_RUNTIME_RELIABILITY_v1.0.md)
 
 ---
 

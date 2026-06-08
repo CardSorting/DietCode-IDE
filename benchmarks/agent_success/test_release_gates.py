@@ -71,12 +71,15 @@ class MutationTraceTest(unittest.TestCase):
         self.assertEqual(len(trace["steps"]), 2)
         self.assertEqual(trace["steps"][0]["failureClass"], "behavior_check_failed")
         self.assertTrue(trace["finalState"]["passed"])
+        self.assertEqual(trace["traceSchemaVersion"], "1.0")
+        self.assertIn("traceHash", trace)
+        self.assertIn("attemptCount", trace)
 
     def test_write_trace_file(self) -> None:
-        import mutation_trace as mt
+        import workspace_integrity as wi
 
         with tempfile.TemporaryDirectory() as tmp:
-            mt.TRACES_DIR = Path(tmp)
+            wi.TRACES_DIR = Path(tmp)
             path = write_mutation_trace("run1", "task_052", {"taskId": "task_052", "steps": []})
             self.assertTrue(path.is_file())
 
@@ -102,13 +105,35 @@ class ReleaseGatesTest(unittest.TestCase):
         return ref, orch, "gate_test"
 
     def test_gates_pass_with_fixtures(self) -> None:
-        import mutation_trace as mt
+        import workspace_integrity as wi
 
         ref, orch, run_id = self._make_passing_set()
         with tempfile.TemporaryDirectory() as tmp:
-            mt.TRACES_DIR = Path(tmp) / "traces"
+            wi.TRACES_DIR = Path(tmp) / "traces"
+            from mutation_trace import compute_trace_hash
+
             for t in NIGHTMARE_TASKS:
-                trace = {"taskId": t, "steps": [{"attempt": 1, "result": "pass"}]}
+                trace = {
+                    "traceSchemaVersion": "1.0",
+                    "taskId": t,
+                    "runId": run_id,
+                    "steps": [
+                        {
+                            "attempt": 1,
+                            "contracts": ["readme", "verify_grep"],
+                            "protocol": "single_shot_patch",
+                            "result": "pass",
+                        }
+                    ],
+                    "finalState": {
+                        "passed": True,
+                        "wrongFileEdited": False,
+                        "apiShapeChanged": False,
+                        "rollbackDirty": False,
+                        "destructiveAllowed": False,
+                    },
+                }
+                trace["traceHash"] = compute_trace_hash(trace)
                 write_mutation_trace(run_id, t, trace)
             violations = validate_release_gates(
                 reference_rows=ref,
@@ -118,15 +143,25 @@ class ReleaseGatesTest(unittest.TestCase):
         self.assertEqual(violations, [])
 
     def test_gates_fail_missing_escalation(self) -> None:
-        import mutation_trace as mt
+        import workspace_integrity as wi
 
         ref, orch, run_id = self._make_passing_set()
         orch = [r for r in orch if r["taskId"] != "task_057"]
         orch.append(_orch_row("task_057", executionProtocolPath=["single_shot_patch"]))
         with tempfile.TemporaryDirectory() as tmp:
-            mt.TRACES_DIR = Path(tmp) / "traces"
+            wi.TRACES_DIR = Path(tmp) / "traces"
+            from mutation_trace import compute_trace_hash
+
             for t in NIGHTMARE_TASKS:
-                write_mutation_trace(run_id, t, {"taskId": t, "steps": [{"attempt": 1}]})
+                trace = {
+                    "traceSchemaVersion": "1.0",
+                    "taskId": t,
+                    "steps": [{"attempt": 1, "contracts": [], "protocol": "single_shot_patch", "result": "pass"}],
+                    "finalState": {"passed": True, "wrongFileEdited": False, "apiShapeChanged": False,
+                                   "rollbackDirty": False, "destructiveAllowed": False},
+                }
+                trace["traceHash"] = compute_trace_hash(trace)
+                write_mutation_trace(run_id, t, trace)
             violations = validate_release_gates(
                 reference_rows=ref,
                 orchestrated_rows=orch,
