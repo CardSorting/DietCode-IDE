@@ -1,187 +1,333 @@
-<p align="center">
-  <img src="resources/logo.svg" width="180" height="180" alt="DietCode Logo">
-</p>
+# DietCode
 
-<h1 align="center">DietCode</h1>
+**A governed local mutation runtime for agentic software work.**
+Not a web UI. Not another editor.
 
-<p align="center">
-  <strong>A governed local mutation runtime — not a web UI, not another editor.</strong><br>
-  <em>C++ kernel · cockpit control plane · agent bridge · visible checkpoints</em>
-</p>
-
-<p align="center">
-  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-4CAF50.svg?style=for-the-badge" alt="License"></a>
-  <img src="https://img.shields.io/badge/platform-macOS-lightgrey.svg?style=for-the-badge" alt="Platform">
-  <img src="https://img.shields.io/badge/baseline-checkpoint--core--v0.1-blue.svg?style=for-the-badge" alt="Baseline">
-</p>
+C++ kernel · cockpit control plane · agent bridge · visible checkpoints
 
 ---
 
-## What DietCode is
+## What DietCode Is
 
-DietCode is the **local control plane for agentic software work** on macOS.
+DietCode is a local-first control plane for autonomous and semi-autonomous software mutation on macOS.
+
+It separates:
+
+* **workspace authority**
+* **agent orchestration**
+* **human oversight**
+* **verification**
+* **UI visualization**
+
+into explicit layers with visible operational checkpoints.
 
 ```text
-dietcode-kernel   Headless C++ runtime — sole workspace mutation authority
-cockpit bridge    HTTP API + session store — governed task plane
-cockpit UI        Vite + React — checkpoints you can see and steer
-agent-bridge      TypeScript workflows for external agents (Hermes, scripts, CI)
+dietcode-kernel
+  Headless C++ runtime
+  Sole workspace mutation authority
+
+cockpit bridge
+  HTTP + SSE governed task plane
+  Session recovery + checkpoint state
+
+cockpit UI
+  Vite + React control surface
+  Drift / approval / verification checkpoints
+
+agent-bridge
+  TypeScript workflows for external agents
+  Hermes, scripts, CI, deterministic runners
 ```
 
-**Hard rule:** The cockpit never edits files. Only `dietcode-kernel` mutates the workspace.
+Hard rule:
 
-No Electron in the cockpit path. No cloud defaults. The legacy AppKit editor in `legacy_ui/` is optional — it is not the product surface.
+> The cockpit never edits files directly.
+> Only `dietcode-kernel` mutates the workspace.
 
-> DietCode is not “a web UI.” It is a governed local mutation runtime, proven by a 53-check vertical slice across npm, Make, and verify.sh workspaces.
+DietCode is not an IDE replacement.
+The optional AppKit editor under `legacy_ui/` exists only as a compatibility layer.
+
+The product surface is the checkpointed control loop.
 
 ---
 
-## The control loop
+## The Control Loop
 
-Six checkpoints between agent intent and “done”:
-
-```text
-1. Context       Did the agent read valid state?
-2. Drift         Did the workspace change underneath it?
-3. Approval      Is this mutation allowed?
-4. Mutation      Did the patch apply cleanly?
-5. Verification  Did the result pass?
-6. Completion    Can this task be called done?
-```
-
-Full map: [docs/checkpoint-model.md](docs/checkpoint-model.md)
+DietCode inserts six visible checkpoints between agent intent and “done.”
 
 ```text
-prompt → read → drift check → approval → patch → verify → completed
+1. Context
+   Did the agent read valid state?
+
+2. Drift
+   Did the workspace change underneath it?
+
+3. Approval
+   Is this mutation allowed?
+
+4. Mutation
+   Did the patch apply cleanly?
+
+5. Verification
+   Did the result pass?
+
+6. Completion
+   Can this task actually be called done?
 ```
 
-Agent exit does **not** mean done. Tasks reach `completed` only after verification passes or is explicitly waived.
+Full reference:
+
+[docs/checkpoint-model.md](docs/checkpoint-model.md)
+
+Operational flow:
+
+```text
+prompt
+  ↓
+read
+  ↓
+drift check
+  ↓
+approval
+  ↓
+patch
+  ↓
+verify
+  ↓
+completed
+```
+
+Agent exit does not imply success.
+
+Tasks only reach `completed` after:
+
+* verification passes
+* or verification is explicitly waived
 
 ---
 
-## Quick start
+## Why DietCode Exists
+
+Most agent tooling collapses workspace mutation, orchestration, and UI into a single opaque system.
+
+DietCode separates them.
+
+The goal is not fully autonomous coding.
+
+The goal is:
+
+> bounded autonomy through visible checkpoints.
+
+DietCode treats agent mutation as an operational problem:
+
+* verify state before mutation
+* surface dangerous transitions
+* pause when supervision is required
+* recover cleanly after failure
+* never silently continue after the control loop breaks
+
+---
+
+## Quick Start
 
 ```bash
-git clone <repo> && cd DietCode-IDE
+git clone <repo>
+cd DietCode-IDE
 
-# Frozen baseline (build + 53-check vertical slice + unit tests + docs drift)
+# frozen baseline
 make checkpoint-core
+```
 
-# Day-to-day development
+`checkpoint-core` validates the full governed pipeline:
+
+* kernel
+* bridge
+* cockpit
+* checkpoint APIs
+* recovery semantics
+* smoke fixtures
+* verification routing
+
+Daily development:
+
+```bash
 make kernel
 make restart-agent-server-fast
-cd cockpit && npm install && npm run dev   # UI + bridge on :9477
+
+cd cockpit
+npm install
+npm run dev
 ```
 
-| Command | Purpose |
-|---------|---------|
-| `make checkpoint-core` | Release gate — tag `checkpoint-core-v0.1` |
-| `make cockpit-smoke` | 53-check vertical slice only |
-| `make kernel` | Build `build/dietcode-kernel` |
-| `make restart-agent-server-fast` | Restart kernel socket (no rebuild) |
-| `make agent-bridge-fast` | Build TypeScript agent bridge |
-| `make cockpit` | Build cockpit UI + server types |
+Cockpit:
 
-Details: [docs/getting-started.md](docs/getting-started.md) · [docs/testing.md](docs/testing.md)
+```text
+http://localhost:5173
+```
 
 ---
 
-## Current baseline (`checkpoint-core-v0.1`)
+## Core Commands
 
-| Layer | Status |
-|-------|--------|
-| **Kernel** | Headless; JSON-RPC on `~/.dietcode/control.sock` |
-| **Cockpit** | Checkpoint rail, drift panel, approval panel, verify gate, diff ring |
-| **Bridge** | Governed tasks, session recovery, checkpoint API |
-| **Safety** | Supervised approvals (autonomy 3), drift gate, verify gate |
-| **Recovery** | Bounded session restore after bridge reload |
-| **Validation** | `cockpit-smoke` — npm-test, make-test, verify-sh fixtures |
+| Command                          | Purpose                       |
+| -------------------------------- | ----------------------------- |
+| `make checkpoint-core`           | Frozen production baseline    |
+| `make cockpit-smoke`             | 53-check vertical slice       |
+| `make kernel`                    | Build `build/dietcode-kernel` |
+| `make restart-agent-server-fast` | Restart kernel socket         |
+| `make agent-bridge-fast`         | Build TypeScript bridge       |
+| `make cockpit`                   | Build cockpit UI + server     |
+
+References:
+
+[docs/getting-started.md](docs/getting-started.md) · [docs/testing.md](docs/testing.md)
+
+---
+
+## Current Baseline
+
+### checkpoint-core-v0.1
+
+| Layer      | Status                                   |
+| ---------- | ---------------------------------------- |
+| Kernel     | Headless JSON-RPC runtime                |
+| Cockpit    | Checkpoint rail + governed task UI       |
+| Bridge     | Session recovery + governed tasks        |
+| Safety     | Drift gate + approval gate + verify gate |
+| Recovery   | Bounded session restore                  |
+| Validation | 53-check vertical slice                  |
+
+Before checkpoint model changes:
 
 ```bash
-make checkpoint-core   # must pass before Hermes / benchmark work moves
+make checkpoint-core
 ```
+
+must pass.
 
 ---
 
-## Architecture (one screen)
+## Architecture
 
 ```text
 Human / agent
-    ↓
-Cockpit UI  ──SSE──┐
-    ↓              │
-POST /api/tasks    │
-    ↓              │
-Bridge (tsx)  ─────┘
-    ↓ Unix socket + session token
+      ↓
+Cockpit UI
+      ↓
+Bridge (HTTP + SSE)
+      ↓
 dietcode-kernel
-    ↓
-Workspace (patches, verify, git, shell)
+      ↓
+Workspace
 ```
 
-Wiring: [docs/architecture.md](docs/architecture.md)
+Kernel responsibilities:
+
+* file mutation
+* patch application
+* verification execution
+* workspace state
+* drift anchoring
+* approval enforcement
+
+Cockpit responsibilities:
+
+* task steering
+* checkpoint visualization
+* approvals
+* verification controls
+* recovery UI
+
+Agents never mutate the workspace directly.
+
+All mutation flows through the kernel.
+
+Detailed architecture:
+
+[docs/architecture.md](docs/architecture.md)
+
+---
+
+## Reliability Philosophy
+
+DietCode does not attempt to hide operational failure.
+
+If the control loop breaks:
+
+* tasks disconnect visibly
+* approvals expire explicitly
+* drift blocks mutation
+* verification blocks completion
+* stale sessions surface warnings
+* recovery requires operator intent
+
+The system should never imply an agent is still safely operating when it is not.
 
 ---
 
 ## Documentation
 
-| Doc | Read when |
-|-----|-----------|
-| [docs/README.md](docs/README.md) | Full index |
-| [checkpoint-model.md](docs/checkpoint-model.md) | Canonical six-gate map |
-| [getting-started.md](docs/getting-started.md) | Build, run cockpit, kernel socket |
-| [testing.md](docs/testing.md) | Make targets, `checkpoint-core`, smoke |
-| [governed-tasks.md](docs/governed-tasks.md) | `POST /api/tasks`, modes, events |
-| [agent-ergonomics.md](docs/agent-ergonomics.md) | `GET /api/checkpoints`, agent loop |
-| [agent-bridge.md](docs/agent-bridge.md) | TypeScript bridge for agents |
-| [kernel-rpc.md](docs/kernel-rpc.md) | RPC surface, CLI, permissions |
-| [troubleshooting.md](docs/troubleshooting.md) | Socket, token, drift, verify failures |
+| Document              | Purpose                             |
+| --------------------- | ----------------------------------- |
+| [docs/README.md](docs/README.md) | Documentation index                 |
+| [checkpoint-model.md](docs/checkpoint-model.md) | Canonical checkpoint model          |
+| [getting-started.md](docs/getting-started.md) | Build + startup                     |
+| [testing.md](docs/testing.md)          | Smoke + baseline validation         |
+| [governed-tasks.md](docs/governed-tasks.md)   | Task API + lifecycle                |
+| [agent-ergonomics.md](docs/agent-ergonomics.md) | Agent recovery + checkpoint polling |
+| [kernel-rpc.md](docs/kernel-rpc.md)       | RPC surface                         |
+| [troubleshooting.md](docs/troubleshooting.md)  | Failure recovery                    |
 
-Checkpoint deep dives: [workspace-drift](docs/workspace-drift.md) · [approval-lifecycle](docs/approval-lifecycle.md) · [verify-gate](docs/verify-gate.md) · [session-recovery](docs/session-recovery.md)
+Deep dives:
+
+[workspace-drift](docs/workspace-drift.md) · [approval-lifecycle](docs/approval-lifecycle.md) · [verify-gate](docs/verify-gate.md) · [session-recovery](docs/session-recovery.md)
 
 ---
 
-## Optional: Hermes + legacy app
+## Optional Integrations
 
-Hermes Agent integration is **optional** — not required for the checkpoint loop.
+Hermes integration is optional.
+
+The checkpoint loop functions independently of any single model provider or agent runtime.
 
 ```bash
-make app                              # legacy AppKit bundle + kernel resources
-make smoke-agent-chat-live            # bounded Hermes edit (separate from cockpit-smoke)
+make app
+make smoke-agent-chat-live
 ```
 
-See [integrations/README.md](integrations/README.md).
+Integration docs:
+
+[integrations/README.md](integrations/README.md)
 
 ---
 
-## Reliability evaluation (parallel track)
-
-Adversarial mutation benchmarks live under `benchmarks/agent_success/`. They evaluate runtime reliability; they are **not** the cockpit checkpoint gate.
-
-- [AGENT_RUNTIME_RELIABILITY.md](AGENT_RUNTIME_RELIABILITY.md)
-- [benchmarks/agent_success/README.md](benchmarks/agent_success/README.md)
-
-Run separately from `make checkpoint-core`.
-
----
-
-## Repository layout
+## Repository Layout
 
 ```text
-src/kernel/                  dietcode-kernel entry + workspace adapter
-src/platform/macos/control/  JSON-RPC server (MacControlServer)
-cockpit/                     React UI + bridge server (tsx)
-agent-bridge/                @dietcode/agent-bridge package
-scripts/                     Harnesses, cockpit-smoke, dietcode_agent_client.py
-scripts/fixtures/cockpit_smoke/   Vertical-slice fixture repos
-legacy_ui/                   Optional native editor (not cockpit)
-integrations/                Hermes plugin sync boundary
-```
+src/kernel/
+  Headless kernel runtime
 
-[docs/file-structure.md](docs/file-structure.md)
+src/platform/macos/control/
+  JSON-RPC server
+
+cockpit/
+  React cockpit + bridge
+
+agent-bridge/
+  TypeScript agent workflows
+
+scripts/
+  Harnesses + smoke tests
+
+legacy_ui/
+  Optional native editor
+
+integrations/
+  External agent integrations
+```
 
 ---
 
 ## License
 
-MIT — see [LICENSE](LICENSE).
+MIT License — see [LICENSE](LICENSE).
