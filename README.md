@@ -5,8 +5,8 @@
 <h1 align="center">DietCode</h1>
 
 <p align="center">
-  <strong>A native, local-first macOS coding environment with a bundled deterministic agent runtime.</strong><br>
-  <em>C++20 core · AppKit shell · Agent Bridge · runtime journal · adversarial reliability evaluation</em>
+  <strong>A local agent-control runtime for deterministic workspace mutation.</strong><br>
+  <em>C++20 kernel · web cockpit · Agent Bridge · runtime journal · adversarial reliability evaluation</em>
 </p>
 
 <p align="center">
@@ -19,22 +19,23 @@
 
 ## What this is
 
-DietCode is a smaller, calmer, native macOS coding environment built from a portable C++20 core with an Objective-C++ / AppKit shell.
+DietCode is the **local control plane for agentic software work**.
 
-No Electron.  
-No Chromium.  
-No background indexing tax.  
-No cloud defaults.
+Developers do not need another editor. They need a trustworthy local runtime that lets agents work safely inside real projects.
 
-**Open. Code. Run. Save.**  
-No jet engine.
+```text
+DietCode Kernel  = C++ headless runtime (sole workspace mutation authority)
+DietCode Cockpit = Vite + React web control surface
+Agent Bridge     = stable deterministic workflows for external agents
+```
 
-DietCode also ships with a bundled deterministic agent runtime: a hardened local control stack that allows external or local agents to safely search, patch, verify, recover, and replay mutations against a live workspace through a stable Agent Bridge API.
+No Electron in the cockpit build path.  
+No cloud defaults.  
+No background indexing tax.
 
-You install one app.
+**Hard rule:** The cockpit never edits files directly. Only `dietcode-kernel` mutates the workspace.
 
-- Humans get a native editor.
-- Agents get a deterministic operating layer.
+The legacy native AppKit editor remains in `legacy_ui/` as optional later integration — it is not the product surface.
 
 ---
 
@@ -125,35 +126,46 @@ Release tag: `agent-runtime-reliability-v1.0`
 ## Architecture
 
 ```text
- [ External agents ]        [ Human developer ]
-          |                         |
-     Agent Bridge              Native Cocoa UI
-     (bundled TS layer)        (editor, tabs, terminal)
-          |                         |
-          +------------+------------+
-                       |
-             DietCode Runtime RPC
-             (~/.dietcode/control.sock)
-                       |
-          +------------+------------+
-          |                         |
-    C++ mutation kernel      BroccoliQ runtime journal
-    (authority + replay)     (timeline, receipts, recovery)
-                       |
-              Agent Reliability Harness
-              (traps, orchestration, provenance)
+agent / user
+    ↓
+cockpit UI (Vite + React)
+    ↓
+local bridge API (HTTP → Unix socket)
+    ↓
+dietcode-kernel (C++ mutation authority)
+    ↓
+workspace
+```
+
+```text
+ [ External agents ]              [ Human operator ]
+          |                                |
+     Agent Bridge                     DietCode Cockpit
+     (bundled TS layer)              (task timeline, diffs, approvals)
+          |                                |
+          +----------------+----------------+
+                           |
+                 dietcode-kernel RPC
+                 (~/.dietcode/control.sock)
+                           |
+          +----------------+----------------+
+          |                                 |
+    C++ mutation kernel            BroccoliQ runtime journal
+    (authority + replay)           (timeline, receipts, recovery)
 ```
 
 | Layer | Responsibility |
 |-------|----------------|
+| Cockpit | Chat, task timeline, streamed activity, diffs, approvals, logs |
+| Bridge API | HTTP proxy + SSE event fan-out to kernel socket |
 | Agent Bridge | Stable deterministic workflows for agents |
-| Runtime RPC | JSON-RPC dispatch, contracts, queues |
-| Mutation kernel | Atomic mutation authority and rollback |
+| `dietcode-kernel` | JSON-RPC dispatch, mutation authority, event stream |
 | Runtime journal | Durable operation memory and replay |
 | Reliability harness | Adversarial evaluation and release gates |
 
 Further reading:
 
+- [Kernel + Cockpit Architecture](docs/kernel-cockpit-architecture.md)
 - [Agent Bridge Architecture](docs/agent-bridge-architecture.md)
 - [Technical Architecture](docs/technical-architecture.md)
 - [Agent Runtime Reliability](AGENT_RUNTIME_RELIABILITY.md)
@@ -208,7 +220,7 @@ Canonical references:
 
 ## Agent Bridge (preferred integration)
 
-The Agent Bridge ships inside `DietCode.app`.
+The Agent Bridge ships with the kernel at `build/resources/agent-bridge/`.
 
 Agents should use the bridge or bundled CLI — **not** raw runtime RPC.
 
@@ -236,11 +248,11 @@ await bridge.close();
 CLI examples:
 
 ```bash
-build/DietCode.app/Contents/Resources/bin/dietcode-agent-client profile
+build/resources/bin/dietcode-agent-client profile
 
-build/DietCode.app/Contents/Resources/bin/dietcode-agent-client verify fast
+build/resources/bin/dietcode-agent-client verify fast
 
-build/DietCode.app/Contents/Resources/bin/dietcode-agent-client patch safe-file \
+build/resources/bin/dietcode-agent-client patch safe-file \
   src/foo.ts \
   /tmp/foo.patch
 ```
@@ -364,7 +376,7 @@ See:
 
 - macOS 12+
 - Xcode Command Line Tools (`xcode-select --install`)
-- Node.js 18+ (bridge build only; bundled after `make app`)
+- Node.js 18+ (agent bridge + cockpit)
 - Python 3 (benchmark + harness tooling)
 - Hermes (installed on demand via `dietcode-enable-agent`; not vendored in repo)
 
@@ -375,20 +387,33 @@ git clone <repo-url> DietCode-IDE
 cd DietCode-IDE
 
 make test
-make app
+make kernel          # builds build/dietcode-kernel (default)
 ```
 
-### Run
+### Run kernel + cockpit
 
 ```bash
-make run
+# Terminal 1 — kernel (mutation authority)
+./build/dietcode-kernel --workspace /path/to/project
+
+# Terminal 2 — web cockpit
+make cockpit-dev
+# open http://localhost:5173
 ```
 
-Headless runtime:
+### Agent integration
 
 ```bash
-make headless
+make ensure-socket
 make agent-ready
+build/resources/bin/dietcode-agent-client profile
+```
+
+### Legacy native editor (optional)
+
+```bash
+make legacy-app
+make run
 ```
 
 ---

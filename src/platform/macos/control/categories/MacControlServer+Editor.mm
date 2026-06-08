@@ -1,8 +1,13 @@
 #import "MacControlServer+Private.hpp"
+#ifndef DIETCODE_KERNEL_BUILD
 #import "MacWindow.hpp"
+#else
+#import "DietCodeWindowController+ControlHost.h"
+#endif
 #import "MacControlSupport.hpp"
 #import "MacControlPathSecurity.hpp"
 #import "BufferStateService.hpp"
+#include "filesystem/GitService.hpp"
 #import "DiffAnalysisService.hpp"
 #import "SymbolIndexService.hpp"
 
@@ -63,9 +68,14 @@
     }
     
     if ([method isEqualToString:@"editor.setSelection"]) {
+        if (self.isKernelMode || !self.windowController) {
+            *outErrCode = @"ui_unavailable";
+            *outErrMsg = @"Editor selection is unavailable in kernel mode.";
+            return;
+        }
         NSInteger start = [params[@"start"] integerValue];
         NSInteger end = [params[@"end"] integerValue];
-        BOOL ok = [self.windowController setActiveSelectionStart:start end:end];
+        BOOL ok = [(id)self.windowController setActiveSelectionStart:start end:end];
         if (!ok) {
             *outErrCode = @"invalid_params";
             *outErrMsg = @"Selection range indices out of bounds or no active editor.";
@@ -82,7 +92,12 @@
             *outErrMsg = @"text parameter required.";
             return;
         }
-        BOOL ok = [self.windowController insertTextAtActiveCursor:text];
+        if (self.isKernelMode || !self.windowController) {
+            *outErrCode = @"ui_unavailable";
+            *outErrMsg = @"Editor insert is unavailable in kernel mode.";
+            return;
+        }
+        BOOL ok = [(id)self.windowController insertTextAtActiveCursor:text];
         if (!ok) {
             *outErrCode = @"invalid_request";
             *outErrMsg = @"Failed to insert text in active editor buffer.";
@@ -99,7 +114,12 @@
             *outErrMsg = @"text parameter required.";
             return;
         }
-        BOOL ok = [self.windowController replaceActiveSelectionWithText:text];
+        if (self.isKernelMode || !self.windowController) {
+            *outErrCode = @"ui_unavailable";
+            *outErrMsg = @"Editor replace is unavailable in kernel mode.";
+            return;
+        }
+        BOOL ok = [(id)self.windowController replaceActiveSelectionWithText:text];
         if (!ok) {
             *outErrCode = @"invalid_request";
             *outErrMsg = @"Failed to replace selection.";
@@ -150,19 +170,33 @@
             *outErrMsg = @"Open document path required.";
             return;
         }
-        [self.windowController saveFileAtPath:targetPath];
+        if (self.windowController) {
+            [(id)self.windowController saveFileAtPath:targetPath];
+        } else {
+            NSString* text = [self safeTextForFileAtPath:targetPath];
+            NSString* err = nil;
+            if (!text || ![self.workspaceSession writeTextAtPath:targetPath content:text error:&err]) {
+                *outErrCode = @"write_failed";
+                *outErrMsg = err ?: @"Failed to save file in kernel mode.";
+                return;
+            }
+        }
         *outResult = @{ @"saved": @YES };
         return;
     }
     
     if ([method isEqualToString:@"editor.closeFile"]) {
+        if (self.isKernelMode || !self.windowController) {
+            *outResult = @{ @"closed": @YES, @"headless": @YES };
+            return;
+        }
         NSString* targetPath = params[@"path"] ?: [self safeActiveFilePath];
         if (!targetPath) {
             *outErrCode = @"invalid_params";
             *outErrMsg = @"Open document path required.";
             return;
         }
-        [self.windowController closeFileAtPath:targetPath];
+        [(id)self.windowController closeFileAtPath:targetPath];
         *outResult = @{ @"closed": @YES };
         return;
     }
@@ -174,6 +208,10 @@
         if (!targetPath || line <= 0) {
             *outErrCode = @"invalid_params";
             *outErrMsg = @"path and line parameters required.";
+            return;
+        }
+        if (self.isKernelMode || !self.windowController) {
+            *outResult = @{ @"navigated": @YES, @"path": targetPath, @"line": @(line), @"headless": @YES };
             return;
         }
         [self.windowController openFileAtPath:targetPath line:line column:col];
@@ -245,7 +283,17 @@
             return;
         }
         NSString* errStr = nil;
-        BOOL ok = [self.windowController gitDiscardFile:targetPath errorOut:&errStr];
+        BOOL ok = NO;
+        if (self.windowController) {
+            ok = [(id)self.windowController gitDiscardFile:targetPath errorOut:&errStr];
+        } else {
+            std::string err;
+            ok = dietcode::filesystem::GitService::discardChanges(
+                std::string([[self safeWorkspacePath] UTF8String]),
+                std::string([targetPath UTF8String]),
+                err);
+            if (!ok) errStr = [NSString stringWithUTF8String:err.c_str()];
+        }
         if (!ok) {
             *outErrCode = @"git_failed";
             *outErrMsg = errStr ?: @"Failed to revert file.";

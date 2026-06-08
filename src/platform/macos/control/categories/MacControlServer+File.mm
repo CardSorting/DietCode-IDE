@@ -1,5 +1,9 @@
 #import "MacControlServer+Private.hpp"
+#ifndef DIETCODE_KERNEL_BUILD
 #import "MacWindow.hpp"
+#else
+#import "DietCodeWindowController+ControlHost.h"
+#endif
 #import "MacControlSupport.hpp"
 #import "MacControlPathSecurity.hpp"
 #import "filesystem/PathUtils.hpp"
@@ -33,8 +37,11 @@ static const NSInteger kMaxBatchFilePaths = 100;
             *outErrMsg = @"Target path is not a valid directory.";
             return;
         }
-        [self.windowController openWorkspaceFolder:targetPath];
-        *outResult = @{ @"opened": @YES, @"path": targetPath };
+        [self.workspaceSession setWorkspaceRoot:targetPath];
+        if (self.windowController) {
+            [self.windowController openWorkspaceFolder:targetPath];
+        }
+        *outResult = @{ @"opened": @YES, @"path": targetPath, @"headless": @(self.isKernelMode) };
         return;
     }
     
@@ -182,7 +189,7 @@ static const NSInteger kMaxBatchFilePaths = 100;
             *outErrMsg = [NSString stringWithFormat:@"File does not exist: %@", absPath];
             return;
         }
-        if (self.windowController.isHeadless || ![[self.windowController window] isVisible]) {
+        if (self.isKernelMode || !self.windowController || self.windowController.isHeadless || ![[self.windowController window] isVisible]) {
             NSArray* recents = [[NSUserDefaults standardUserDefaults] stringArrayForKey:@"RecentFiles"] ?: @[];
             NSMutableArray* updatedRecents = [recents mutableCopy];
             [updatedRecents removeObject:absPath];
@@ -352,7 +359,8 @@ static const NSInteger kMaxBatchFilePaths = 100;
             return;
         }
         NSString* readSource = nil;
-        NSString* text = TextForSearchAtPath([self.windowController textForFileAtPath:targetPath], targetPath, &readSource);
+        NSString* editorText = self.windowController ? [self.windowController textForFileAtPath:targetPath] : nil;
+        NSString* text = TextForSearchAtPath(editorText, targetPath, &readSource);
         if (!text) text = [self safeTextForFileAtPath:targetPath];
         if (!text && ![method isEqualToString:@"file.stat"]) {
             *outErrCode = @"invalid_request";
@@ -483,7 +491,12 @@ static const NSInteger kMaxBatchFilePaths = 100;
             return;
         }
         NSString* errStr = nil;
-        BOOL ok = [self.windowController writeFileAtPath:targetPath content:content errorOut:&errStr];
+        BOOL ok = NO;
+        if (self.windowController) {
+            ok = [self.windowController writeFileAtPath:targetPath content:content errorOut:&errStr];
+        } else {
+            ok = [self.workspaceSession writeTextAtPath:targetPath content:content error:&errStr];
+        }
         if (!ok) {
             *outErrCode = @"write_failed";
             *outErrMsg = errStr ?: @"Failed to write file.";

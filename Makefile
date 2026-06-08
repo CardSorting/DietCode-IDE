@@ -2,23 +2,31 @@ CXX := clang++
 
 # Header search paths
 INC_FLAGS := -I./src \
+             -I./src/kernel \
+             -I./src/kernel/workspace \
+             -I./legacy_ui/macos/control \
              -I./src/platform/macos \
              -I./src/platform/macos/control \
              -I./src/platform/macos/control/categories \
              -I./src/platform/macos/control/services \
              -I./src/platform/macos/control/utils \
-             -I./src/platform/macos/ui \
-             -I./src/platform/macos/ui/app \
-             -I./src/platform/macos/ui/controllers \
-             -I./src/platform/macos/ui/controllers/categories \
-             -I./src/platform/macos/ui/views \
-             -I./src/platform/macos/ui/utils \
+             -I./legacy_ui/macos \
+             -I./legacy_ui/macos/ui \
+             -I./legacy_ui/macos/ui/app \
+             -I./legacy_ui/macos/ui/controllers \
+             -I./legacy_ui/macos/ui/controllers/categories \
+             -I./legacy_ui/macos/ui/views \
+             -I./legacy_ui/macos/ui/utils \
              -I./src/platform/macos/services
 
 CXXFLAGS := -std=c++20 -Wall -Wextra -Wpedantic $(INC_FLAGS)
 OBJCXXFLAGS := -std=c++20 -Wall -Wextra $(INC_FLAGS) -fobjc-arc
 
 BUILD_DIR := build
+KERNEL_NAME := dietcode-kernel
+KERNEL_BINARY := $(BUILD_DIR)/$(KERNEL_NAME)
+KERNEL_RESOURCES := $(BUILD_DIR)/resources
+KERNEL_BIN := $(KERNEL_RESOURCES)/bin
 APP_NAME := DietCode
 APP_BUNDLE := $(BUILD_DIR)/$(APP_NAME).app
 APP_CONTENTS := $(APP_BUNDLE)/Contents
@@ -28,19 +36,23 @@ APP_RESOURCES := $(APP_CONTENTS)/Resources
 APP_BIN := $(APP_RESOURCES)/bin
 AGENT_BRIDGE_DIR := agent-bridge
 AGENT_BRIDGE_DIST := $(AGENT_BRIDGE_DIR)/dist
-PACKAGED_BRIDGE := $(APP_RESOURCES)/agent-bridge
-PACKAGED_BRIDGE_CLI := $(APP_BIN)/dietcode-agent-client
+PACKAGED_BRIDGE := $(KERNEL_RESOURCES)/agent-bridge
+PACKAGED_BRIDGE_CLI := $(KERNEL_BIN)/dietcode-agent-client
+LEGACY_PACKAGED_BRIDGE := $(APP_RESOURCES)/agent-bridge
+LEGACY_PACKAGED_BRIDGE_CLI := $(APP_BIN)/dietcode-agent-client
 HERMES_PLUGIN_SRC := integrations/hermes-dietcode-plugin
-PACKAGED_HERMES_PLUGIN := $(APP_RESOURCES)/integrations/hermes/dietcode
-PACKAGED_ENABLE_AGENT := $(APP_BIN)/dietcode-enable-agent
-PACKAGED_ENABLE_AGENT_PY := $(APP_BIN)/dietcode-enable-agent.py
-PACKAGED_AGENT_CHAT := $(APP_BIN)/dietcode-agent-chat
-PACKAGED_AGENT_CHAT_PY := $(APP_BIN)/dietcode-agent-chat.py
-PACKAGED_AGENT_BUNDLE_PY := $(APP_BIN)/dietcode_agent_bundle.py
-PACKAGED_MUTATION_AUTHORITY_PY := $(APP_BIN)/dietcode_mutation_authority.py
-PACKAGED_DIFF_AUTHORITY_PY := $(APP_BIN)/dietcode_diff_authority.py
-PACKAGED_VERIFICATION_AUTHORITY_PY := $(APP_BIN)/dietcode_verification_authority.py
-PACKAGED_BUNDLE_MANIFEST := $(APP_RESOURCES)/dietcode-agent-bundle.manifest.json
+PACKAGED_HERMES_PLUGIN := $(KERNEL_RESOURCES)/integrations/hermes/dietcode
+LEGACY_PACKAGED_HERMES_PLUGIN := $(APP_RESOURCES)/integrations/hermes/dietcode
+PACKAGED_ENABLE_AGENT := $(KERNEL_BIN)/dietcode-enable-agent
+PACKAGED_ENABLE_AGENT_PY := $(KERNEL_BIN)/dietcode-enable-agent.py
+PACKAGED_AGENT_CHAT := $(KERNEL_BIN)/dietcode-agent-chat
+PACKAGED_AGENT_CHAT_PY := $(KERNEL_BIN)/dietcode-agent-chat.py
+PACKAGED_AGENT_BUNDLE_PY := $(KERNEL_BIN)/dietcode_agent_bundle.py
+PACKAGED_MUTATION_AUTHORITY_PY := $(KERNEL_BIN)/dietcode_mutation_authority.py
+PACKAGED_DIFF_AUTHORITY_PY := $(KERNEL_BIN)/dietcode_diff_authority.py
+PACKAGED_VERIFICATION_AUTHORITY_PY := $(KERNEL_BIN)/dietcode_verification_authority.py
+PACKAGED_BUNDLE_MANIFEST := $(KERNEL_RESOURCES)/dietcode-agent-bundle.manifest.json
+LEGACY_PACKAGED_BUNDLE_MANIFEST := $(APP_RESOURCES)/dietcode-agent-bundle.manifest.json
 BUNDLE_MANIFEST_SRC := resources/dietcode-agent-bundle.manifest.json
 TEST_BIN := $(BUILD_DIR)/test_editor
 
@@ -51,30 +63,53 @@ CORE_CPP := \
 	src/filesystem/FileService.cpp \
 	src/syntax/Tokenizer.cpp
 
-MACOS_MM := \
-	src/platform/macos/main.mm \
-	src/platform/macos/ui/app/MacAppDelegate.mm \
-	src/platform/macos/ui/controllers/MacWindow.mm \
-	src/platform/macos/ui/controllers/categories/MacWindow+Layout.mm \
-	src/platform/macos/ui/controllers/categories/MacWindow+Tabs.mm \
-	src/platform/macos/ui/controllers/categories/MacWindow+Files.mm \
-	src/platform/macos/ui/controllers/categories/MacWindow+Search.mm \
-	src/platform/macos/ui/controllers/categories/MacWindow+Git.mm \
-	src/platform/macos/ui/controllers/categories/MacWindow+Language.mm \
-	src/platform/macos/ui/controllers/categories/MacWindow+Diagnostics.mm \
-	src/platform/macos/ui/controllers/categories/MacWindow+RunTerminal.mm \
-	src/platform/macos/ui/controllers/categories/MacWindow+Settings.mm \
-	src/platform/macos/ui/controllers/categories/MacWindow+Recovery.mm \
-	src/platform/macos/ui/controllers/categories/MacWindow+AgentAPI.mm \
-	src/platform/macos/ui/controllers/categories/MacWindow+AgentSidebar.mm \
-	src/platform/macos/MacAgentSidebar.mm \
-	src/platform/macos/ui/controllers/categories/MacWindow+CommandPalette.mm \
-	src/platform/macos/ui/utils/MacWindowUtilities.mm \
-	src/platform/macos/ui/views/MacEditorComponents.mm \
-	src/platform/macos/ui/app/MacMenu.mm \
-	src/platform/macos/ui/app/MacFileDialog.mm \
-	src/platform/macos/ui/app/MacClipboard.mm \
-	src/platform/macos/ui/views/MacTextRendering.mm \
+WORKSPACE_MM := \
+	legacy_ui/macos/ui/controllers/MacWindow.mm \
+	legacy_ui/macos/ui/controllers/categories/MacWindow+Layout.mm \
+	legacy_ui/macos/ui/controllers/categories/MacWindow+Tabs.mm \
+	legacy_ui/macos/ui/controllers/categories/MacWindow+Files.mm \
+	legacy_ui/macos/ui/controllers/categories/MacWindow+Search.mm \
+	legacy_ui/macos/ui/controllers/categories/MacWindow+Git.mm \
+	legacy_ui/macos/ui/controllers/categories/MacWindow+Language.mm \
+	legacy_ui/macos/ui/controllers/categories/MacWindow+Diagnostics.mm \
+	legacy_ui/macos/ui/controllers/categories/MacWindow+RunTerminal.mm \
+	legacy_ui/macos/ui/controllers/categories/MacWindow+Settings.mm \
+	legacy_ui/macos/ui/controllers/categories/MacWindow+Recovery.mm \
+	legacy_ui/macos/ui/controllers/categories/MacWindow+AgentAPI.mm \
+	legacy_ui/macos/ui/controllers/categories/MacWindow+AgentSidebar.mm \
+	legacy_ui/macos/MacAgentSidebar.mm \
+	legacy_ui/macos/ui/controllers/categories/MacWindow+CommandPalette.mm \
+	legacy_ui/macos/ui/utils/MacWindowUtilities.mm \
+	legacy_ui/macos/ui/views/MacEditorComponents.mm \
+	legacy_ui/macos/ui/app/MacFileDialog.mm \
+	legacy_ui/macos/ui/app/MacClipboard.mm \
+	legacy_ui/macos/ui/views/MacTextRendering.mm
+
+LEGACY_UI_MM := \
+	legacy_ui/macos/main.mm \
+	legacy_ui/macos/ui/app/MacAppDelegate.mm \
+	legacy_ui/macos/ui/app/MacMenu.mm
+
+KERNEL_WORKSPACE_CPP := \
+	src/kernel/workspace/WorkspaceFileOps.cpp \
+	src/kernel/workspace/WorkspacePatchOps.cpp \
+	src/kernel/workspace/WorkspaceVerifyOps.cpp \
+	src/kernel/workspace/WorkspaceIndex.cpp \
+	src/kernel/workspace/WorkspaceSession.cpp
+
+KERNEL_RUNTIME_MM := \
+	src/kernel/KernelAppDelegate.mm \
+	src/kernel/KernelRuntime.mm \
+	src/kernel/workspace/WorkspaceSessionBridge.mm
+
+KERNEL_APP_MM := \
+	src/kernel/main.mm \
+	$(KERNEL_RUNTIME_MM)
+
+LEGACY_CONTROL_MM := \
+	legacy_ui/macos/control/DietCodeLegacyWindowBridge.mm
+
+CONTROL_MM := \
 	src/platform/macos/control/MacControlServer.mm \
 	src/platform/macos/control/categories/MacControlServer+File.mm \
 	src/platform/macos/control/categories/MacControlServer+Editor.mm \
@@ -112,11 +147,17 @@ MACOS_MM := \
 	src/filesystem/FileWatcher.mm \
 	src/core/LSPClient.mm
 
-AGENT_CHAT_BUNDLE := $(APP_BINARY) $(PACKAGED_BRIDGE) $(PACKAGED_BRIDGE_CLI) $(PACKAGED_HERMES_PLUGIN) $(PACKAGED_ENABLE_AGENT) $(PACKAGED_ENABLE_AGENT_PY) $(PACKAGED_AGENT_CHAT) $(PACKAGED_AGENT_CHAT_PY) $(PACKAGED_AGENT_BUNDLE_PY) $(PACKAGED_MUTATION_AUTHORITY_PY) $(PACKAGED_DIFF_AUTHORITY_PY) $(PACKAGED_VERIFICATION_AUTHORITY_PY) $(PACKAGED_BUNDLE_MANIFEST)
+KERNEL_OBJCXXFLAGS := $(OBJCXXFLAGS) -DDIETCODE_KERNEL_BUILD
+KERNEL_SOURCES := $(KERNEL_WORKSPACE_CPP) src/filesystem/FileService.cpp $(CONTROL_MM) $(KERNEL_APP_MM)
+LEGACY_SOURCES := $(KERNEL_WORKSPACE_CPP) $(CORE_CPP) $(WORKSPACE_MM) $(CONTROL_MM) $(KERNEL_RUNTIME_MM) $(LEGACY_UI_MM) $(LEGACY_CONTROL_MM)
 
-.PHONY: all app agent-chat-bundle agent-bridge agent-bridge-fast run headless ensure-socket restart-agent-server restart-agent-server-fast agent-ready agent-status agent-ping agent-methods agent-capabilities agent-self-test test-agent-offline control-smoke test-task-health test-rpc-transaction test-ergonomics test-grep-diff-tooling test-runtime-determinism test-transaction-kernel test-harness-realism test-deterministic-retrieval test-agent-workflow-smoke test-agent-shell-tooling test-agent-shell-tooling-fast test-agent-shell-workflows test-agent-shell-workflows-fast test-authority-boundaries test-authority-boundaries-fast test-agent-bridge-authority test-cli-agent-failures test-docs-code-drift test-partial-success-closure test-broccoliq-runtime-memory test-broccoliq-runtime-memory-fast test-runtime-native-integration test-runtime-native-integration-fast test-agent-bridge test-agent-bridge-fast test-agent-integration sync-hermes-plugin enable-hermes-agent test-dietcode-enable-agent test-dietcode-agent-chat test-agent-chat-workspace-switch verify-agent-chat-sidebar smoke-agent-chat-live setup-hermes-bridge test-hermes-bridge-audit test-hermes-bridge-workflows hermes-ide-watchdog verify-hermes-bridge agent-integration verify-agent-runtime verify-agent-runtime-fast verify-agent-runtime-full verify-agent-runtime-full-fast benchmark-agent-success benchmark-agent-success-fast benchmark-agent-success-report test-agent-success-report test clean
+KERNEL_BUNDLE := $(KERNEL_BINARY) $(PACKAGED_BRIDGE) $(PACKAGED_BRIDGE_CLI) $(PACKAGED_HERMES_PLUGIN) $(PACKAGED_ENABLE_AGENT) $(PACKAGED_ENABLE_AGENT_PY) $(PACKAGED_AGENT_CHAT) $(PACKAGED_AGENT_CHAT_PY) $(PACKAGED_AGENT_BUNDLE_PY) $(PACKAGED_MUTATION_AUTHORITY_PY) $(PACKAGED_DIFF_AUTHORITY_PY) $(PACKAGED_VERIFICATION_AUTHORITY_PY) $(PACKAGED_BUNDLE_MANIFEST)
+AGENT_CHAT_BUNDLE := $(KERNEL_BUNDLE)
+LEGACY_AGENT_CHAT_BUNDLE := $(APP_BINARY) $(LEGACY_PACKAGED_BRIDGE) $(LEGACY_PACKAGED_BRIDGE_CLI) $(LEGACY_PACKAGED_HERMES_PLUGIN) $(LEGACY_PACKAGED_BUNDLE_MANIFEST)
 
-all: app test
+.PHONY: all kernel app legacy-app agent-chat-bundle agent-bridge agent-bridge-fast cockpit cockpit-dev run headless ensure-socket restart-agent-server restart-agent-server-fast agent-ready agent-status agent-ping agent-methods agent-capabilities agent-self-test test-agent-offline control-smoke test-task-health test-rpc-transaction test-ergonomics test-grep-diff-tooling test-runtime-determinism test-transaction-kernel test-harness-realism test-deterministic-retrieval test-agent-workflow-smoke test-agent-shell-tooling test-agent-shell-tooling-fast test-agent-shell-workflows test-agent-shell-workflows-fast test-authority-boundaries test-authority-boundaries-fast test-agent-bridge-authority test-cli-agent-failures test-docs-code-drift test-partial-success-closure test-broccoliq-runtime-memory test-broccoliq-runtime-memory-fast test-runtime-native-integration test-runtime-native-integration-fast test-agent-bridge test-agent-bridge-fast test-agent-integration sync-hermes-plugin enable-hermes-agent test-dietcode-enable-agent test-dietcode-agent-chat test-agent-chat-workspace-switch verify-agent-chat-sidebar smoke-agent-chat-live setup-hermes-bridge test-hermes-bridge-audit test-hermes-bridge-workflows hermes-ide-watchdog verify-hermes-bridge agent-integration verify-agent-runtime verify-agent-runtime-fast verify-agent-runtime-full verify-agent-runtime-full-fast benchmark-agent-success benchmark-agent-success-fast benchmark-agent-success-report test-agent-success-report test clean
+
+all: kernel test
 
 $(BUILD_DIR):
 	mkdir -p $(BUILD_DIR)
@@ -130,22 +171,38 @@ $(APP_RESOURCES):
 $(APP_BIN):
 	mkdir -p $(APP_BIN)
 
+$(KERNEL_RESOURCES):
+	mkdir -p $(KERNEL_RESOURCES)
+
+$(KERNEL_BIN):
+	mkdir -p $(KERNEL_BIN)
+
 agent-bridge-fast:
 	cd $(AGENT_BRIDGE_DIR) && npm install --silent && npm run build
 
 agent-bridge: agent-bridge-fast
 
-$(PACKAGED_BRIDGE): agent-bridge-fast
+$(PACKAGED_BRIDGE): agent-bridge-fast $(KERNEL_RESOURCES)
 	rm -rf $(PACKAGED_BRIDGE)
 	mkdir -p $(PACKAGED_BRIDGE)
 	cp -R $(AGENT_BRIDGE_DIR)/dist $(PACKAGED_BRIDGE)/
 	cp $(AGENT_BRIDGE_DIR)/package.json $(PACKAGED_BRIDGE)/
 
-$(PACKAGED_BRIDGE_CLI): $(APP_BIN) resources/bin/dietcode-agent-client
+$(PACKAGED_BRIDGE_CLI): $(KERNEL_BIN) resources/bin/dietcode-agent-client
 	cp resources/bin/dietcode-agent-client $(PACKAGED_BRIDGE_CLI)
 	chmod +x $(PACKAGED_BRIDGE_CLI)
 
-$(PACKAGED_HERMES_PLUGIN): $(APP_RESOURCES)
+$(LEGACY_PACKAGED_BRIDGE): agent-bridge-fast $(APP_RESOURCES)
+	rm -rf $(LEGACY_PACKAGED_BRIDGE)
+	mkdir -p $(LEGACY_PACKAGED_BRIDGE)
+	cp -R $(AGENT_BRIDGE_DIR)/dist $(LEGACY_PACKAGED_BRIDGE)/
+	cp $(AGENT_BRIDGE_DIR)/package.json $(LEGACY_PACKAGED_BRIDGE)/
+
+$(LEGACY_PACKAGED_BRIDGE_CLI): $(APP_BIN) resources/bin/dietcode-agent-client
+	cp resources/bin/dietcode-agent-client $(LEGACY_PACKAGED_BRIDGE_CLI)
+	chmod +x $(LEGACY_PACKAGED_BRIDGE_CLI)
+
+$(PACKAGED_HERMES_PLUGIN): $(KERNEL_RESOURCES)
 	@if [ ! -f "$(HERMES_PLUGIN_SRC)/plugin.yaml" ]; then \
 		echo "→ Syncing Hermes plugin (first build)"; \
 		./scripts/sync-hermes-plugin.sh; \
@@ -155,36 +212,48 @@ $(PACKAGED_HERMES_PLUGIN): $(APP_RESOURCES)
 	rsync -a --exclude broccolidb/node_modules --exclude broccolidb/scratch --exclude '__pycache__' --exclude '*.pyc' \
 		$(HERMES_PLUGIN_SRC)/ $(PACKAGED_HERMES_PLUGIN)/
 
-$(PACKAGED_ENABLE_AGENT): $(APP_BIN) resources/bin/dietcode-enable-agent
+$(LEGACY_PACKAGED_HERMES_PLUGIN): $(APP_RESOURCES)
+	@if [ ! -f "$(HERMES_PLUGIN_SRC)/plugin.yaml" ]; then \
+		./scripts/sync-hermes-plugin.sh; \
+	fi
+	rm -rf $(LEGACY_PACKAGED_HERMES_PLUGIN)
+	mkdir -p $(LEGACY_PACKAGED_HERMES_PLUGIN)
+	rsync -a --exclude broccolidb/node_modules --exclude broccolidb/scratch --exclude '__pycache__' --exclude '*.pyc' \
+		$(HERMES_PLUGIN_SRC)/ $(LEGACY_PACKAGED_HERMES_PLUGIN)/
+
+$(LEGACY_PACKAGED_BUNDLE_MANIFEST): $(BUNDLE_MANIFEST_SRC) $(APP_RESOURCES)
+	cp $(BUNDLE_MANIFEST_SRC) $(LEGACY_PACKAGED_BUNDLE_MANIFEST)
+
+$(PACKAGED_ENABLE_AGENT): $(KERNEL_BIN) resources/bin/dietcode-enable-agent
 	cp resources/bin/dietcode-enable-agent $(PACKAGED_ENABLE_AGENT)
 	chmod +x $(PACKAGED_ENABLE_AGENT)
 
 $(BUNDLE_MANIFEST_SRC): resources/Info.plist agent-bridge/package.json integrations/hermes-dietcode-plugin/plugin.yaml
 	python3 scripts/generate_bundle_manifest.py -o $(BUNDLE_MANIFEST_SRC)
 
-$(PACKAGED_BUNDLE_MANIFEST): $(BUNDLE_MANIFEST_SRC) $(APP_RESOURCES)
+$(PACKAGED_BUNDLE_MANIFEST): $(BUNDLE_MANIFEST_SRC) $(KERNEL_RESOURCES)
 	cp $(BUNDLE_MANIFEST_SRC) $(PACKAGED_BUNDLE_MANIFEST)
 
-$(PACKAGED_ENABLE_AGENT_PY): scripts/dietcode_enable_agent.py $(APP_BIN)
+$(PACKAGED_ENABLE_AGENT_PY): scripts/dietcode_enable_agent.py $(KERNEL_BIN)
 	cp scripts/dietcode_enable_agent.py $(PACKAGED_ENABLE_AGENT_PY)
 
-$(PACKAGED_AGENT_CHAT): $(APP_BIN) resources/bin/dietcode-agent-chat
+$(PACKAGED_AGENT_CHAT): $(KERNEL_BIN) resources/bin/dietcode-agent-chat
 	cp resources/bin/dietcode-agent-chat $(PACKAGED_AGENT_CHAT)
 	chmod +x $(PACKAGED_AGENT_CHAT)
 
-$(PACKAGED_AGENT_CHAT_PY): scripts/dietcode_agent_chat.py $(APP_BIN)
+$(PACKAGED_AGENT_CHAT_PY): scripts/dietcode_agent_chat.py $(KERNEL_BIN)
 	cp scripts/dietcode_agent_chat.py $(PACKAGED_AGENT_CHAT_PY)
 
-$(PACKAGED_AGENT_BUNDLE_PY): scripts/dietcode_agent_bundle.py $(APP_BIN)
+$(PACKAGED_AGENT_BUNDLE_PY): scripts/dietcode_agent_bundle.py $(KERNEL_BIN)
 	cp scripts/dietcode_agent_bundle.py $(PACKAGED_AGENT_BUNDLE_PY)
 
-$(PACKAGED_MUTATION_AUTHORITY_PY): scripts/dietcode_mutation_authority.py $(APP_BIN)
+$(PACKAGED_MUTATION_AUTHORITY_PY): scripts/dietcode_mutation_authority.py $(KERNEL_BIN)
 	cp scripts/dietcode_mutation_authority.py $(PACKAGED_MUTATION_AUTHORITY_PY)
 
-$(PACKAGED_DIFF_AUTHORITY_PY): scripts/dietcode_diff_authority.py $(APP_BIN)
+$(PACKAGED_DIFF_AUTHORITY_PY): scripts/dietcode_diff_authority.py $(KERNEL_BIN)
 	cp scripts/dietcode_diff_authority.py $(PACKAGED_DIFF_AUTHORITY_PY)
 
-$(PACKAGED_VERIFICATION_AUTHORITY_PY): scripts/dietcode_verification_authority.py $(APP_BIN)
+$(PACKAGED_VERIFICATION_AUTHORITY_PY): scripts/dietcode_verification_authority.py $(KERNEL_BIN)
 	cp scripts/dietcode_verification_authority.py $(PACKAGED_VERIFICATION_AUTHORITY_PY)
 
 sync-hermes-plugin:
@@ -193,34 +262,49 @@ sync-hermes-plugin:
 enable-hermes-agent:
 	./scripts/enable-hermes-agent.sh
 
-$(APP_BINARY): $(APP_MACOS) $(CORE_CPP) $(MACOS_MM)
-	$(CXX) $(OBJCXXFLAGS) $(CORE_CPP) $(MACOS_MM) -framework Cocoa -lsqlite3 -o $(APP_BINARY)
+$(KERNEL_BINARY): $(BUILD_DIR) $(KERNEL_SOURCES)
+	$(CXX) $(KERNEL_OBJCXXFLAGS) $(KERNEL_SOURCES) -framework Cocoa -lsqlite3 -o $(KERNEL_BINARY)
 
-agent-chat-bundle: $(AGENT_CHAT_BUNDLE)
+$(APP_BINARY): $(APP_MACOS) $(LEGACY_SOURCES)
+	$(CXX) $(OBJCXXFLAGS) $(LEGACY_SOURCES) -framework Cocoa -lsqlite3 -o $(APP_BINARY)
 
-app: $(APP_RESOURCES) $(APP_BIN) $(AGENT_CHAT_BUNDLE)
+kernel: $(KERNEL_RESOURCES) $(KERNEL_BIN) $(KERNEL_BUNDLE)
+
+agent-chat-bundle: $(KERNEL_BUNDLE)
+
+app: kernel
+
+legacy-app: $(APP_RESOURCES) $(APP_BIN) $(LEGACY_AGENT_CHAT_BUNDLE)
 	cp resources/Info.plist $(APP_CONTENTS)/Info.plist
 	if [ -f resources/AppIcon.icns ]; then cp resources/AppIcon.icns $(APP_RESOURCES)/AppIcon.icns; fi
 
-run: app
+cockpit-dev:
+	cd cockpit && npm install && npm run dev
+
+cockpit:
+	cd cockpit && npm install && npm run build
+
+run: legacy-app
 	open $(APP_BUNDLE)
 
-headless: app
-	$(APP_MACOS)/$(APP_NAME) --headless
+headless: kernel
+	$(KERNEL_BINARY)
 
-ensure-socket: app
-	$(APP_MACOS)/$(APP_NAME) --ensure-socket
+ensure-socket: kernel
+	$(KERNEL_BINARY) --ensure-socket
 
-restart-agent-server: app
+restart-agent-server: kernel
+	-pkill -f "$(KERNEL_BINARY)" 2>/dev/null || true
 	-pkill -f "$(APP_MACOS)/$(APP_NAME)" 2>/dev/null || true
 	sleep 0.5
-	DIETCODE_REPO_ROOT=$(CURDIR) $(APP_MACOS)/$(APP_NAME) --ensure-socket
+	DIETCODE_REPO_ROOT=$(CURDIR) $(KERNEL_BINARY) --ensure-socket
 
 # Restart agent server without rebuilding — assumes binary already matches HEAD.
 restart-agent-server-fast:
+	-pkill -f "$(KERNEL_BINARY)" 2>/dev/null || true
 	-pkill -f "$(APP_MACOS)/$(APP_NAME)" 2>/dev/null || true
 	sleep 0.5
-	DIETCODE_REPO_ROOT=$(CURDIR) $(APP_MACOS)/$(APP_NAME) --ensure-socket
+	DIETCODE_REPO_ROOT=$(CURDIR) $(KERNEL_BINARY) --ensure-socket
 
 agent-ready: app
 	python3 scripts/dietcode_agent_client.py --wait-ready --compact --error-json
@@ -372,10 +456,10 @@ test-dietcode-agent-chat: agent-chat-bundle
 verify-agent-chat-sidebar: agent-chat-bundle
 	python3 scripts/verify_agent_chat_sidebar.py
 
-smoke-agent-chat-live: agent-bridge-fast $(PACKAGED_BRIDGE) $(APP_BINARY) $(PACKAGED_AGENT_CHAT) $(PACKAGED_AGENT_CHAT_PY) $(PACKAGED_AGENT_BUNDLE_PY) $(PACKAGED_MUTATION_AUTHORITY_PY) $(PACKAGED_DIFF_AUTHORITY_PY) $(PACKAGED_VERIFICATION_AUTHORITY_PY) $(PACKAGED_ENABLE_AGENT_PY) $(PACKAGED_BUNDLE_MANIFEST) $(PACKAGED_BRIDGE_CLI)
+smoke-agent-chat-live: agent-bridge-fast $(PACKAGED_BRIDGE) $(KERNEL_BINARY) $(PACKAGED_AGENT_CHAT) $(PACKAGED_AGENT_CHAT_PY) $(PACKAGED_AGENT_BUNDLE_PY) $(PACKAGED_MUTATION_AUTHORITY_PY) $(PACKAGED_DIFF_AUTHORITY_PY) $(PACKAGED_VERIFICATION_AUTHORITY_PY) $(PACKAGED_ENABLE_AGENT_PY) $(PACKAGED_BUNDLE_MANIFEST) $(PACKAGED_BRIDGE_CLI)
 	PYTHONUNBUFFERED=1 python3 scripts/smoke_agent_chat_live.py --compact
 
-test-agent-chat-workspace-switch: agent-bridge-fast $(PACKAGED_BRIDGE) $(APP_BINARY) $(PACKAGED_AGENT_BUNDLE_PY) $(PACKAGED_BRIDGE_CLI)
+test-agent-chat-workspace-switch: agent-bridge-fast $(PACKAGED_BRIDGE) $(KERNEL_BINARY) $(PACKAGED_AGENT_BUNDLE_PY) $(PACKAGED_BRIDGE_CLI)
 	python3 scripts/test_agent_chat_workspace_switch.py
 
 test-mutation-authority:

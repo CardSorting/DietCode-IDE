@@ -1,5 +1,12 @@
 #import "MacControlServer.hpp"
+#import "WorkspaceSessionBridge.hpp"
+#ifdef DIETCODE_KERNEL_BUILD
+#import "DietCodeWindowController+ControlHost.h"
+#endif
+#ifndef DIETCODE_KERNEL_BUILD
 #import "MacWindow.hpp"
+#import "DietCodeLegacyWindowBridge.hpp"
+#endif
 #import <CommonCrypto/CommonDigest.h>
 #import "SymbolIndexService.hpp"
 #import "DiffAnalysisService.hpp"
@@ -100,11 +107,7 @@ static const void* kDietCodeReadQueueKey = &kDietCodeReadQueueKey;
 
 @implementation DietCodeControlServer
 
-- (instancetype)initWithWindowController:(DietCodeWindowController*)controller {
-    self = [super init];
-    if (self) {
-        _windowController = controller;
-        _windowBridge = [[DietCodeControlWindowBridge alloc] initWithWindowController:controller];
+- (void)configureServices {
         _searchService = [[MacControlSearchService alloc] initWithWindowBridge:_windowBridge];
         _recoveryStore = [[MacControlRecoveryStore alloc] initWithWindowBridge:_windowBridge];
         _workspaceState = [[MacControlWorkspaceState alloc] init];
@@ -131,6 +134,8 @@ static const void* kDietCodeReadQueueKey = &kDietCodeReadQueueKey;
         _contextSnapshots = [NSMutableDictionary dictionary];
         _contextSnapshotCounter = 0;
         _activeConnections = [NSMutableDictionary dictionary];
+        _eventRingBuffer = [NSMutableArray array];
+        _eventSequence = 0;
         _sessionToken = nil;
         _executionQueue = dispatch_queue_create("com.dietcode.runtime.execution", DISPATCH_QUEUE_SERIAL);
         _readQueue = dispatch_queue_create("com.dietcode.runtime.read", DISPATCH_QUEUE_CONCURRENT);
@@ -149,8 +154,40 @@ static const void* kDietCodeReadQueueKey = &kDietCodeReadQueueKey;
             @"passed": @NO
         };
         _lastComboId = nil;
+}
+
+- (instancetype)initWithWorkspaceSession:(DietCodeWorkspaceSession*)session {
+    self = [super init];
+    if (self) {
+        _isKernelMode = YES;
+        _workspaceSession = session;
+        _windowController = nil;
+        _windowBridge = [[DietCodeControlWindowBridge alloc] initWithWorkspaceSession:session windowController:nil];
+        [self configureServices];
     }
     return self;
+}
+
+#ifndef DIETCODE_KERNEL_BUILD
+- (instancetype)initWithWindowController:(DietCodeWindowController*)controller {
+    self = [super init];
+    if (self) {
+        _isKernelMode = NO;
+        _windowController = controller;
+        _windowBridge = [[DietCodeLegacyWindowBridge alloc] initWithWindowController:controller];
+        _workspaceSession = _windowBridge.workspaceSession;
+        [self configureServices];
+    }
+    return self;
+}
+#endif
+
+- (BOOL)isKernelMode {
+    return _isKernelMode;
+}
+
+- (DietCodeWorkspaceSession*)workspaceSession {
+    return _workspaceSession;
 }
 
 - (NSString*)safeWorkspacePath {
@@ -339,7 +376,9 @@ static const void* kDietCodeReadQueueKey = &kDietCodeReadQueueKey;
     unlink([[dcDir stringByAppendingPathComponent:@"session.token"] UTF8String]);
     
     [self appendLogLine:@"[System] External Control Server stopped."];
-    [_windowController setControlActiveCommand:nil caller:nil];
+    if (_windowController) {
+        [_windowController setControlActiveCommand:nil caller:nil];
+    }
 }
 
 - (void)acceptLoop {
@@ -584,7 +623,37 @@ static const void* kDietCodeReadQueueKey = &kDietCodeReadQueueKey;
         NSString* caller = agentId ?: @"unix_socket";
         NSString* permission = [self permissionLevelForMethod:method params:params];
         
-        if ([method isEqualToString:@"event.subscribe"] || [method isEqualToString:@"event.unsubscribe"]) {
+        if ([method isEqualToString:@"event.subscribe"] || [method isEqualToString:@"event.unsubscribe"] || [method isEqualToString:@"events.recent"]) {
+            if ([method isEqualToString:@"events.recent"]) {
+                NSInteger limit = params[@"limit"] ? [params[@"limit"] integerValue] : 50;
+                if (limit < 1) limit = 1;
+                if (limit > 500) limit = 500;
+                NSString* afterSeq = params[@"afterSequence"];
+                NSInteger afterSequence = afterSeq.length > 0 ? [afterSeq integerValue] : 0;
+                NSArray* typesFilter = params[@"types"];
+                NSMutableArray* events = [NSMutableArray array];
+                @synchronized(self) {
+                    for (NSDictionary* event in _eventRingBuffer) {
+                        NSInteger seq = [event[@"sequence"] integerValue];
+                        if (seq <= afterSequence) continue;
+                        if ([typesFilter isKindOfClass:[NSArray class]] && typesFilter.count > 0) {
+                            NSString* eventType = event[@"type"];
+                            if (![typesFilter containsObject:eventType] && ![typesFilter containsObject:@"*"]) continue;
+                        }
+                        [events addObject:event];
+                    }
+                }
+                BOOL truncated = events.count > (NSUInteger)limit;
+                if (truncated) {
+                    events = [[events subarrayWithRange:NSMakeRange(events.count - (NSUInteger)limit, (NSUInteger)limit)] mutableCopy];
+                }
+                [self sendSuccess:reqId result:@{
+                    @"events": events,
+                    @"truncated": @(truncated),
+                    @"mode": @"events_recent",
+                } clientFd:clientFd];
+                return;
+            }
             NSArray* types = params[@"types"];
             if (![types isKindOfClass:[NSArray class]] || types.count == 0) {
                 [self sendError:reqId code:@"invalid_params" message:@"types must be a non-empty array of strings." clientFd:clientFd];
@@ -616,14 +685,16 @@ static const void* kDietCodeReadQueueKey = &kDietCodeReadQueueKey;
             return;
         }
         
-        dispatch_async(dispatch_get_main_queue(), ^{
-            [_windowController setControlActiveCommand:method caller:caller];
-        });
+        if (_windowController) {
+            dispatch_async(dispatch_get_main_queue(), ^{
+                [_windowController setControlActiveCommand:method caller:caller];
+            });
+        }
         
         __block BOOL allowed = YES;
         if ([permission isEqualToString:@"Destructive"]) {
             NSInteger autonomy = [self safeAgentAutonomyLevel];
-            if (autonomy == 1 || _windowController.isHeadless) {
+            if (autonomy == 1 || _isKernelMode || _windowController.isHeadless) {
                 allowed = YES;
             } else if (autonomy == 2) {
                 allowed = [self isDestructiveRequestSafe:method params:params];
@@ -645,7 +716,7 @@ static const void* kDietCodeReadQueueKey = &kDietCodeReadQueueKey;
                 });
                 dispatch_semaphore_wait(sem, DISPATCH_TIME_FOREVER);
             }
-        } else if ([permission isEqualToString:@"Execute"]) {
+        } else if ([permission isEqualToString:@"Execute"] && _windowController) {
             dispatch_async(dispatch_get_main_queue(), ^{
                 if ([method hasPrefix:@"terminal"]) {
                     [[self windowController] showBottomPanelTab:@"terminal"];
@@ -657,9 +728,11 @@ static const void* kDietCodeReadQueueKey = &kDietCodeReadQueueKey;
         
         if (!allowed) {
             [self sendError:reqId code:@"permission_denied" message:@"User rejected the command execution." clientFd:clientFd];
-            dispatch_async(dispatch_get_main_queue(), ^{
-                [_windowController setControlActiveCommand:nil caller:caller];
-            });
+            if (_windowController) {
+                dispatch_async(dispatch_get_main_queue(), ^{
+                    [_windowController setControlActiveCommand:nil caller:caller];
+                });
+            }
             
             auto endTime = std::chrono::high_resolution_clock::now();
             auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(endTime - startTime).count();
@@ -711,9 +784,11 @@ static const void* kDietCodeReadQueueKey = &kDietCodeReadQueueKey;
             dispatch_semaphore_wait(execSem, DISPATCH_TIME_FOREVER);
         }
         
-        dispatch_async(dispatch_get_main_queue(), ^{
-            [_windowController setControlActiveCommand:nil caller:caller];
-        });
+        if (_windowController) {
+            dispatch_async(dispatch_get_main_queue(), ^{
+                [_windowController setControlActiveCommand:nil caller:caller];
+            });
+        }
         
         auto endTime = std::chrono::high_resolution_clock::now();
         auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(endTime - startTime).count();
@@ -878,61 +953,31 @@ static const void* kDietCodeReadQueueKey = &kDietCodeReadQueueKey;
 - (NSDictionary*)runVerificationCommand:(NSString*)command cwd:(NSString*)cwd {
     NSString* ws = [self safeWorkspacePath];
     NSString* runCwd = cwd.length > 0 ? cwd : ws;
-    
-    _lastVerifyCommand = [command copy];
-    _lastVerifyStartedAt = [NSDate date];
-    _lastVerifyFinishedAt = nil;
-    _lastVerifyExitCode = nil;
-    
-    _lastVerifyStatus = @{
-        @"command": command,
-        @"state": @"running",
-        @"exitCode": [NSNull null],
-        @"passed": @NO,
-        @"startedAt": ISODateString(_lastVerifyStartedAt)
-    };
-    
+
     [self appendLogLine:[NSString stringWithFormat:@"[Verify] Starting command: %@", command]];
+    _lastVerifyStartedAt = [NSDate date];
+    _lastVerifyCommand = [command copy];
 
-    std::vector<std::string> args = {"-c", [command UTF8String]};
-    using namespace dietcode::platform::macos;
-    SubprocessResult res = SubprocessRunner::run("/bin/zsh", args, [runCwd UTF8String] ?: "", 60.0);
-    
+    NSDictionary* status = [_workspaceSession runVerificationCommand:command cwd:runCwd];
+    _lastVerifyStatus = status;
     _lastVerifyFinishedAt = [NSDate date];
-    _lastVerifyExitCode = @(res.exitCode);
-    
-    if (res.timedOut) {
-        _lastVerifyStatus = @{
-            @"command": command,
-            @"state": @"complete",
-            @"exitCode": @(-2),
-            @"passed": @NO,
-            @"startedAt": ISODateString(_lastVerifyStartedAt),
-            @"finishedAt": ISODateString(_lastVerifyFinishedAt),
-            @"error": @"Command timed out after 60s"
-        };
+    _lastVerifyExitCode = status[@"exitCode"];
+
+    if ([status[@"timedOut"] boolValue]) {
         [self appendLogLine:@"[Verify] Error: Command timed out after 60s"];
-        return _lastVerifyStatus;
+    }
+    NSString* stdoutText = status[@"stdout"];
+    if (stdoutText.length > 0) {
+        [self appendLogLine:stdoutText];
+    }
+    NSString* stderrText = status[@"stderr"];
+    if (stderrText.length > 0) {
+        [self appendLogLine:[NSString stringWithFormat:@"[Stderr] %@", stderrText]];
     }
 
-    if (!res.stdOut.empty()) {
-        [self appendLogLine:[NSString stringWithUTF8String:res.stdOut.c_str()]];
-    }
-    if (!res.stdErr.empty()) {
-        [self appendLogLine:[NSString stringWithFormat:@"[Stderr] %s", res.stdErr.c_str()]];
-    }
-    
-    NSTimeInterval duration = [_lastVerifyFinishedAt timeIntervalSinceDate:_lastVerifyStartedAt];
-    _lastVerifyStatus = @{
-        @"command": command,
-        @"state": @"complete",
-        @"exitCode": @(res.exitCode),
-        @"passed": @(res.exitCode == 0),
-        @"startedAt": ISODateString(_lastVerifyStartedAt),
-        @"finishedAt": ISODateString(_lastVerifyFinishedAt),
-        @"durationMs": @((NSInteger)(duration * 1000.0))
-    };
-    
+    [self notifyStructuredEvent:@"verify.complete"
+                         detail:[NSString stringWithFormat:@"exit=%@", status[@"exitCode"]]
+                        payload:status];
     return _lastVerifyStatus;
 }
 
@@ -1527,13 +1572,20 @@ static const void* kDietCodeReadQueueKey = &kDietCodeReadQueueKey;
 }
 
 - (void)appendLogLine:(NSString*)line {
-    if ([NSThread isMainThread]) {
-        [_windowController appendControlLogLine:line];
+    if (_windowController) {
+        if ([NSThread isMainThread]) {
+            [_windowController appendControlLogLine:line];
+            return;
+        }
+        dispatch_async(dispatch_get_main_queue(), ^{
+            [_windowController appendControlLogLine:line];
+        });
         return;
     }
-    dispatch_async(dispatch_get_main_queue(), ^{
-        [_windowController appendControlLogLine:line];
-    });
+    if (line.length > 0) {
+        NSLog(@"%@", line);
+        [self notifyStructuredEvent:@"kernel.log" detail:line payload:nil];
+    }
 }
 
 - (void)logAuditMethod:(NSString*)method 
@@ -1602,23 +1654,53 @@ static const void* kDietCodeReadQueueKey = &kDietCodeReadQueueKey;
 }
 
 - (void)notifyEvent:(NSString*)type detail:(NSString*)detail {
+    [self notifyStructuredEvent:type detail:detail payload:nil];
+}
+
+- (void)notifyStructuredEvent:(NSString*)type detail:(NSString*)detail payload:(NSDictionary*)payload {
+    NSString* eventType = type ?: @"unknown";
+    NSString* eventDetail = detail ?: @"";
+    NSDateFormatter* iso = [[NSDateFormatter alloc] init];
+    iso.locale = [NSLocale localeWithLocaleIdentifier:@"en_US_POSIX"];
+    iso.dateFormat = @"yyyy-MM-dd'T'HH:mm:ss.SSSZ";
+    NSString* timestamp = [iso stringFromDate:[NSDate date]];
+
+    NSDictionary* structuredEvent = nil;
+    @synchronized(self) {
+        _eventSequence += 1;
+        NSMutableDictionary* eventRecord = [@{
+            @"id": [NSString stringWithFormat:@"evt-%lld", (long long)_eventSequence],
+            @"sequence": @(_eventSequence),
+            @"timestamp": timestamp,
+            @"type": eventType,
+            @"source": @"kernel",
+            @"detail": eventDetail,
+        } mutableCopy];
+        if ([payload isKindOfClass:[NSDictionary class]] && payload.count > 0) {
+            eventRecord[@"payload"] = payload;
+        }
+        structuredEvent = [eventRecord copy];
+        [_eventRingBuffer addObject:structuredEvent];
+        static const NSInteger kMaxEventRingSize = 500;
+        while ((NSInteger)_eventRingBuffer.count > kMaxEventRingSize) {
+            [_eventRingBuffer removeObjectAtIndex:0];
+        }
+    }
+
     NSDictionary* notification = @{
         @"method": @"event.emitted",
-        @"params": @{
-            @"type": type ?: @"unknown",
-            @"detail": detail ?: @""
-        }
+        @"params": structuredEvent,
     };
     NSData* data = [NSJSONSerialization dataWithJSONObject:notification options:0 error:nil];
     if (!data) return;
-    
+
     NSMutableData* frame = [data mutableCopy];
     [frame appendBytes:"\n" length:1];
-    
+
     @synchronized(self) {
         NSMutableArray* deadConns = [NSMutableArray array];
         for (DietCodeClientConnection* conn in [_activeConnections allValues]) {
-            if ([conn.subscriptions containsObject:type] || [conn.subscriptions containsObject:@"*"]) {
+            if ([conn.subscriptions containsObject:eventType] || [conn.subscriptions containsObject:@"*"]) {
                 ssize_t written = write(conn.fd, frame.bytes, frame.length);
                 if (written < 0) {
                     if (errno == EPIPE || errno == EBADF) {

@@ -156,7 +156,8 @@ NSArray<NSDictionary*>* MacControlRPCMethodDescriptions(void) {
             @{ @"name": @"session.clearHistory", @"permission": @"Read", @"params": @{}, @"returns": @{ @"cleared": @"boolean" } },
             @{ @"name": @"system.info", @"permission": @"Read", @"params": @{}, @"returns": @{ @"os": @"string", @"arch": @"string", @"memoryGB": @"number", @"cpuCount": @"number", @"appVersion": @"string" } },
             @{ @"name": @"event.subscribe", @"permission": @"Read", @"params": @{ @"types": @"non-empty string array" }, @"returns": @{ @"subscribed": @"boolean", @"types": @"array" } },
-            @{ @"name": @"event.unsubscribe", @"permission": @"Read", @"params": @{ @"types": @"non-empty string array" }, @"returns": @{ @"unsubscribed": @"boolean", @"types": @"array" } }
+            @{ @"name": @"event.unsubscribe", @"permission": @"Read", @"params": @{ @"types": @"non-empty string array" }, @"returns": @{ @"unsubscribed": @"boolean", @"types": @"array" } },
+            @{ @"name": @"events.recent", @"permission": @"Read", @"params": @{ @"limit": @"number optional", @"afterSequence": @"number optional", @"types": @"string array optional" }, @"returns": @{ @"events": @"array", @"truncated": @"boolean", @"mode": @"string" } }
         ];
     });
     return methods;

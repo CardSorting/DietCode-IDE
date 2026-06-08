@@ -1,5 +1,9 @@
 #import "MacControlServer+Private.hpp"
+#ifndef DIETCODE_KERNEL_BUILD
 #import "MacWindow.hpp"
+#else
+#import "DietCodeWindowController+ControlHost.h"
+#endif
 #import "MacControlSupport.hpp"
 #import "MacControlPathSecurity.hpp"
 #import "SubprocessRunner.hpp"
@@ -61,7 +65,12 @@
         BOOL show = params[@"show"] ? [params[@"show"] boolValue] : YES;
         
         NSString* errStr = nil;
-        BOOL ok = [self.windowController runTerminalCommand:command cwd:cwd show:show errorOut:&errStr];
+        if (self.isKernelMode || !self.windowController) {
+            *outErrCode = @"ui_unavailable";
+            *outErrMsg = @"Interactive terminal is unavailable in kernel mode. Use shell.run.";
+            return;
+        }
+        BOOL ok = [(id)self.windowController runTerminalCommand:command cwd:cwd show:show errorOut:&errStr];
         if (!ok) {
             *outErrCode = @"terminal_failed";
             *outErrMsg = errStr ?: @"Failed to start terminal command.";
@@ -72,7 +81,9 @@
     }
     
     if ([method isEqualToString:@"terminal.stop"]) {
-        [self.windowController stopTerminalCommand];
+        if (!self.isKernelMode && self.windowController) {
+            [(id)self.windowController stopTerminalCommand];
+        }
         *outResult = @{ @"stopped": @YES };
         return;
     }
@@ -84,7 +95,9 @@
     }
     
     if ([method isEqualToString:@"terminal.clear"]) {
-        [self.windowController clearTerminalOutput];
+        if (!self.isKernelMode && self.windowController) {
+            [(id)self.windowController clearTerminalOutput];
+        }
         *outResult = @{ @"cleared": @YES };
         return;
     }

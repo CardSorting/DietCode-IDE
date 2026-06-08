@@ -1,5 +1,9 @@
 #import "MacControlServer+Private.hpp"
+#ifndef DIETCODE_KERNEL_BUILD
 #import "MacWindow.hpp"
+#else
+#import "DietCodeWindowController+ControlHost.h"
+#endif
 #import "MacControlSupport.hpp"
 #import "MacControlPathSecurity.hpp"
 #import "WorkspaceAnalysisService.hpp"
@@ -372,12 +376,7 @@ static NSArray* BuildSymbolHierarchy(NSArray* flatSymbols) {
             return;
         }
         dispatch_async(dispatch_get_main_queue(), ^{
-            if (![self.windowController.sessionLastSearches containsObject:query]) {
-                [self.windowController.sessionLastSearches insertObject:query atIndex:0];
-                if (self.windowController.sessionLastSearches.count > 50) {
-                    [self.windowController.sessionLastSearches removeLastObject];
-                }
-            }
+            [self.workspaceSession appendRecentSearch:query];
         });
 
         NSInteger requestedMax = params[@"maxResults"] ? [params[@"maxResults"] integerValue] : kMaxGrepResults;
@@ -534,23 +533,13 @@ static NSArray* BuildSymbolHierarchy(NSArray* flatSymbols) {
 
     // Session workflow commands
     if ([method isEqualToString:@"session.info"] || [method isEqualToString:@"session.workflowState"]) {
-        __block NSString* ws = nil;
-        __block NSString* activeFile = nil;
-        __block NSArray* openFiles = nil;
-        __block NSArray* dirtyFiles = nil;
-        __block NSArray* recentCmds = nil;
-        __block NSArray* lastSearches = nil;
-        __block pid_t termPid = 0;
-        
-        dispatch_sync(dispatch_get_main_queue(), ^{
-            ws = [self.windowController workspacePath];
-            activeFile = [self.windowController activeFilePath];
-            openFiles = [self.windowController openFilePaths];
-            dirtyFiles = DirtyFilePathsFromTabs(self.windowController.openTabs ?: @[]);
-            recentCmds = [self.windowController.sessionRecentCommands copy];
-            lastSearches = [self.windowController.sessionLastSearches copy];
-            termPid = [self.windowController terminalPid];
-        });
+        NSString* ws = [self safeWorkspacePath];
+        NSString* activeFile = [self safeActiveFilePath];
+        NSArray* openFiles = [self safeOpenFilePaths];
+        NSArray* dirtyFiles = DirtyFilePathsFromTabs([self safeOpenTabs] ?: @[]);
+        NSArray* recentCmds = [self safeSessionRecentCommands];
+        NSArray* lastSearches = [self safeSessionLastSearches];
+        pid_t termPid = [self safeTerminalPid];
         
         NSDictionary* git = [self safeGitStatusInfo] ?: @{};
         *outResult = @{
@@ -579,10 +568,7 @@ static NSArray* BuildSymbolHierarchy(NSArray* flatSymbols) {
     }
 
     if ([method isEqualToString:@"session.clearHistory"]) {
-        dispatch_async(dispatch_get_main_queue(), ^{
-            [self.windowController.sessionRecentCommands removeAllObjects];
-            [self.windowController.sessionLastSearches removeAllObjects];
-        });
+        [self.workspaceSession clearSessionHistory];
         *outResult = @{ @"cleared": @YES };
         return;
     }
@@ -616,7 +602,7 @@ static NSArray* BuildSymbolHierarchy(NSArray* flatSymbols) {
             *outErrMsg = @"line and column must be positive 1-indexed integers.";
             return;
         }
-        if (self.windowController.isHeadless || ![[self.windowController window] isVisible]) {
+        if (self.isKernelMode || !self.windowController || self.windowController.isHeadless || ![[self.windowController window] isVisible]) {
             if ([method isEqualToString:@"language.hover"]) {
                 *outResult = @{ @"hover": @"", @"headless": @YES };
             } else if ([method isEqualToString:@"language.completions"]) {
@@ -734,7 +720,11 @@ static NSArray* BuildSymbolHierarchy(NSArray* flatSymbols) {
             *outErrMsg = @"id parameter required.";
             return;
         }
-        [self.windowController problemsOpen:problemId];
+        if (self.isKernelMode || !self.windowController) {
+            *outResult = @{ @"opened": @YES, @"headless": @YES };
+            return;
+        }
+        [(id)self.windowController problemsOpen:problemId];
         *outResult = @{ @"opened": @YES };
         return;
     }
@@ -746,7 +736,11 @@ static NSArray* BuildSymbolHierarchy(NSArray* flatSymbols) {
             *outErrMsg = @"source parameter required.";
             return;
         }
-        [self.windowController problemsClearSource:source];
+        if (self.isKernelMode || !self.windowController) {
+            *outResult = @{ @"cleared": @YES, @"headless": @YES };
+            return;
+        }
+        [(id)self.windowController problemsClearSource:source];
         *outResult = @{ @"cleared": @YES };
         return;
     }
@@ -771,7 +765,11 @@ static NSArray* BuildSymbolHierarchy(NSArray* flatSymbols) {
             *outErrMsg = @"path parameter required.";
             return;
         }
-        [self.windowController formatFileAtPath:targetPath];
+        if (self.isKernelMode || !self.windowController) {
+            *outResult = @{ @"formatted": @YES, @"headless": @YES };
+            return;
+        }
+        [(id)self.windowController formatFileAtPath:targetPath];
         *outResult = @{ @"formatted": @YES };
         return;
     }
@@ -783,7 +781,11 @@ static NSArray* BuildSymbolHierarchy(NSArray* flatSymbols) {
             *outErrMsg = @"path parameter required.";
             return;
         }
-        [self.windowController lintFileAtPath:targetPath];
+        if (self.isKernelMode || !self.windowController) {
+            *outResult = @{ @"linted": @YES, @"headless": @YES };
+            return;
+        }
+        [(id)self.windowController lintFileAtPath:targetPath];
         *outResult = @{ @"linted": @YES };
         return;
     }

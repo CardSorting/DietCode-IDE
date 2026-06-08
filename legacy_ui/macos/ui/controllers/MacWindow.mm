@@ -12,24 +12,15 @@ using namespace dietcode::platform::macos;
 @implementation DietCodeWindowController
 
 - (instancetype)init {
-    self = [super initWithWindow:nil];
+    self = [super init];
     if (self) {
-        self.window = [[NSWindow alloc] initWithContentRect:NSMakeRect(0, 0, 1200, 800)
-                                                 styleMask:NSWindowStyleMaskTitled | NSWindowStyleMaskClosable | NSWindowStyleMaskMiniaturizable | NSWindowStyleMaskResizable | NSWindowStyleMaskFullSizeContentView
-                                                   backing:NSBackingStoreBuffered
-                                                     defer:NO];
-        self.window.title = @"DietCode";
-        self.window.delegate = self;
-        self.window.minSize = NSMakeSize(800, 600);
-        [self.window center];
-
         self.openTabs = [NSMutableArray array];
         self.directoryCache = [NSMutableDictionary dictionary];
         self.diagnosticsDict = [NSMutableDictionary dictionary];
         self.unifiedDiagnostics = [NSMutableArray array];
         self.sessionLastSearches = [NSMutableArray array];
         self.sessionRecentCommands = [NSMutableArray array];
-        self.controlServer = [[DietCodeControlServer alloc] initWithWindowController:self];
+        self.controlServer = [[DietCodeControlServer alloc] initWithWindowController:self]; // legacy bridge + shared workspace session
         
         self.currentFontSize = 13;
         self.currentWordWrap = YES;
@@ -59,6 +50,17 @@ using namespace dietcode::platform::macos;
         [self.controlServer start];
     }
     return self;
+}
+
+- (void)loadWindow {
+    self.window = [[NSWindow alloc] initWithContentRect:NSMakeRect(0, 0, 1200, 800)
+                                             styleMask:NSWindowStyleMaskTitled | NSWindowStyleMaskClosable | NSWindowStyleMaskMiniaturizable | NSWindowStyleMaskResizable | NSWindowStyleMaskFullSizeContentView
+                                               backing:NSBackingStoreBuffered
+                                                 defer:NO];
+    self.window.title = @"DietCode";
+    self.window.delegate = self;
+    self.window.minSize = NSMakeSize(800, 600);
+    [self.window center];
 }
 
 - (void)windowDidLoad {

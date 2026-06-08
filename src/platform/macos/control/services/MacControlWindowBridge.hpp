@@ -3,10 +3,13 @@
 #import <Cocoa/Cocoa.h>
 
 @class DietCodeWindowController;
+@class DietCodeWorkspaceSession;
 
 @interface DietCodeControlWindowBridge : NSObject
 
-- (instancetype)initWithWindowController:(DietCodeWindowController*)controller;
+- (instancetype)initWithWorkspaceSession:(DietCodeWorkspaceSession*)session
+                        windowController:(DietCodeWindowController*)controller;
+@property(nonatomic, strong, readonly) DietCodeWorkspaceSession* workspaceSession;
 - (NSString*)workspacePath;
 - (NSString*)textForFileAtPath:(NSString*)path;
 - (BOOL)replaceTextInRange:(NSRange)range withText:(NSString*)text forFileAtPath:(NSString*)path;

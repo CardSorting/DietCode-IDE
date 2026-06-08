@@ -1,5 +1,10 @@
 #import "MacControlServer+Private.hpp"
+#ifndef DIETCODE_KERNEL_BUILD
 #import "MacWindow.hpp"
+#else
+#import "DietCodeWindowController+ControlHost.h"
+#endif
+#include "filesystem/GitService.hpp"
 #import "MacControlSupport.hpp"
 #import "MacControlPathSecurity.hpp"
 
@@ -33,7 +38,14 @@
             return;
         }
         NSString* errStr = nil;
-        BOOL ok = [self.windowController gitStageFile:targetPath errorOut:&errStr];
+        BOOL ok = NO;
+        if (self.windowController) {
+            ok = [(id)self.windowController gitStageFile:targetPath errorOut:&errStr];
+        } else {
+            std::string err;
+            ok = dietcode::filesystem::GitService::stageFile(std::string([[self safeWorkspacePath] UTF8String]), std::string([targetPath UTF8String]), err);
+            if (!ok) errStr = [NSString stringWithUTF8String:err.c_str()];
+        }
         if (!ok) {
             *outErrCode = @"git_failed";
             *outErrMsg = errStr ?: @"Failed to stage file.";
@@ -51,7 +63,14 @@
             return;
         }
         NSString* errStr = nil;
-        BOOL ok = [self.windowController gitUnstageFile:targetPath errorOut:&errStr];
+        BOOL ok = NO;
+        if (self.windowController) {
+            ok = [(id)self.windowController gitUnstageFile:targetPath errorOut:&errStr];
+        } else {
+            std::string err;
+            ok = dietcode::filesystem::GitService::unstageFile(std::string([[self safeWorkspacePath] UTF8String]), std::string([targetPath UTF8String]), err);
+            if (!ok) errStr = [NSString stringWithUTF8String:err.c_str()];
+        }
         if (!ok) {
             *outErrCode = @"git_failed";
             *outErrMsg = errStr ?: @"Failed to unstage file.";
@@ -69,7 +88,14 @@
             return;
         }
         NSString* errStr = nil;
-        BOOL ok = [self.windowController gitDiscardFile:targetPath errorOut:&errStr];
+        BOOL ok = NO;
+        if (self.windowController) {
+            ok = [(id)self.windowController gitDiscardFile:targetPath errorOut:&errStr];
+        } else {
+            std::string err;
+            ok = dietcode::filesystem::GitService::discardChanges(std::string([[self safeWorkspacePath] UTF8String]), std::string([targetPath UTF8String]), err);
+            if (!ok) errStr = [NSString stringWithUTF8String:err.c_str()];
+        }
         if (!ok) {
             *outErrCode = @"git_failed";
             *outErrMsg = errStr ?: @"Failed to discard file changes.";
@@ -87,7 +113,14 @@
             return;
         }
         NSString* errStr = nil;
-        BOOL ok = [self.windowController gitCommitWithMessage:message errorOut:&errStr];
+        BOOL ok = NO;
+        if (self.windowController) {
+            ok = [(id)self.windowController gitCommitWithMessage:message errorOut:&errStr];
+        } else {
+            std::string err;
+            ok = dietcode::filesystem::GitService::commit(std::string([[self safeWorkspacePath] UTF8String]), std::string([message UTF8String]), err);
+            if (!ok) errStr = [NSString stringWithUTF8String:err.c_str()];
+        }
         if (!ok) {
             *outErrCode = @"git_failed";
             *outErrMsg = errStr ?: @"Failed to commit staged changes.";

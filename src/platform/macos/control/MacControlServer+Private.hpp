@@ -2,6 +2,7 @@
 
 #import "MacControlServer.hpp"
 #import "MacControlWindowBridge.hpp"
+#import "WorkspaceSessionBridge.hpp"
 #import "MacControlRecoveryStore.hpp"
 #import "MacControlSearchService.hpp"
 #import "MacControlPatchService.hpp"
@@ -14,6 +15,8 @@
 
 @interface DietCodeControlServer () {
 @public
+    BOOL _isKernelMode;
+    DietCodeWorkspaceSession* _workspaceSession;
     DietCodeControlWindowBridge* _windowBridge;
     MacControlRecoveryStore* _recoveryStore;
     MacControlSearchService* _searchService;
@@ -34,6 +37,8 @@
     NSInteger _editPlanCounter;
     NSInteger _comboCounter;
     NSMutableDictionary<NSNumber*, DietCodeClientConnection*>* _activeConnections;
+    NSMutableArray<NSDictionary*>* _eventRingBuffer;
+    NSInteger _eventSequence;
     NSString* _sessionToken;
     dispatch_queue_t _executionQueue;
     dispatch_queue_t _readQueue;
@@ -73,6 +78,7 @@
                  outErrCode:(NSString**)outErrCode
                     outErrMsg:(NSString**)outErrMsg
                    outPaths:(NSString**)outPaths;
+- (void)configureServices;
 
 @end
 

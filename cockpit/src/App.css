@@ -1,0 +1,170 @@
+:root {
+  color-scheme: dark;
+  font-family: 'SF Pro Text', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  background: #0d1117;
+  color: #e6edf3;
+  line-height: 1.5;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+}
+
+.app {
+  min-height: 100vh;
+  display: grid;
+  grid-template-rows: auto 1fr;
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 1rem 1.5rem;
+  border-bottom: 1px solid #30363d;
+  background: #161b22;
+}
+
+.header h1 {
+  margin: 0;
+  font-size: 1.1rem;
+  font-weight: 600;
+}
+
+.header .tagline {
+  margin: 0.15rem 0 0;
+  font-size: 0.8rem;
+  color: #8b949e;
+}
+
+.status-pill {
+  padding: 0.25rem 0.75rem;
+  border-radius: 999px;
+  font-size: 0.75rem;
+  font-weight: 600;
+}
+
+.status-pill.connected {
+  background: #23863633;
+  color: #3fb950;
+}
+
+.status-pill.disconnected {
+  background: #da363333;
+  color: #f85149;
+}
+
+.layout {
+  display: grid;
+  grid-template-columns: 320px 1fr 360px;
+  gap: 0;
+  min-height: 0;
+}
+
+.panel {
+  border-right: 1px solid #30363d;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.panel:last-child {
+  border-right: none;
+}
+
+.panel-header {
+  padding: 0.75rem 1rem;
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: #8b949e;
+  border-bottom: 1px solid #30363d;
+}
+
+.panel-body {
+  flex: 1;
+  overflow: auto;
+  padding: 0.75rem 1rem;
+}
+
+.chat-input {
+  display: flex;
+  gap: 0.5rem;
+  padding: 0.75rem 1rem;
+  border-top: 1px solid #30363d;
+}
+
+.chat-input input {
+  flex: 1;
+  background: #0d1117;
+  border: 1px solid #30363d;
+  border-radius: 6px;
+  color: #e6edf3;
+  padding: 0.5rem 0.75rem;
+}
+
+.chat-input button {
+  background: #238636;
+  border: none;
+  border-radius: 6px;
+  color: white;
+  padding: 0.5rem 1rem;
+  cursor: pointer;
+  font-weight: 600;
+}
+
+.timeline-item,
+.log-line,
+.approval-item {
+  padding: 0.5rem 0;
+  border-bottom: 1px solid #21262d;
+  font-size: 0.85rem;
+}
+
+.timeline-item .type {
+  color: #58a6ff;
+  font-weight: 600;
+}
+
+.timeline-item .time,
+.log-line .time {
+  color: #8b949e;
+  font-size: 0.75rem;
+}
+
+.diff-block {
+  background: #161b22;
+  border: 1px solid #30363d;
+  border-radius: 6px;
+  padding: 0.75rem;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.8rem;
+  white-space: pre-wrap;
+  overflow: auto;
+}
+
+.empty {
+  color: #8b949e;
+  font-size: 0.85rem;
+}
+
+.approval-item button {
+  margin-top: 0.5rem;
+  margin-right: 0.5rem;
+  background: #21262d;
+  border: 1px solid #30363d;
+  border-radius: 6px;
+  color: #e6edf3;
+  padding: 0.35rem 0.75rem;
+  cursor: pointer;
+}
+
+.approval-item button.approve {
+  background: #238636;
+  border-color: #238636;
+}

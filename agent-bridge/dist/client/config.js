@@ -36,6 +36,9 @@ const READ_METHODS = new Set([
     'shell.tail',
     'shell.sedRange',
     'shell.catSmall',
+    'events.recent',
+    'event.subscribe',
+    'event.unsubscribe',
 ]);
 export function isReadMethod(method) {
     return READ_METHODS.has(method);
@@ -66,6 +69,10 @@ export function resolveAppPath(explicit) {
     const bundled = resolveBundledAppBinary();
     if (bundled) {
         return bundled;
+    }
+    const kernelCandidate = resolve(process.cwd(), 'build/dietcode-kernel');
+    if (existsSync(kernelCandidate)) {
+        return kernelCandidate;
     }
     const repoCandidate = resolve(process.cwd(), 'build/DietCode.app/Contents/MacOS/DietCode');
     if (existsSync(repoCandidate)) {

@@ -19,12 +19,16 @@ DietCode-IDE/
     Info.plist
     logo.svg
   docs/                    # Specifications and guides (see docs/README.md)
+  cockpit/                 # Vite + React web control surface
+  legacy_ui/               # Deprecated AppKit editor shell
   agent-bridge/            # Bundled TypeScript agent bridge (@dietcode/agent-bridge)
   scripts/                 # Python agent client, harnesses, fixtures
-  src/                     # Portable C++20 core + macOS shell
+  src/
+    kernel/                # dietcode-kernel entry (headless)
+    platform/macos/control/  # JSON-RPC mutation kernel
   tests/
     test_editor.cpp        # Zero-dependency C++ unit tests
-  build/                   # Generated (DietCode.app, test_editor)
+  build/                   # Generated (dietcode-kernel, resources/, DietCode.app)
   .wiki/                   # Decision logs and internal memory
 ```
 
@@ -39,12 +43,25 @@ src/
   syntax/                  # Regex tokenizer
   filesystem/              # FileService, GitService, FileWatcher
   core/                    # LSPClient, app state, event bus
+  kernel/
+    main.mm                # Headless kernel entry
+    KernelRuntime.*        # WorkspaceSession + control server (no MacWindow)
+    KernelAppDelegate.*    # Minimal NSApplication delegate
+    workspace/             # C++ headless workspace adapter
   platform/
     macos/
-      main.mm
-      ui/                  # AppKit shell (MacWindow, menus, editor views)
-      control/             # JSON-RPC server (agent surface)
+      control/             # JSON-RPC server (mutation authority)
       services/            # Symbol index, diff analysis, subprocess runner
+
+legacy_ui/
+  macos/
+    main.mm                # Legacy DietCode.app entry
+    ui/                    # AppKit editor shell (optional)
+    MacAgentSidebar.*      # Native agent chat sidebar (legacy)
+
+cockpit/
+  src/                     # React UI (timeline, diffs, approvals, logs)
+  server/bridge.ts         # HTTP → Unix socket proxy + SSE events
 ```
 
 ### `src/platform/macos/control/` — agent surface
