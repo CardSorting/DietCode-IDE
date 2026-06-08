@@ -159,7 +159,7 @@ KERNEL_BUNDLE := $(KERNEL_BINARY) $(PACKAGED_BRIDGE) $(PACKAGED_BRIDGE_CLI) $(PA
 AGENT_CHAT_BUNDLE := $(KERNEL_BUNDLE)
 LEGACY_AGENT_CHAT_BUNDLE := $(APP_BINARY) $(LEGACY_PACKAGED_BRIDGE) $(LEGACY_PACKAGED_BRIDGE_CLI) $(LEGACY_PACKAGED_HERMES_PLUGIN) $(LEGACY_PACKAGED_BUNDLE_MANIFEST)
 
-.PHONY: all kernel app legacy-app agent-chat-bundle agent-bridge agent-bridge-fast cockpit cockpit-dev run headless ensure-socket restart-agent-server restart-agent-server-fast agent-ready agent-status agent-ping agent-methods agent-capabilities agent-self-test test-agent-offline control-smoke test-task-health test-rpc-transaction test-ergonomics test-grep-diff-tooling test-runtime-determinism test-transaction-kernel test-harness-realism test-deterministic-retrieval test-agent-workflow-smoke test-agent-shell-tooling test-agent-shell-tooling-fast test-agent-shell-workflows test-agent-shell-workflows-fast test-authority-boundaries test-authority-boundaries-fast test-agent-bridge-authority test-cli-agent-failures test-docs-code-drift test-partial-success-closure test-broccoliq-runtime-memory test-broccoliq-runtime-memory-fast test-runtime-native-integration test-runtime-native-integration-fast test-agent-bridge test-agent-bridge-fast test-agent-integration sync-hermes-plugin enable-hermes-agent test-dietcode-enable-agent test-dietcode-agent-chat test-agent-chat-workspace-switch verify-agent-chat-sidebar smoke-agent-chat-live setup-hermes-bridge test-hermes-bridge-audit test-hermes-bridge-workflows hermes-ide-watchdog verify-hermes-bridge agent-integration verify-agent-runtime verify-agent-runtime-fast verify-agent-runtime-full verify-agent-runtime-full-fast benchmark-agent-success benchmark-agent-success-fast benchmark-agent-success-report test-agent-success-report test clean
+.PHONY: all kernel app legacy-app agent-chat-bundle agent-bridge agent-bridge-fast cockpit cockpit-dev run headless ensure-socket restart-agent-server restart-agent-server-fast agent-ready agent-status agent-ping agent-methods agent-capabilities agent-self-test test-agent-offline control-smoke cockpit-smoke checkpoint-core test-checkpoint-core-unit test-task-health test-rpc-transaction test-ergonomics test-grep-diff-tooling test-runtime-determinism test-transaction-kernel test-harness-realism test-deterministic-retrieval test-agent-workflow-smoke test-agent-shell-tooling test-agent-shell-tooling-fast test-agent-shell-workflows test-agent-shell-workflows-fast test-authority-boundaries test-authority-boundaries-fast test-agent-bridge-authority test-cli-agent-failures test-docs-code-drift test-partial-success-closure test-broccoliq-runtime-memory test-broccoliq-runtime-memory-fast test-runtime-native-integration test-runtime-native-integration-fast test-agent-bridge test-agent-bridge-fast test-agent-integration sync-hermes-plugin enable-hermes-agent test-dietcode-enable-agent test-dietcode-agent-chat test-agent-chat-workspace-switch verify-agent-chat-sidebar smoke-agent-chat-live setup-hermes-bridge test-hermes-bridge-audit test-hermes-bridge-workflows hermes-ide-watchdog verify-hermes-bridge agent-integration verify-agent-runtime verify-agent-runtime-fast verify-agent-runtime-full verify-agent-runtime-full-fast benchmark-agent-success benchmark-agent-success-fast benchmark-agent-success-report test-agent-success-report test clean
 
 all: kernel test
 
@@ -465,6 +465,13 @@ smoke-agent-chat-live: agent-bridge-fast $(PACKAGED_BRIDGE) $(KERNEL_BINARY) $(P
 
 cockpit-smoke: kernel restart-agent-server-fast agent-bridge-fast cockpit
 	DIETCODE_REPO_ROOT=$(CURDIR) DIETCODE_SESSION_DIR=$(CURDIR)/build/cockpit-smoke-session PYTHONUNBUFFERED=1 python3 scripts/cockpit_vertical_slice.py --compact
+
+test-checkpoint-core-unit: cockpit
+	python3 scripts/test_checkpoint_resolver.py
+	cd cockpit && npx tsx --test server/checkpoints.test.ts server/sessionStore.test.ts
+
+checkpoint-core: kernel agent-bridge-fast cockpit cockpit-smoke test-checkpoint-core-unit test-docs-code-drift
+	@echo "checkpoint-core v0.1 — kernel, bridge, cockpit, vertical slice, unit tests, docs drift: OK"
 
 test-agent-chat-workspace-switch: agent-bridge-fast $(PACKAGED_BRIDGE) $(KERNEL_BINARY) $(PACKAGED_AGENT_BUNDLE_PY) $(PACKAGED_BRIDGE_CLI)
 	python3 scripts/test_agent_chat_workspace_switch.py

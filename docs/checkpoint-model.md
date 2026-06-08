@@ -202,6 +202,16 @@ See [agent-ergonomics.md](./agent-ergonomics.md).
 | Hermes plugin | Emits `workspace.drift.detected` on drift block |
 | No duplicate UI | Drift/verify banners removed — panels + rail only |
 
+## Release baseline
+
+Frozen control-loop gate (tag `checkpoint-core-v0.1`):
+
+```bash
+make checkpoint-core
+```
+
+Runs kernel + agent-bridge + cockpit builds, the 53-check `cockpit-smoke` vertical slice, checkpoint unit tests (resolver / session / checkpoints), and `test-docs-code-drift`.
+
 ## Related docs
 
 | Doc | Checkpoint |

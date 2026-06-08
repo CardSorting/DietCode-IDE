@@ -155,6 +155,12 @@ def test_agent_environment_mentions_restart_target() -> None:
     assert "restart-agent-server" in text, "agent-environment.md must document make restart-agent-server"
 
 
+def test_checkpoint_model_documents_release_gate() -> None:
+    text = (DOCS / "checkpoint-model.md").read_text(encoding="utf-8")
+    for needle in ("checkpoint-core", "cockpit-smoke", "checkpoint-core-v0.1"):
+        assert needle in text, f"checkpoint-model.md missing {needle}"
+
+
 def test_file_structure_documents_control_tree() -> None:
     text = (DOCS / "file-structure.md").read_text(encoding="utf-8")
     for needle in ("MacControlServer.mm", "agent_contracts.py", "fixtures/"):
@@ -184,6 +190,7 @@ def main() -> int:
         ("drift.root_readme", test_root_readme_mentions_audit_and_verify),
         ("drift.build_instructions", test_build_instructions_mentions_agent_verify),
         ("drift.agent_environment", test_agent_environment_mentions_restart_target),
+        ("drift.checkpoint_release_gate", test_checkpoint_model_documents_release_gate),
         ("drift.file_structure", test_file_structure_documents_control_tree),
     ]:
         recorder.run(name, fn)
