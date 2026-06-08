@@ -105,9 +105,15 @@ Adversarial tasks set `metadata.json` fields: `adversarial`, `trapType`,
 
 ## Reports
 
-`report_results.py` produces a **money table** comparing normal vs adversarial
-pass rates, plus trap-type breakdowns for wrong-file edits, rollbacks, and recovery.
+`report_results.py` writes `results/summary.md` and `results/summary.json` with:
+
+- **Evaluation Claim** — reference vs agent framing (claim-ready prose)
+- **Money table** — normal vs adversarial pass rates by executor/mode
+- **Adversarial Trap Matrix** — per-`trapType` pass rate, wrong-file, rollback, recovery, retries
 
 ```bash
 make benchmark-agent-success-report
 ```
+
+The reference executor proves the tools can solve it. The agent executor reveals
+whether autonomy survives the traps.

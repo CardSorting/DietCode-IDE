@@ -157,6 +157,42 @@ def aggregate(rows: list[dict[str, Any]], task_meta: dict[str, dict[str, Any]], 
     for trap, mode_groups in sorted(by_trap_mode.items()):
         trap_type_pass_rate[trap] = {mode: _pass_rate(group) for mode, group in sorted(mode_groups.items())}
 
+    by_trap_rows: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    for row in adversarial_rows:
+        task_id = str(row.get("taskId", ""))
+        trap = str(task_meta.get(task_id, {}).get("trapType", "unknown"))
+        by_trap_rows[trap].append(row)
+
+    adversarial_trap_matrix: list[dict[str, Any]] = []
+    for trap in sorted(by_trap_rows):
+        group = by_trap_rows[trap]
+        adversarial_trap_matrix.append(
+            {
+                "trapType": trap,
+                "passRate": _pass_rate(group),
+                "passed": sum(1 for row in group if passed(row)),
+                "total": len(group),
+                "wrongFileEdited": sum(1 for row in group if row.get("wrongFileEdited")),
+                "rollbackSucceeded": sum(1 for row in group if row.get("rollbackSucceeded")),
+                "recoverySucceeded": sum(1 for row in group if row.get("staleRecoverySucceeded")),
+                "avgRetries": round(mean(row.get("retries", 0) for row in group), 2) if group else 0.0,
+            }
+        )
+
+    reference_rows = [row for row in rows if str(row.get("executor", "reference")) == "reference"]
+    agent_rows = [row for row in rows if str(row.get("executor")) == "agent"]
+    evaluation_claim = {
+        "referencePassed": sum(1 for row in reference_rows if passed(row)),
+        "referenceTotal": len(reference_rows),
+        "agentPassed": sum(1 for row in agent_rows if passed(row)),
+        "agentTotal": len(agent_rows),
+        "hasAgentResults": bool(agent_rows),
+        "frame": (
+            "DietCode evaluates bounded agent code mutation as a transactional runtime "
+            "problem, not an autocomplete problem."
+        ),
+    }
+
     money_table: list[dict[str, Any]] = []
     for mode in sorted(by_mode):
         group = by_mode[mode]
@@ -180,6 +216,8 @@ def aggregate(rows: list[dict[str, Any]], task_meta: dict[str, dict[str, Any]], 
         "normalPassRate": normal_pass_rate,
         "adversarialPassRate": adversarial_pass_rate,
         "trapTypePassRate": trap_type_pass_rate,
+        "adversarialTrapMatrix": adversarial_trap_matrix,
+        "evaluationClaim": evaluation_claim,
         "moneyTable": money_table,
         "byCategory": by_category,
         "failureCodeCounts": dict(failure_codes.most_common()),
@@ -197,6 +235,45 @@ def _fmt_rate(value: float) -> str:
     return f"{value * 100:.1f}%"
 
 
+def _render_evaluation_claim(claim: dict[str, Any]) -> list[str]:
+    ref_passed = claim["referencePassed"]
+    ref_total = claim["referenceTotal"]
+    lines = [
+        "## Evaluation Claim",
+        "",
+        (
+            f"The reference executor passed **{ref_passed}/{ref_total}** tasks, demonstrating "
+            "that the tool surface and fixtures are mechanically solvable across both "
+            "`raw_rpc` and `bridge` modes."
+        ),
+        "",
+        (
+            "The agent executor is evaluated separately using only `README.md`, `verify.sh`, "
+            "and workspace inspection. It is intentionally denied `metadata.json`, "
+            "`expected.patch`, `trapType`, and workflow bindings."
+        ),
+        "",
+        (
+            "Adversarial tasks measure whether bounded autonomy fails predictably under decoys, "
+            "stale reads, rollback scenarios, ambiguous symbols, and verify-only requirements."
+        ),
+    ]
+    if claim.get("hasAgentResults"):
+        agent_passed = claim["agentPassed"]
+        agent_total = claim["agentTotal"]
+        lines.extend(
+            [
+                "",
+                (
+                    f"In this run the agent executor passed **{agent_passed}/{agent_total}** tasks — "
+                    "compare against the reference baseline and adversarial trap matrix below."
+                ),
+            ]
+        )
+    lines.extend(["", f"> {claim['frame']}", ""])
+    return lines
+
+
 def render_markdown(summary: dict[str, Any]) -> str:
     lines: list[str] = [
         "# Agent Success Benchmark Report",
@@ -204,11 +281,16 @@ def render_markdown(summary: dict[str, Any]) -> str:
         f"Task results: **{summary['taskResultCount']}** "
         f"(normal: {summary['normalTaskCount']}, adversarial: {summary['adversarialTaskCount']})",
         "",
-        "## Money table",
-        "",
-        "| executor | mode | normal pass | adversarial pass | wrong file | rollback | recovery |",
-        "|----------|------|------------:|-----------------:|-----------:|---------:|---------:|",
     ]
+    lines.extend(_render_evaluation_claim(summary["evaluationClaim"]))
+    lines.extend(
+        [
+            "## Money table",
+            "",
+            "| executor | mode | normal pass | adversarial pass | wrong file | rollback | recovery |",
+            "|----------|------|------------:|-----------------:|-----------:|---------:|---------:|",
+        ]
+    )
 
     for row in summary["moneyTable"]:
         em = row["executorMode"]
@@ -222,9 +304,26 @@ def render_markdown(summary: dict[str, Any]) -> str:
             f"{row['rollbackSucceeded']} | {row['recoverySucceeded']} |"
         )
 
+    lines.extend(["", "## Adversarial Trap Matrix", ""])
+    matrix = summary.get("adversarialTrapMatrix", [])
+    if matrix:
+        lines.append(
+            "| trapType | passRate | wrongFileEdited | rollbackSucceeded | "
+            "recoverySucceeded | avgRetries |"
+        )
+        lines.append("|---|---:|---:|---:|---:|---:|")
+        for row in matrix:
+            lines.append(
+                f"| {row['trapType']} | {_fmt_rate(row['passRate'])} | {row['wrongFileEdited']} | "
+                f"{row['rollbackSucceeded']} | {row['recoverySucceeded']} | {row['avgRetries']} |"
+            )
+        lines.append("")
+    else:
+        lines.append("_No adversarial tasks in this run._")
+        lines.append("")
+
     lines.extend(
         [
-            "",
             "## Overall pass rate by mode",
             "",
             "| Mode | Total | Passed | Pass rate | Avg tool calls | Avg retries | Avg duration (ms) |",
