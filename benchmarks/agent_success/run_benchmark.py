@@ -24,6 +24,7 @@ RESULTS_DIR = BENCHMARK_ROOT / "results"
 WORKSPACES_DIR = BENCHMARK_ROOT / ".workspaces"
 
 sys.path.insert(0, str(REPO_ROOT / "scripts"))
+sys.path.insert(0, str(BENCHMARK_ROOT))
 from dietcode_agent_client import connect, load_token, send_rpc  # noqa: E402
 
 PYTHON_CLIENT = [sys.executable, str(REPO_ROOT / "scripts" / "dietcode_agent_client.py")]
@@ -34,6 +35,7 @@ BRIDGE_CLI = REPO_ROOT / "agent-bridge" / "dist" / "cli" / "dietcode-agent-clien
 class RunMetrics:
     task_id: str
     mode: str
+    executor: str = "reference"
     task_success: bool = False
     verify_passed: bool = False
     wrong_file_edited: bool = False
@@ -52,6 +54,7 @@ class RunMetrics:
             "type": "task_result",
             "taskId": self.task_id,
             "mode": self.mode,
+            "executor": self.executor,
             "taskSuccess": self.task_success,
             "verifyPassed": self.verify_passed,
             "wrongFileEdited": self.wrong_file_edited,
@@ -680,8 +683,8 @@ def run_task_bridge(workspace: Path, ctx: WorkflowContext) -> None:
     _sync_metrics_from_ctx(ctx)
 
 
-def run_single_task(task_id: str, mode: str) -> RunMetrics:
-    metrics = RunMetrics(task_id=task_id, mode=mode)
+def run_single_task(task_id: str, mode: str, *, executor: str = "reference") -> RunMetrics:
+    metrics = RunMetrics(task_id=task_id, mode=mode, executor=executor)
     started = time.monotonic()
     workspace: Path | None = None
     try:
@@ -690,12 +693,20 @@ def run_single_task(task_id: str, mode: str) -> RunMetrics:
         patch = load_expected_patch(task_id)
         workspace = copy_task_workspace(task_id)
         ctx = WorkflowContext(workspace=workspace, meta=meta, patch=patch, metrics=metrics)
-        if mode == "raw_rpc":
-            run_task_rpc(workspace, ctx)
-        elif mode == "bridge":
-            run_task_bridge(workspace, ctx)
+        if executor == "reference":
+            if mode == "raw_rpc":
+                run_task_rpc(workspace, ctx)
+            elif mode == "bridge":
+                run_task_bridge(workspace, ctx)
+            else:
+                raise ValueError(f"unknown mode: {mode}")
+        elif executor == "agent":
+            from agent_driver import run_agent_task
+
+            run_agent_task(workspace, task_id, mode, ctx)
+            _sync_metrics_from_ctx(ctx)
         else:
-            raise ValueError(f"unknown mode: {mode}")
+            raise ValueError(f"unknown executor: {executor}")
         metrics.task_success = True
     except Exception as exc:
         metrics.failure_code = metrics.failure_code or type(exc).__name__
@@ -735,6 +746,7 @@ def write_results(results: list[RunMetrics], run_id: str) -> Path:
             "passed": sum(1 for r in results if r.task_success and r.verify_passed),
             "failed": sum(1 for r in results if not (r.task_success and r.verify_passed)),
             "modes": sorted({r.mode for r in results}),
+            "executors": sorted({r.executor for r in results}),
             "timestamp": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
         }
         handle.write(json.dumps(summary, separators=(",", ":")) + "\n")
@@ -744,6 +756,12 @@ def write_results(results: list[RunMetrics], run_id: str) -> Path:
 def main() -> int:
     parser = argparse.ArgumentParser(description="Run agent success benchmarks.")
     parser.add_argument("--mode", choices=["raw_rpc", "bridge", "both"], default="both")
+    parser.add_argument(
+        "--executor",
+        choices=["reference", "agent"],
+        default="reference",
+        help="reference = deterministic workflow baseline; agent = README-driven agent driver.",
+    )
     parser.add_argument("--task", action="append", help="Run specific task id (repeatable).")
     parser.add_argument("--assume-server-ready", action="store_true")
     parser.add_argument("--run-id", help="Results filename stem.")
@@ -763,7 +781,7 @@ def main() -> int:
 
     for task_id in tasks:
         for mode in modes:
-            metrics = run_single_task(task_id, mode)
+            metrics = run_single_task(task_id, mode, executor=args.executor)
             results.append(metrics)
             print(json.dumps(metrics.to_json(), separators=(",", ":")))
 

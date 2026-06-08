@@ -10,7 +10,9 @@ verify-after-mutation) against an isolated fixture workspace.
 ```text
 benchmarks/agent_success/
   generate_fixtures.py   # (re)generate task fixture repos
-  run_benchmark.py       # reference-agent runner (Mode A / Mode B)
+  run_benchmark.py       # benchmark runner (Mode A / Mode B, reference or agent executor)
+  report_results.py      # comparison report from JSONL results
+  agent_driver.py        # optional README-driven agent executor
   tasks/task_NNN/        # per-task README, metadata, before/, expected.patch, verify.sh
   results/               # JSONL run output (gitignored)
 ```
@@ -21,6 +23,20 @@ benchmarks/agent_success/
 |------|------|-------|
 | **A** | `--mode raw_rpc` | Raw shell + `dietcode_agent_client.py` RPC |
 | **B** | `--mode bridge` | Agent Bridge CLI (`dietcode-agent-client`) safe workflows |
+
+## Executors
+
+| Executor | Flag | Description |
+|----------|------|-------------|
+| **reference** (default) | `--executor reference` | Deterministic workflow baseline (control) |
+| **agent** | `--executor agent` | README + verify-driven driver (`agent_driver.py`) |
+
+Override the built-in agent with an external script:
+
+```bash
+export AGENT_BENCHMARK_AGENT_SCRIPT=/path/to/your_agent.py
+python3 benchmarks/agent_success/run_benchmark.py --executor agent --mode bridge
+```
 
 ## Quick start
 
@@ -33,6 +49,9 @@ make benchmark-agent-success-fast
 
 # Full run — rebuild app and restart agent server first
 make benchmark-agent-success
+
+# Report only (latest JSONL in results/)
+make benchmark-agent-success-report
 ```
 
 ## Metrics (JSONL)
