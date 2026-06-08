@@ -10,6 +10,10 @@ const KNOWN_CODES = new Set([
     'unsupported_runtime_capability',
     'transport_error',
     'invalid_params',
+    'approval_required',
+    'approval_invalid',
+    'approval_rejected',
+    'approval_timeout',
 ]);
 export function bridgeError(code, message, rawError, overrides) {
     return new DietCodeBridgeError(code, message, rawError, overrides);

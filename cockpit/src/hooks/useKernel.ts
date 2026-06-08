@@ -8,6 +8,7 @@ export interface KernelEvent {
   source: string;
   detail: string;
   payload?: Record<string, unknown>;
+  taskId?: string;
 }
 
 export interface KernelStatus {

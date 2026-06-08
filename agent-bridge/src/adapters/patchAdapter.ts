@@ -1,4 +1,5 @@
 import { mapRpcError } from '../contracts/errors.js';
+import { completeApprovedMutation } from '../workflows/awaitApproval.js';
 import {
   assertBatchReceipt,
   assertMutationReceipt,
@@ -40,18 +41,26 @@ export async function applyPatch(
   expectBeforeHash: string,
   options: PatchOptions = {},
 ): Promise<BridgeResult<Record<string, unknown>>> {
-  const envelope = await transport.call(
-    'patch.apply',
-    {
-      path,
-      patch: unifiedDiff,
-      confirm: true,
-      dryRun: options.dryRun ?? false,
-      expectBeforeHash,
-      idempotencyKey: options.idempotencyKey,
-    },
-    { timeoutMs: options.requestTimeoutMs },
-  );
+  const patchParams = {
+    path,
+    patch: unifiedDiff,
+    confirm: true,
+    dryRun: options.dryRun ?? false,
+    expectBeforeHash,
+    idempotencyKey: options.idempotencyKey,
+  };
+  let envelope = await transport.call('patch.apply', patchParams, {
+    timeoutMs: options.requestTimeoutMs,
+  });
+  if (envelope.ok && envelope.result?.approvalRequired === true) {
+    envelope = await completeApprovedMutation(
+      transport,
+      envelope.result,
+      'patch.apply',
+      patchParams,
+      { timeoutMs: options.requestTimeoutMs ?? 30 * 60 * 1000 },
+    );
+  }
   if (!envelope.ok || !envelope.result) {
     throw mapRpcError(envelope, 'applyPatch');
   }
@@ -80,16 +89,24 @@ export async function applyPatchBatch(
   patches: BatchPatchRpcEntry[],
   options: BatchPatchOptions = {},
 ): Promise<BridgeResult<Record<string, unknown>>> {
-  const envelope = await transport.call(
-    'patch.applyBatch',
-    {
-      patches,
-      dryRun: options.dryRun ?? false,
-      confirm: options.confirm ?? true,
-      idempotencyKey: options.idempotencyKey,
-    },
-    { timeoutMs: options.requestTimeoutMs },
-  );
+  const batchParams = {
+    patches,
+    dryRun: options.dryRun ?? false,
+    confirm: options.confirm ?? true,
+    idempotencyKey: options.idempotencyKey,
+  };
+  let envelope = await transport.call('patch.applyBatch', batchParams, {
+    timeoutMs: options.requestTimeoutMs,
+  });
+  if (envelope.ok && envelope.result?.approvalRequired === true) {
+    envelope = await completeApprovedMutation(
+      transport,
+      envelope.result,
+      'patch.applyBatch',
+      batchParams,
+      { timeoutMs: options.requestTimeoutMs ?? 30 * 60 * 1000 },
+    );
+  }
   if (!envelope.ok || !envelope.result) {
     throw mapRpcError(envelope, 'applyPatchBatch');
   }

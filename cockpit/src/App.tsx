@@ -3,10 +3,12 @@ import { ChatPanel } from './components/ChatPanel';
 import { DiffPanel } from './components/DiffPanel';
 import { LogStream } from './components/LogStream';
 import { TaskTimeline } from './components/TaskTimeline';
+import { useState } from 'react';
 import { useKernel } from './hooks/useKernel';
 
 export default function App() {
-  const { status, events, timeline } = useKernel();
+  const { status, events } = useKernel();
+  const [activeTaskId, setActiveTaskId] = useState<string | null>(null);
 
   return (
     <div className="app">
@@ -30,13 +32,13 @@ export default function App() {
       <div className="layout">
         <section className="panel">
           <div className="panel-header">Chat</div>
-          <ChatPanel />
+          <ChatPanel workspace={status.workspace} onTaskSubmitted={setActiveTaskId} />
         </section>
 
         <section className="panel">
           <div className="panel-header">Task Timeline</div>
           <div className="panel-body">
-            <TaskTimeline events={events} timeline={timeline} />
+            <TaskTimeline events={events} activeTaskId={activeTaskId} />
           </div>
           <div className="panel-header">Diffs</div>
           <div className="panel-body">

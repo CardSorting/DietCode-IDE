@@ -106,11 +106,16 @@ export class RpcTransport {
             throw new DietCodeBridgeError('transport_error', 'bridge not connected');
         }
         const requestId = options.requestId ?? `${method}:${randomUUID()}`;
+        const enrichedParams = { ...params };
+        const taskId = process.env.DIETCODE_TASK_ID?.trim();
+        if (taskId && !enrichedParams.taskId) {
+            enrichedParams.taskId = taskId;
+        }
         const payload = {
             id: requestId,
             schemaVersion: this.config.schemaVersion,
             method,
-            params,
+            params: enrichedParams,
             token: this.token,
         };
         const agentId = options.agentId ?? this.config.agentId;

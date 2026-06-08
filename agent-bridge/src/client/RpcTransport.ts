@@ -164,11 +164,17 @@ export class RpcTransport implements RpcCaller {
     }
 
     const requestId = options.requestId ?? `${method}:${randomUUID()}`;
+    const enrichedParams = { ...params };
+    const taskId = process.env.DIETCODE_TASK_ID?.trim();
+    if (taskId && !enrichedParams.taskId) {
+      enrichedParams.taskId = taskId;
+    }
+
     const payload: Record<string, unknown> = {
       id: requestId,
       schemaVersion: this.config.schemaVersion,
       method,
-      params,
+      params: enrichedParams,
       token: this.token,
     };
 

@@ -12,6 +12,10 @@ const KNOWN_CODES = new Set<string>([
   'unsupported_runtime_capability',
   'transport_error',
   'invalid_params',
+  'approval_required',
+  'approval_invalid',
+  'approval_rejected',
+  'approval_timeout',
 ]);
 
 export function bridgeError(

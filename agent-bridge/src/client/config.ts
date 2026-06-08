@@ -45,6 +45,8 @@ const READ_METHODS = new Set([
   'events.recent',
   'event.subscribe',
   'event.unsubscribe',
+  'approval.list',
+  'approval.get',
 ]);
 
 export interface ResolvedTransportConfig {

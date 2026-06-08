@@ -126,6 +126,18 @@ Kernel RPCs: `approval.list`, `approval.get`, `approval.resolve`. Destructive mu
 
 See [approval-lifecycle.md](./approval-lifecycle.md) for the full safety loop.
 
+## Governed tasks
+
+Cockpit chat submits Hermes **tasks** (not raw chat):
+
+| Endpoint | Purpose |
+|----------|---------|
+| `POST /api/tasks` | Start governed Hermes run (`message`, `workspace`, `mode`) |
+| `GET /api/tasks` | List tasks |
+| `GET /api/tasks/:id` | Task status |
+
+Events (`task.started`, `agent.message`, `tool.call.*`, `approval.*`, `file.diff`, `task.completed`) stream over SSE. See [governed-tasks.md](./governed-tasks.md).
+
 ## Legacy native UI
 
 The original AppKit editor shell is preserved in `legacy_ui/` for optional editor integration:

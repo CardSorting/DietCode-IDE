@@ -5,6 +5,18 @@ import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 
+import {
+  broadcastEvent,
+  emitBridgeEvent,
+  getLastKernelEventSequence,
+  normalizeKernelEvent,
+  registerSseClient,
+  setLastKernelEventSequence,
+  unregisterSseClient,
+} from './events.js';
+import { createTask, getTask, listTasks } from './taskRegistry.js';
+import { startGovernedTask } from './taskRunner.js';
+
 const PORT = Number(process.env.COCKPIT_BRIDGE_PORT ?? 9477);
 const SOCKET_PATH = process.env.DIETCODE_SOCKET_PATH ?? join(homedir(), '.dietcode', 'control.sock');
 const TOKEN_PATH = process.env.DIETCODE_TOKEN_PATH ?? join(homedir(), '.dietcode', 'session.token');
@@ -16,18 +28,6 @@ interface RpcRequest {
   params?: Record<string, unknown>;
 }
 
-interface KernelEvent {
-  id: string;
-  sequence: number;
-  timestamp: string;
-  type: string;
-  source: string;
-  detail: string;
-  payload?: Record<string, unknown>;
-}
-
-const sseClients = new Set<ServerResponse>();
-let lastEventSequence = 0;
 let pollTimer: NodeJS.Timeout | null = null;
 
 async function readToken(): Promise<string> {
@@ -84,23 +84,29 @@ async function rpcCall(method: string, params: Record<string, unknown> = {}): Pr
   });
 }
 
-function broadcastEvent(event: KernelEvent): void {
-  const frame = `data: ${JSON.stringify(event)}\n\n`;
-  for (const client of sseClients) {
-    client.write(frame);
-  }
-}
-
 async function pollKernelEvents(): Promise<void> {
   try {
     const result = (await rpcCall('events.recent', {
-      afterSequence: lastEventSequence,
+      afterSequence: getLastKernelEventSequence(),
       limit: 100,
-    })) as { events?: KernelEvent[] };
+    })) as { events?: Record<string, unknown>[] };
     const events = result.events ?? [];
-    for (const event of events) {
-      if (event.sequence > lastEventSequence) {
-        lastEventSequence = event.sequence;
+    for (const raw of events) {
+      const sequence = Number(raw.sequence ?? 0);
+      if (sequence <= getLastKernelEventSequence()) continue;
+      setLastKernelEventSequence(sequence);
+      const event = normalizeKernelEvent(raw);
+
+      if (event.type === 'verify.complete' || event.type.startsWith('verify.')) {
+        broadcastEvent({
+          ...event,
+          type: event.type === 'verify.complete' ? 'verify.completed' : event.type,
+        });
+      } else if (event.type === 'approval.resolved') {
+        broadcastEvent(event);
+      } else if (event.type === 'approval.required') {
+        broadcastEvent(event);
+      } else {
         broadcastEvent(event);
       }
     }
@@ -149,8 +155,8 @@ const server = createServer(async (req, res) => {
       Connection: 'keep-alive',
     });
     res.write(': connected\n\n');
-    sseClients.add(res);
-    req.on('close', () => sseClients.delete(res));
+    registerSseClient(res);
+    req.on('close', () => unregisterSseClient(res));
     void pollKernelEvents();
     return;
   }
@@ -164,6 +170,72 @@ const server = createServer(async (req, res) => {
     } catch (err) {
       res.writeHead(503, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ connected: false, error: String(err) }));
+    }
+    return;
+  }
+
+  if (req.url === '/api/tasks' && req.method === 'GET') {
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ tasks: listTasks() }));
+    return;
+  }
+
+  const taskMatch = req.url?.match(/^\/api\/tasks\/([^/?]+)$/);
+  if (taskMatch && req.method === 'GET') {
+    const task = getTask(taskMatch[1]);
+    if (!task) {
+      res.writeHead(404, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'not_found' }));
+      return;
+    }
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ task }));
+    return;
+  }
+
+  if (req.url === '/api/tasks' && req.method === 'POST') {
+    try {
+      const body = await readBody(req);
+      const parsed = JSON.parse(body || '{}') as {
+        message?: string;
+        workspace?: string;
+        mode?: 'supervised' | 'trusted';
+      };
+      if (!parsed.message?.trim()) {
+        res.writeHead(400, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'message required' }));
+        return;
+      }
+
+      let workspace = parsed.workspace?.trim();
+      if (!workspace) {
+        try {
+          const root = (await rpcCall('workspace.getRoot')) as { path?: string };
+          workspace = root.path;
+        } catch {
+          workspace = undefined;
+        }
+      }
+      if (!workspace) {
+        res.writeHead(400, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'workspace required' }));
+        return;
+      }
+
+      const mode = parsed.mode === 'trusted' ? 'trusted' : 'supervised';
+      const task = createTask({
+        message: parsed.message.trim(),
+        workspace,
+        mode,
+      });
+
+      startGovernedTask(task);
+
+      res.writeHead(202, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ task, mode: 'governed_task_accepted' }));
+    } catch (err) {
+      res.writeHead(500, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: String(err) }));
     }
     return;
   }

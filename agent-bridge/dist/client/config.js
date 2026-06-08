@@ -39,6 +39,8 @@ const READ_METHODS = new Set([
     'events.recent',
     'event.subscribe',
     'event.unsubscribe',
+    'approval.list',
+    'approval.get',
 ]);
 export function isReadMethod(method) {
     return READ_METHODS.has(method);

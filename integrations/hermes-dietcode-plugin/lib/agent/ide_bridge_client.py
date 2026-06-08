@@ -14,6 +14,31 @@ from typing import Any, Optional
 logger = logging.getLogger(__name__)
 
 DEFAULT_SOCKET_PATH = Path.home() / ".dietcode" / "control.sock"
+
+
+def _emit_task_event(event_type: str, **payload: Any) -> None:
+    task_id = os.environ.get("DIETCODE_TASK_ID", "").strip()
+    if not task_id:
+        return
+    from datetime import datetime, timezone
+
+    record = {
+        "type": event_type,
+        "taskId": task_id,
+        "timestamp": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "source": "dietcode_ide",
+        **payload,
+    }
+    log_path = os.environ.get("DIETCODE_TASK_EVENT_LOG", "").strip()
+    if not log_path:
+        return
+    try:
+        path = Path(log_path).expanduser()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with path.open("a", encoding="utf-8") as handle:
+            handle.write(json.dumps(record, ensure_ascii=False) + "\n")
+    except OSError:
+        logger.debug("task event log write failed", exc_info=True)
 DEFAULT_TOKEN_PATH = Path.home() / ".dietcode" / "session.token"
 _PREFLIGHT_CACHE: dict[str, Any] | None = None
 _PREFLIGHT_CACHE_AT: float = 0.0
@@ -658,7 +683,14 @@ def _execute_bridge_call(
         cmd.extend(["--idempotency-key", idempotency_key])
     cmd.extend(["--workspace", root, *args])
 
+    action_label = " ".join(args[:3]) if args else "bridge"
+    _emit_task_event("tool.call.started", action=action_label, workspace=root)
+
     request_timeout = timeout if timeout is not None else float(ide_cfg.request_timeout_sec)
+    if os.environ.get("DIETCODE_SUPERVISED") == "1" and any(
+        token in args for token in ("patch", "safe-file", "safe-batch")
+    ):
+        request_timeout = max(request_timeout, 30 * 60)
     env = {**os.environ}
     if app:
         env.setdefault("DIETCODE_APP_PATH", str(app))
@@ -708,6 +740,27 @@ def _execute_bridge_call(
     if isinstance(data, dict):
         data.setdefault("exit_code", proc.returncode)
         data.setdefault("workspace_root", root)
+        if data.get("approvalRequired"):
+            approval = data.get("approval") if isinstance(data.get("approval"), dict) else {}
+            _emit_task_event(
+                "approval.required",
+                approvalId=approval.get("approvalId"),
+                action=action_label,
+                preview=approval.get("preview"),
+            )
+        elif data.get("applied") or data.get("mutationReceipt"):
+            receipt = data.get("mutationReceipt") if isinstance(data.get("mutationReceipt"), dict) else {}
+            _emit_task_event(
+                "file.diff",
+                path=receipt.get("path") or data.get("path"),
+                action=action_label,
+            )
+        _emit_task_event(
+            "tool.call.completed",
+            action=action_label,
+            ok=proc.returncode == 0 and data.get("ok") is not False,
+            approvalRequired=bool(data.get("approvalRequired")),
+        )
         if proc.returncode != 0 or data.get("ok") is False:
             if data.get("ok") is not False:
                 data["ok"] = False

@@ -108,6 +108,46 @@ body {
   padding: 0.5rem 0.75rem;
 }
 
+.chat-mode {
+  display: flex;
+  gap: 1rem;
+  padding: 0.5rem 1rem;
+  font-size: 0.8rem;
+  color: #8b949e;
+  border-top: 1px solid #30363d;
+}
+
+.chat-mode label {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  cursor: pointer;
+}
+
+.task-timeline .timeline-meta {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+.task-tag {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.7rem;
+  color: #8b949e;
+}
+
+.timeline-item.event-task-completed .type {
+  color: #3fb950;
+}
+
+.timeline-item.event-task-failed .type {
+  color: #f85149;
+}
+
+.timeline-item.event-approval-required .type {
+  color: #d29922;
+}
+
 .chat-input button {
   background: #238636;
   border: none;
