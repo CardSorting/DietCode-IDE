@@ -329,6 +329,7 @@ test-contract-ladder:
 
 test-contract-orchestrator:
 	python3 benchmarks/agent_success/test_contracts.py
+	python3 benchmarks/agent_success/test_execution_protocols.py
 
 benchmark-contract-orchestrator: agent-bridge-fast
 	DIETCODE_REPO_ROOT=$(CURDIR) python3 benchmarks/agent_success/run_orchestrator_benchmark.py --assume-server-ready

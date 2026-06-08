@@ -63,6 +63,8 @@ class RunMetrics:
     failure_classes_observed: list[str] = field(default_factory=list)
     orchestration_steps: int = 0
     escalation_succeeded: bool = False
+    execution_protocol_path: list[str] = field(default_factory=list)
+    protocol_escalation_succeeded: bool = False
     mcs_reference_match: dict[str, Any] = field(default_factory=dict)
 
     def to_json(self) -> dict[str, Any]:
@@ -97,6 +99,8 @@ class RunMetrics:
             "failureClassesObserved": self.failure_classes_observed,
             "orchestrationSteps": self.orchestration_steps,
             "escalationSucceeded": self.escalation_succeeded,
+            "executionProtocolPath": self.execution_protocol_path,
+            "protocolEscalationSucceeded": self.protocol_escalation_succeeded,
             "mcsReferenceMatch": self.mcs_reference_match,
             "timestamp": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
         }

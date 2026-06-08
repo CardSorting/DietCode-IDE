@@ -1,50 +1,66 @@
 # Runtime Contract Orchestrator — Results
 
-**Generated:** 2026-06-08T11:47:47Z
+**Generated:** 2026-06-08T11:56:46Z
 
 > Reliable bounded autonomy emerges through adaptive runtime contract escalation, not static maximal visibility.
 
-Methodology: [WHITEPAPER.md](WHITEPAPER.md) §Phase 3
+> Runtime contract visibility tells the agent what truth exists; execution protocols determine whether mutation remains safe under changing state.
+
+Methodology: [WHITEPAPER.md](WHITEPAPER.md) §Phase 3–3.1
 
 ---
 
 ## Minimum Contract Set (MCS) — nightmare tier
 
-| task | passed | MCS (observed) | MCS (reference) | escalations | match |
-|------|--------|----------------|-----------------|------------:|-------|
-| 051 | PASS | readme, verify_grep | readme, verify_grep, execution_trace | 0 | False |
-| 052 | PASS | hidden_invariant, readme, verify_grep | readme, verify_grep, hidden_invariant | 1 | True |
-| 053 | PASS | readme, verify_grep | readme, verify_grep | 0 | True |
-| 054 | PASS | readme, verify_grep | readme, verify_grep, verify_exec | 0 | False |
-| 055 | PASS | behavior_check, readme, verify_exec, verify_grep | readme, verify_grep, verify_exec, behavior_check | 1 | True |
-| 056 | PASS | readme, verify_grep | readme, verify_grep, stale_read_protocol | 0 | False |
-| 057 | FAIL | behavior_check, execution_trace, hidden_invariant, readme, verify_exec, verify_grep | readme, verify_grep, stale_read_protocol, authoritative_read | 3 | — |
-| 058 | PASS | readme, verify_grep | readme, verify_grep, authoritative_read | 0 | False |
-| 059 | FAIL | behavior_check, readme, verify_exec, verify_grep | readme, verify_grep, verify_exec, behavior_check | 1 | — |
-| 060 | PASS | readme, verify_grep | readme, verify_grep, destructive_policy | 0 | False |
+| task | passed | MCS (observed) | protocol path | escalations | match |
+|------|--------|----------------|---------------|------------:|-------|
+| 051 | PASS | readme, verify_grep | single_shot_patch | 0 | False |
+| 052 | PASS | hidden_invariant, readme, verify_grep | single_shot_patch | 1 | True |
+| 053 | PASS | readme, verify_grep | single_shot_patch | 0 | True |
+| 054 | PASS | readme, verify_grep | single_shot_patch | 0 | False |
+| 055 | PASS | behavior_check, readme, verify_exec, verify_grep | single_shot_patch | 1 | True |
+| 056 | PASS | readme, verify_grep | single_shot_patch | 0 | False |
+| 057 | PASS | readme, stale_read_protocol, verify_grep | single_shot_patch → lock_read_validate_apply | 1 | False |
+| 058 | PASS | readme, verify_grep | single_shot_patch | 0 | False |
+| 059 | FAIL | behavior_check, readme, verify_exec, verify_grep | single_shot_patch | 1 | — |
+| 060 | PASS | readme, verify_grep | single_shot_patch | 0 | False |
 
 ## Executive summary
 
-The orchestrator passed **8/10** nightmare tasks starting from `readme` + `verify_grep` only. Failures trigger classified escalation; the broker grants the next contract layer and retries from a clean fixture snapshot.
+The orchestrator passed **9/10** nightmare tasks starting from `readme` + `verify_grep` + `single_shot_patch` only. Failures classify into visibility contracts *and* execution protocols; the broker retries from a clean snapshot.
 
-**Key result:** task 052 MCS = `readme` + `verify_grep` + `hidden_invariant` (1 escalation after `hidden_invariant_missing`) — matches reference MCS.
+**Phase 3.1:** task 057 escalates `concurrent_mutation_detected` → `stale_read_protocol` + `lock_read_validate_apply` (strip concurrent `VERSION = 3`, reconcile, re-apply).
 
-**Gap:** task 057 exhausts escalation without organic stale recovery; task 059 grants `verify_exec` + `behavior_check` but still fails execution (visibility ≠ patch correctness).
+**Key result:** task 052 MCS = `readme` + `verify_grep` + `hidden_invariant` (1 visibility escalation).
 
-**Orchestrated pass rate:** 8/10
+**Orchestrated pass rate:** 9/10
 
-## Example escalation (task 052)
+## Example escalations
+
+Task 052 (visibility):
 
 ```json
 {
   "failureClass": "hidden_invariant_missing",
   "grantedContract": "hidden_invariant",
-  "visibleAfter": [
-    "readme",
-    "verify_grep",
-    "hidden_invariant"
-  ]
+  "grantedProtocol": null,
+  "protocolAfter": "single_shot_patch"
 }
 ```
 
-Source: `orchestrator_smoke_20260608.jsonl`
+Task 057 (visibility + execution):
+
+```json
+{
+  "failureClass": "concurrent_mutation_detected",
+  "grantedContract": "stale_read_protocol",
+  "grantedProtocol": "lock_read_validate_apply",
+  "executionProtocolPath": [
+    "single_shot_patch",
+    "lock_read_validate_apply"
+  ],
+  "protocolEscalationSucceeded": true
+}
+```
+
+Source: `orchestrator20260608T115638Z.jsonl`

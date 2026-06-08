@@ -20,6 +20,11 @@ ORCHESTRATOR_CLAIM = (
     "not static maximal visibility."
 )
 
+PHASE_31_CLAIM = (
+    "Runtime contract visibility tells the agent what truth exists; "
+    "execution protocols determine whether mutation remains safe under changing state."
+)
+
 # Canonical contract registry — what each layer exposes to the agent.
 CONTRACTS: dict[str, dict[str, Any]] = {
     "readme": {
@@ -76,17 +81,41 @@ CONTRACTS: dict[str, dict[str, Any]] = {
 
 INITIAL_CONTRACTS: tuple[str, ...] = ("readme", "verify_grep")
 
-# Failure class → contract to grant (orchestrator-side only; agent never sees trap metadata).
-ESCALATION_GRAPH: dict[str, str] = {
-    "hidden_invariant_missing": "hidden_invariant",
-    "runtime_behavior_mismatch": "verify_exec",
-    "execution_trace_required": "execution_trace",
-    "stale_read_detected": "authoritative_read",
-    "stale_read_protocol_required": "stale_read_protocol",
-    "destructive_attempt": "destructive_policy",
-    "concurrent_mutation": "stale_read_protocol",
-    "api_shape_mismatch": "behavior_check",
-    "unclassified_failure": "verify_exec",
+# Failure class → visibility contract and/or execution protocol to grant.
+# Orchestrator-side only; agent never sees trap metadata.
+ESCALATION_ACTION = dict[str, str | None]
+
+ESCALATION_GRAPH: dict[str, ESCALATION_ACTION] = {
+    "hidden_invariant_missing": {"grantContract": "hidden_invariant", "grantProtocol": None},
+    "runtime_behavior_mismatch": {"grantContract": "verify_exec", "grantProtocol": None},
+    "execution_trace_required": {"grantContract": "execution_trace", "grantProtocol": None},
+    "stale_read_detected": {
+        "grantContract": "authoritative_read",
+        "grantProtocol": "stale_safe_patch",
+    },
+    "stale_read_protocol_required": {
+        "grantContract": "stale_read_protocol",
+        "grantProtocol": "stale_safe_patch",
+    },
+    "destructive_attempt": {"grantContract": "destructive_policy", "grantProtocol": None},
+    "concurrent_mutation_detected": {
+        "grantContract": "stale_read_protocol",
+        "grantProtocol": "lock_read_validate_apply",
+    },
+    "concurrent_mutation": {  # legacy alias
+        "grantContract": "stale_read_protocol",
+        "grantProtocol": "lock_read_validate_apply",
+    },
+    "partial_mutation_detected": {
+        "grantContract": "rollback_protocol",
+        "grantProtocol": "transactional_batch_patch",
+    },
+    "sidecar_residue_detected": {
+        "grantContract": "rollback_protocol",
+        "grantProtocol": "rollback_cleanup",
+    },
+    "api_shape_mismatch": {"grantContract": "behavior_check", "grantProtocol": None},
+    "unclassified_failure": {"grantContract": "verify_exec", "grantProtocol": "stale_safe_patch"},
 }
 
 # Reference MCS (diagnostic baseline for reports — derived from trap analysis, not agent input).
@@ -113,14 +142,17 @@ class VerifyOutcome:
     invariant_stdout: str = ""
     invariant_stderr: str = ""
     execution_error: str | None = None
+    concurrent_mutation_observed: bool = False
 
 
 @dataclass
 class ContractBroker:
-    """Adaptive contract broker — grants visibility incrementally on classified failure."""
+    """Adaptive broker — grants visibility contracts and execution protocols on failure."""
 
     visible: set[str] = field(default_factory=lambda: set(INITIAL_CONTRACTS))
+    active_protocol: str = "single_shot_patch"
     escalation_path: list[dict[str, Any]] = field(default_factory=list)
+    protocol_path: list[str] = field(default_factory=lambda: ["single_shot_patch"])
     failure_classes: list[str] = field(default_factory=list)
 
     def visible_contracts(self) -> list[str]:
@@ -132,39 +164,103 @@ class ContractBroker:
         if contract not in CONTRACTS:
             return False
         self.visible.add(contract)
-        # behavior_check bundles with verify_exec escalation path
         if contract == "verify_exec":
             self.visible.add("behavior_check")
+        return True
+
+    def grant_protocol(self, protocol: str, *, failure_class: str, step: int) -> bool:
+        from execution_protocols import EXECUTION_PROTOCOLS
+
+        if protocol not in EXECUTION_PROTOCOLS:
+            return False
+        if protocol == self.active_protocol:
+            return False
+        self.active_protocol = protocol
+        if protocol not in self.protocol_path:
+            self.protocol_path.append(protocol)
+        return True
+
+    def _record_escalation(
+        self,
+        *,
+        failure_class: str,
+        step: int,
+        granted_contract: str | None,
+        granted_protocol: str | None,
+    ) -> None:
         self.escalation_path.append(
             {
                 "step": step,
                 "failureClass": failure_class,
-                "grantedContract": contract,
+                "grantedContract": granted_contract,
+                "grantedProtocol": granted_protocol,
                 "visibleAfter": self.visible_contracts(),
+                "protocolAfter": self.active_protocol,
             }
         )
-        return True
 
     def escalate(self, failure_class: str | None, *, step: int) -> str | None:
         if not failure_class:
             return None
         self.failure_classes.append(failure_class)
-        contract = ESCALATION_GRAPH.get(failure_class)
-        if not contract:
+        action = ESCALATION_GRAPH.get(failure_class)
+        if not action:
             return None
-        if self.grant(contract, failure_class=failure_class, step=step):
-            return contract
-        # Already have that contract — try chained escalation
+
+        granted_contract: str | None = None
+        granted_protocol: str | None = None
+        contract_spec = action.get("grantContract")
+        protocol_spec = action.get("grantProtocol")
+
+        if contract_spec and self.grant(str(contract_spec), failure_class=failure_class, step=step):
+            granted_contract = str(contract_spec)
+        elif contract_spec and contract_spec in self.visible:
+            granted_contract = None  # already visible
+
+        if protocol_spec and self.grant_protocol(str(protocol_spec), failure_class=failure_class, step=step):
+            granted_protocol = str(protocol_spec)
+
+        if granted_contract or granted_protocol:
+            self._record_escalation(
+                failure_class=failure_class,
+                step=step,
+                granted_contract=granted_contract,
+                granted_protocol=granted_protocol,
+            )
+            return granted_contract or granted_protocol
+
+        # Contract/protocol already granted — try chained contract escalation
         chained = _CHAINED_ESCALATION.get(failure_class, [])
         for next_contract in chained:
             if next_contract not in self.visible and self.grant(next_contract, failure_class=failure_class, step=step):
+                self._record_escalation(
+                    failure_class=failure_class,
+                    step=step,
+                    granted_contract=next_contract,
+                    granted_protocol=None,
+                )
                 return next_contract
+
+        # Chained protocol fallback for concurrent stale races
+        chained_protocols = _CHAINED_PROTOCOL_ESCALATION.get(failure_class, [])
+        for next_protocol in chained_protocols:
+            if self.grant_protocol(next_protocol, failure_class=failure_class, step=step):
+                self._record_escalation(
+                    failure_class=failure_class,
+                    step=step,
+                    granted_contract=None,
+                    granted_protocol=next_protocol,
+                )
+                return next_protocol
+
         return None
 
     def to_coverage(self) -> dict[str, Any]:
         return {
             "orchestrated": True,
             "visibleContracts": self.visible_contracts(),
+            "activeProtocol": self.active_protocol,
+            "executionProtocolPath": list(self.protocol_path),
             "executableChecks": "verify_exec" in self.visible,
             "invariantChecks": "hidden_invariant" in self.visible,
             "traceScripts": "execution_trace" in self.visible,
@@ -181,8 +277,17 @@ _CHAINED_ESCALATION: dict[str, list[str]] = {
     "runtime_behavior_mismatch": ["behavior_check"],
     "stale_read_detected": ["stale_read_protocol"],
     "stale_read_protocol_required": ["authoritative_read"],
-    "concurrent_mutation": ["authoritative_read", "stale_read_protocol"],
+    "concurrent_mutation_detected": ["authoritative_read"],
+    "concurrent_mutation": ["authoritative_read"],
     "unclassified_failure": ["hidden_invariant", "execution_trace"],
+}
+
+_CHAINED_PROTOCOL_ESCALATION: dict[str, list[str]] = {
+    "stale_read_detected": ["stale_safe_patch"],
+    "concurrent_mutation_detected": ["lock_read_validate_apply"],
+    "concurrent_mutation": ["lock_read_validate_apply"],
+    "partial_mutation_detected": ["transactional_batch_patch"],
+    "sidecar_residue_detected": ["rollback_cleanup"],
 }
 
 
@@ -254,6 +359,9 @@ def _verify_script_signals(task_id: str) -> dict[str, bool]:
 
 def classify_failure(task_id: str, outcome: VerifyOutcome) -> str | None:
     """Classify verify/execution failure into an escalation key (no trap metadata)."""
+    if outcome.concurrent_mutation_observed:
+        return "concurrent_mutation_detected"
+
     signals = _verify_script_signals(task_id)
     combined = " ".join(
         filter(
@@ -270,10 +378,10 @@ def classify_failure(task_id: str, outcome: VerifyOutcome) -> str | None:
 
     if outcome.execution_error:
         err = outcome.execution_error.lower()
-        if "stale_content" in err or "stale" in err:
-            return "stale_read_detected"
         if "destructive" in err:
             return "destructive_attempt"
+        if "stale_content" in err or "stale" in err:
+            return "stale_read_detected"
 
     # Primary verify passes but invariant fails → hidden invariant gap
     if outcome.verify_rc == 0 and signals["has_invariant_script"]:
@@ -298,8 +406,18 @@ def classify_failure(task_id: str, outcome: VerifyOutcome) -> str | None:
     if outcome.verify_rc != 0 and signals["verify_has_trace"]:
         return "execution_trace_required"
 
-    if outcome.execution_error and "concurrent" in outcome.execution_error.lower():
-        return "concurrent_mutation"
+    if outcome.execution_error:
+        err_lower = outcome.execution_error.lower()
+        if "concurrent" in err_lower or "single_shot_patch does not reconcile" in err_lower:
+            return "concurrent_mutation_detected"
+        if "sidecar" in err_lower:
+            return "sidecar_residue_detected"
+        if "partial" in err_lower and "batch" in err_lower:
+            return "partial_mutation_detected"
+
+    lower_all = combined.lower()
+    if outcome.verify_rc != 0 and "version = 3" in lower_all:
+        return "concurrent_mutation_detected"
 
     if outcome.verify_rc != 0:
         return "unclassified_failure"

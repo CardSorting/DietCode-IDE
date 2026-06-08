@@ -15,7 +15,7 @@ End-to-end benchmark harness for DietCode agent workflows — **mutation safety,
 
 **Phase 3 claim:** Reliable bounded autonomy emerges through **adaptive runtime contract escalation**, not static maximal visibility.
 
-**Corpus:** 40 tasks in three tiers (tasks 031–050 reserved). DietCode **1.6.5**, benchmark **v1.2** (Phase 3 orchestrator).
+**Corpus:** 40 tasks in three tiers (tasks 031–050 reserved). DietCode **1.6.5**, benchmark **v1.3** (Phase 3.1 execution protocols).
 
 ## Layout
 
@@ -208,6 +208,6 @@ adversarial trap metadata. Tasks 052+ may ship `verify_invariant.sh` for a secon
 
 - Reference passes **100%** on all 40 tasks (80 rows across `raw_rpc` + `bridge`).
 - Phase 2: `grep_only` **6/10** nightmare → `contract_full` **9/10** (static maximal visibility).
-- Phase 3: **`orchestrated` 8/10** nightmare with **MCS telemetry** — e.g. task 052 escalates `hidden_invariant` on failure, then passes.
-- Task **057** fails all modes — needs organic multi-writer stale recovery, not contract visibility alone.
+- Phase 3–3.1: **`orchestrated` 9/10** nightmare — MCS + `executionProtocolPath` telemetry.
+- Task **052**: visibility escalation (`hidden_invariant`). Task **057**: dual-axis (`stale_read_protocol` + `lock_read_validate_apply`).
 - Zero wrong-file edits across all live runs.

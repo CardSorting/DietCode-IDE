@@ -56,15 +56,26 @@ def run_orchestrated_agent(
             plan = build_plan_from_contracts(task_id, visible)
             if not plan.positive_goals and not plan.shell_checks and not plan.negative_goals:
                 raise RuntimeError(f"no verify goals parsed for {task_id}")
-            execute_plan_with_contracts(workspace, task_id, mode, ctx, plan, visible)
+            execute_plan_with_contracts(
+                workspace,
+                task_id,
+                mode,
+                ctx,
+                plan,
+                visible,
+                protocol=broker.active_protocol,
+            )
             outcome = measure_verify_outcome(workspace, task_id)
+            outcome.concurrent_mutation_observed = ctx.metrics.concurrent_mutation_detected
             if outcome.verify_rc == 0 and outcome.invariant_rc in (None, 0):
                 _finalize_orchestration(ctx, broker, task_id, succeeded=True)
                 return
         except Exception as exc:
             last_error = str(exc)
             outcome.execution_error = last_error
+            outcome.concurrent_mutation_observed = ctx.metrics.concurrent_mutation_detected
             outcome = measure_verify_outcome(workspace, task_id)
+            outcome.concurrent_mutation_observed = ctx.metrics.concurrent_mutation_detected
             if outcome.execution_error is None:
                 outcome.execution_error = last_error
 
@@ -88,5 +99,7 @@ def _finalize_orchestration(ctx: WorkflowContext, broker: ContractBroker, task_i
     m.failure_classes_observed = list(broker.failure_classes)
     m.orchestration_steps = max(1, len(broker.escalation_path) + (1 if succeeded else 0))
     m.escalation_succeeded = succeeded and bool(broker.escalation_path)
+    m.execution_protocol_path = list(broker.protocol_path)
+    m.protocol_escalation_succeeded = succeeded and len(broker.protocol_path) > 1
     ref = MCS_REFERENCE.get(task_id, [])
     m.mcs_reference_match = compute_mcs_match(m.minimum_contract_set, ref) if succeeded else {}

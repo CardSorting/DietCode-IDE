@@ -49,8 +49,11 @@ class ContractsTest(unittest.TestCase):
             "runtime_behavior_mismatch",
             "stale_read_detected",
             "execution_trace_required",
+            "concurrent_mutation_detected",
         ):
             self.assertIn(key, ESCALATION_GRAPH)
+            action = ESCALATION_GRAPH[key]
+            self.assertIn("grantContract", action)
 
     def test_contracts_allow_verify_exec(self) -> None:
         self.assertFalse(contracts_allow(set(INITIAL_CONTRACTS), "verify_exec"))

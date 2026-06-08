@@ -15,7 +15,7 @@ REPO_ROOT = BENCHMARK_ROOT.parents[1]
 RESULTS_DIR = BENCHMARK_ROOT / "results"
 
 from contract_ladder import NIGHTMARE_TASKS  # noqa: E402
-from contracts import MCS_REFERENCE, ORCHESTRATOR_CLAIM  # noqa: E402
+from contracts import MCS_REFERENCE, ORCHESTRATOR_CLAIM, PHASE_31_CLAIM  # noqa: E402
 
 
 def render_mcs_report(rows: list[dict], *, generated_at: str, input_file: str) -> str:
@@ -26,14 +26,16 @@ def render_mcs_report(rows: list[dict], *, generated_at: str, input_file: str) -
         "",
         f"> {ORCHESTRATOR_CLAIM}",
         "",
-        "Methodology: [WHITEPAPER.md](WHITEPAPER.md) §Phase 3",
+        f"> {PHASE_31_CLAIM}",
+        "",
+        "Methodology: [WHITEPAPER.md](WHITEPAPER.md) §Phase 3–3.1",
         "",
         "---",
         "",
         "## Minimum Contract Set (MCS) — nightmare tier",
         "",
-        "| task | passed | MCS (observed) | MCS (reference) | escalations | match |",
-        "|------|--------|----------------|-----------------|------------:|-------|",
+        "| task | passed | MCS (observed) | protocol path | escalations | match |",
+        "|------|--------|----------------|---------------|------------:|-------|",
     ]
     passed = 0
     for row in sorted(rows, key=lambda r: r.get("taskId", "")):
@@ -42,10 +44,10 @@ def render_mcs_report(rows: list[dict], *, generated_at: str, input_file: str) -
         if ok:
             passed += 1
         mcs = ", ".join(row.get("minimumContractSet") or [])
-        ref = ", ".join(MCS_REFERENCE.get(row.get("taskId", ""), []))
+        protocols = " → ".join(row.get("executionProtocolPath") or ["single_shot_patch"])
         esc = len(row.get("contractEscalationPath") or [])
         match = row.get("mcsReferenceMatch", {}).get("matched", "—")
-        lines.append(f"| {tid} | {'PASS' if ok else 'FAIL'} | {mcs or '—'} | {ref or '—'} | {esc} | {match} |")
+        lines.append(f"| {tid} | {'PASS' if ok else 'FAIL'} | {mcs or '—'} | {protocols} | {esc} | {match} |")
 
     lines.extend(
         [
@@ -54,30 +56,48 @@ def render_mcs_report(rows: list[dict], *, generated_at: str, input_file: str) -
             "",
             (
                 f"The orchestrator passed **{passed}/{len(rows)}** nightmare tasks starting from "
-                "`readme` + `verify_grep` only. Failures trigger classified escalation; the broker "
-                "grants the next contract layer and retries from a clean fixture snapshot."
+                "`readme` + `verify_grep` + `single_shot_patch` only. Failures classify into "
+                "visibility contracts *and* execution protocols; the broker retries from a clean snapshot."
+            ),
+            "",
+            (
+                "**Phase 3.1:** task 057 escalates `concurrent_mutation_detected` → "
+                "`stale_read_protocol` + `lock_read_validate_apply` (strip concurrent `VERSION = 3`, reconcile, re-apply)."
             ),
             "",
             (
                 "**Key result:** task 052 MCS = `readme` + `verify_grep` + `hidden_invariant` "
-                "(1 escalation after `hidden_invariant_missing`) — matches reference MCS."
-            ),
-            "",
-            (
-                "**Gap:** task 057 exhausts escalation without organic stale recovery; "
-                "task 059 grants `verify_exec` but still fails execution (visibility ≠ patch correctness)."
+                "(1 visibility escalation)."
             ),
             "",
             f"**Orchestrated pass rate:** {passed}/{len(rows)}",
             "",
-            "## Example escalation (task 052)",
+            "## Example escalations",
+            "",
+            "Task 052 (visibility):",
             "",
             "```json",
             json.dumps(
                 {
                     "failureClass": "hidden_invariant_missing",
                     "grantedContract": "hidden_invariant",
-                    "visibleAfter": ["readme", "verify_grep", "hidden_invariant"],
+                    "grantedProtocol": None,
+                    "protocolAfter": "single_shot_patch",
+                },
+                indent=2,
+            ),
+            "```",
+            "",
+            "Task 057 (visibility + execution):",
+            "",
+            "```json",
+            json.dumps(
+                {
+                    "failureClass": "concurrent_mutation_detected",
+                    "grantedContract": "stale_read_protocol",
+                    "grantedProtocol": "lock_read_validate_apply",
+                    "executionProtocolPath": ["single_shot_patch", "lock_read_validate_apply"],
+                    "protocolEscalationSucceeded": True,
                 },
                 indent=2,
             ),

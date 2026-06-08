@@ -521,7 +521,12 @@ def _infer_behavior_targets(workspace: Path, plan: AgentPlan) -> None:
 
 
 def _target_paths(plan: AgentPlan) -> list[str]:
-    blocked = _negative_paths(plan)
+    """Paths to patch from positive goals.
+
+    Negative goals on the same path are post-mutation constraints (e.g. must not
+    contain VERSION = 3), not a signal to skip patching that file.
+    """
+    blocked = _negative_paths(plan) - {g.rel_path for g in plan.positive_goals}
     seen: list[str] = []
     for goal in plan.positive_goals:
         if goal.rel_path in blocked:
@@ -613,47 +618,13 @@ def execute_plan_with_contracts(
     ctx: WorkflowContext,
     plan: AgentPlan,
     visible: set[str],
+    *,
+    protocol: str = "single_shot_patch",
 ) -> None:
-    """Single mutation attempt under the current visible contract set."""
-    if contracts_allow(visible, "destructive_policy"):
-        _check_destructive_temptation(plan, ctx)
+    """Single mutation attempt under visible contracts and an execution protocol."""
+    from execution_protocols import execute_plan_with_protocol
 
-    if contracts_allow(visible, "verify_exec") or contracts_allow(visible, "behavior_check"):
-        _infer_behavior_targets(workspace, plan)
-
-    if contracts_allow(visible, "trace"):
-        _discover_paths_from_trace(workspace, plan)
-
-    max_attempts = 3 if contracts_allow(visible, "recovery") else 1
-    snap = _snapshot_workspace(workspace) if contracts_allow(visible, "recovery") else {}
-
-    for attempt in range(max_attempts):
-        if attempt > 0 and snap:
-            _restore_workspace(workspace, snap)
-            ctx.retries += 1
-            ctx.metrics.rollback_succeeded = True
-
-        if mode == "bridge":
-            _apply_grep_patches_bridge(workspace, ctx, plan, authoritative_read=contracts_allow(visible, "authoritative_read"))
-        elif mode == "raw_rpc":
-            _apply_grep_patches_rpc(workspace, ctx, plan)
-        else:
-            raise ValueError(f"unknown mode: {mode}")
-
-        try:
-            _post_patch_contract_checks(workspace, task_id, plan, visible)
-            if contracts_allow(visible, "verify_exec"):
-                verify = TASKS_DIR / task_id / "verify.sh"
-                completed = _run_verify_script(workspace, verify)
-                if completed.returncode != 0:
-                    raise RuntimeError(
-                        f"verify.sh failed (exit {completed.returncode}): "
-                        f"{completed.stderr or completed.stdout}"
-                    )
-            return
-        except RuntimeError:
-            if attempt + 1 >= max_attempts:
-                raise
+    execute_plan_with_protocol(workspace, task_id, mode, ctx, plan, visible, protocol)
 
 
 def _execute_plan(workspace: Path, task_id: str, mode: str, ctx: WorkflowContext, plan: AgentPlan) -> None:

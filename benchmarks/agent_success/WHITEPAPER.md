@@ -323,6 +323,38 @@ make benchmark-contract-orchestrator   # nightmare tier → RESULTS_ORCHESTRATOR
 
 Results: [RESULTS_ORCHESTRATOR.md](RESULTS_ORCHESTRATOR.md)
 
+### 6.6 Phase 3.1 — Execution-Side Recovery Protocol
+
+Phase 3 escalated **visibility contracts** only. Phase 3.1 adds a second axis — **execution protocols** — because revealing more truth is not enough when workspace state changes mid-mutation.
+
+```text
+failure → classify → grantContract + grantProtocol → retry with new mutation strategy
+```
+
+| Protocol | Behavior |
+|----------|----------|
+| `single_shot_patch` | Read, validate, apply (default) |
+| `stale_safe_patch` | Re-read and reconcile on `stale_content` |
+| `lock_read_validate_apply` | Authoritative read; strip concurrent writer lines; reconcile |
+| `transactional_batch_patch` | Snapshot rollback between batch attempts |
+| `rollback_cleanup` | Restore fixture and remove sidecar residue |
+
+**Dual-axis escalation example (task 057):**
+
+```json
+{
+  "failureClass": "concurrent_mutation_detected",
+  "grantedContract": "stale_read_protocol",
+  "grantedProtocol": "lock_read_validate_apply",
+  "executionProtocolPath": ["single_shot_patch", "lock_read_validate_apply"],
+  "protocolEscalationSucceeded": true
+}
+```
+
+**Claim (Phase 3.1):** Runtime contract visibility tells the agent what truth exists; **execution protocols** determine whether mutation remains safe under changing state.
+
+Implementation: `execution_protocols.py`, extended `ESCALATION_GRAPH` in `contracts.py`.
+
 ---
 
 ## 7. Metrics
@@ -354,6 +386,8 @@ Each run emits one JSONL `task_result` row:
 | `contractEscalationPath` | Failure class → granted contract per step |
 | `escalationSucceeded` | Task passed after at least one contract escalation |
 | `orchestrationSteps` | Broker iterations consumed |
+| `executionProtocolPath` | Protocols active across orchestration (`orchestrated` profile) |
+| `protocolEscalationSucceeded` | Task passed after execution-protocol escalation |
 | `mcsReferenceMatch` | Observed MCS vs diagnostic reference |
 | `executor` | `reference` or `agent` |
 | `mode` | `raw_rpc` or `bridge` |
@@ -611,3 +645,4 @@ DietCode does not only measure whether an agent can patch code. It measures **wh
 | 1.0 | June 2026 | 30 tasks: dual modes, dual executors, adversarial traps, claim-ready reporting |
 | 1.1 | June 2026 | +10 nightmare tasks (051–060), contract metrics, Runtime Contract Evaluation Ladder (6 profiles), CRI, failure attribution, three result papers |
 | 1.2 | June 2026 | Phase 3: Runtime Contract Orchestrator, adaptive escalation, MCS metric, `orchestrated` agent profile |
+| 1.3 | June 2026 | Phase 3.1: execution protocols (`lock_read_validate_apply`, etc.), dual-axis escalation, `executionProtocolPath` metric |
