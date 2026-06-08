@@ -33,6 +33,12 @@ build/DietCode.app/Contents/Resources/bin/dietcode-agent-chat \
 
 Agent Chat sidebar in the IDE uses `dietcode-agent-chat` for real Hermes sessions.
 
+Live bounded-edit proof:
+
+```bash
+make smoke-agent-chat-live
+```
+
 Trust guarantees:
 
 - Works from `/Applications/DietCode.app`, `~/Applications/DietCode.app`, and `build/DietCode.app`

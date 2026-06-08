@@ -43,6 +43,7 @@ def main() -> int:
     rec.record("chat.script", (REPO_ROOT / "scripts/dietcode_agent_chat.py").is_file())
     rec.record("chat.launcher", (REPO_ROOT / "resources/bin/dietcode-agent-chat").is_file())
     rec.record("bundle.module", (REPO_ROOT / "scripts/dietcode_agent_bundle.py").is_file())
+    rec.record("smoke.live_script", (REPO_ROOT / "scripts/smoke_agent_chat_live.py").is_file())
 
     for name in ("dietcode-agent-chat", "dietcode-agent-chat.py", "dietcode_agent_bundle.py"):
         rec.record(f"bundled.{name}", (BIN / name).is_file(), str(BIN / name))
@@ -53,6 +54,9 @@ def main() -> int:
     rec.record("sidebar.stop_button", "_stopButton" in text)
     rec.record("sidebar.open_folder_guard", "Open a folder first." in text)
     rec.record("sidebar.async_dispatch", "dispatch_get_global_queue" in text)
+
+    makefile = (REPO_ROOT / "Makefile").read_text(encoding="utf-8") if (REPO_ROOT / "Makefile").is_file() else ""
+    rec.record("makefile.smoke_target", "smoke-agent-chat-live:" in makefile)
 
     if CHAT_TEST.is_file():
         completed = subprocess.run([sys.executable, str(CHAT_TEST)], cwd=str(REPO_ROOT), capture_output=True, text=True, check=False, timeout=180)

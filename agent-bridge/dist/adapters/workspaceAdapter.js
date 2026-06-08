@@ -1,5 +1,9 @@
+import { resolve as resolvePath } from 'node:path';
 import { DietCodeBridgeError } from '../contracts/BridgeError.js';
 import { mapRpcError } from '../contracts/errors.js';
+function normalizeWorkspacePath(path) {
+    return resolvePath(path);
+}
 export async function getWorkspaceRoot(transport) {
     const envelope = await transport.call('workspace.getRoot', {});
     if (!envelope.ok || !envelope.result) {
@@ -21,10 +25,17 @@ export async function openWorkspaceFolder(transport, path) {
 }
 export async function ensureWorkspaceRoot(transport, preferredRoot) {
     const existing = await getWorkspaceRoot(transport);
+    if (preferredRoot) {
+        const normalizedPreferred = normalizeWorkspacePath(preferredRoot);
+        if (existing && normalizeWorkspacePath(existing) === normalizedPreferred) {
+            return existing;
+        }
+        return openWorkspaceFolder(transport, preferredRoot);
+    }
     if (existing) {
         return existing;
     }
-    const target = preferredRoot ?? process.env.DIETCODE_TEST_WORKSPACE ?? process.cwd();
+    const target = process.env.DIETCODE_TEST_WORKSPACE ?? process.cwd();
     return openWorkspaceFolder(transport, target);
 }
 //# sourceMappingURL=workspaceAdapter.js.map

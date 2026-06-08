@@ -75,6 +75,12 @@ build/DietCode.app/Contents/Resources/bin/dietcode-agent-chat \
   --prompt "inspect this project"
 ```
 
+Live bounded-edit smoke (temp workspace, real Hermes patch via bridge):
+
+```bash
+make smoke-agent-chat-live
+```
+
 ---
 
 ## Public bridge API

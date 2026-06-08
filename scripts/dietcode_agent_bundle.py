@@ -279,6 +279,39 @@ def hermes_version() -> str | None:
     return None
 
 
+def open_runtime_workspace(ctx: BundleContext, workspace: Path, *, timeout: int = 45) -> dict[str, Any]:
+    """Force workspace.openFolder on the DietCode runtime for the requested root."""
+    if not ctx.bridge_cli:
+        return {"ok": False, "error": "bridge_cli_missing", "code": "bridge_missing"}
+    if not ctx.app_path:
+        return {"ok": False, "error": "app_binary_missing", "code": "runtime_unavailable"}
+    prefix = ["node", str(ctx.bridge_cli)] if ctx.bridge_cli.suffix == ".js" else [str(ctx.bridge_cli)]
+    cmd = [
+        *prefix,
+        "--compact",
+        "--wait-ready",
+        "--workspace",
+        str(workspace),
+        "--app",
+        str(ctx.app_path),
+        "profile",
+    ]
+    completed = subprocess.run(cmd, capture_output=True, text=True, check=False, timeout=timeout)
+    raw = (completed.stdout or completed.stderr).strip()
+    line = raw.splitlines()[-1] if raw else ""
+    try:
+        payload = json.loads(line) if line else {"ok": False, "error": raw[:300]}
+    except json.JSONDecodeError:
+        payload = {"ok": False, "error": raw[:300]}
+    payload["exit_code"] = completed.returncode
+    if payload.get("ok") is None:
+        opened = str(payload.get("workspacePath") or "")
+        payload["ok"] = completed.returncode == 0 and (
+            not opened or Path(opened).resolve() == workspace.resolve()
+        )
+    return payload
+
+
 def run_bridge_verify(ctx: BundleContext, workspace: Path | None = None) -> dict[str, Any]:
     if not ctx.bridge_cli:
         return {"ok": False, "error": "bridge_cli_missing", "code": "bridge_missing"}
@@ -419,6 +452,14 @@ def assert_chat_ready(ctx: BundleContext, repo_root: Path, workspace: Path) -> d
             recovery_hint="dietcode-enable-agent --doctor",
         )
     ensure_runtime_socket(ctx)
+    opened = open_runtime_workspace(ctx, workspace)
+    if not opened.get("ok"):
+        raise AgentChatError(
+            f"Failed to open workspace on runtime: {opened.get('error', opened)}",
+            code="workspace_open_failed",
+            exit_code=3,
+            recovery_hint="open_folder",
+        )
     bridge = run_bridge_verify(ctx, workspace)
     if not bridge.get("ok"):
         raise AgentChatError(
@@ -442,7 +483,15 @@ def build_system_prompt(workspace: Path, prompt: str) -> str:
     )
 
 
-def run_hermes_chat(ctx: BundleContext, workspace: Path, prompt: str, *, max_turns: int = 25) -> tuple[int, str]:
+def run_hermes_chat(
+    ctx: BundleContext,
+    workspace: Path,
+    prompt: str,
+    *,
+    max_turns: int = 25,
+    timeout: int = 600,
+    yolo: bool = False,
+) -> tuple[int, str]:
     hermes_bin = find_hermes_binary()
     if not hermes_bin:
         raise AgentChatError("Hermes missing", code="hermes_missing", exit_code=4)
@@ -471,6 +520,8 @@ def run_hermes_chat(ctx: BundleContext, workspace: Path, prompt: str, *, max_tur
         "--max-turns",
         str(max_turns),
     ]
+    if yolo:
+        cmd.append("--yolo")
     completed = subprocess.run(
         cmd,
         cwd=str(workspace),
@@ -478,7 +529,7 @@ def run_hermes_chat(ctx: BundleContext, workspace: Path, prompt: str, *, max_tur
         capture_output=True,
         text=True,
         check=False,
-        timeout=600,
+        timeout=max(30, timeout),
     )
     output = (completed.stdout or "").strip()
     if not output:
