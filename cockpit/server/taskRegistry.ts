@@ -1,7 +1,17 @@
 import { nextSessionTaskId, persistActiveTasks } from './sessionStore.js';
 
 export type TaskMode = 'supervised' | 'trusted';
-export type TaskStatus = 'pending' | 'running' | 'completed' | 'failed' | 'disconnected';
+export type TaskStatus =
+  | 'queued'
+  | 'running'
+  | 'awaiting_approval'
+  | 'disconnected'
+  | 'failed'
+  | 'completed'
+  | 'cancelled';
+
+/** @deprecated use queued */
+export type LegacyTaskStatus = 'pending';
 
 export interface GovernedTask {
   taskId: string;
@@ -17,12 +27,27 @@ export interface GovernedTask {
 }
 
 const tasks = new Map<string, GovernedTask>();
+const MAX_TASKS = 40;
 
 function persistTasks(): void {
   void persistActiveTasks(listTasks(MAX_TASKS));
 }
 
-const MAX_TASKS = 40;
+export function normalizeTaskStatus(status: string): TaskStatus {
+  if (status === 'pending') return 'queued';
+  if (
+    status === 'queued' ||
+    status === 'running' ||
+    status === 'awaiting_approval' ||
+    status === 'disconnected' ||
+    status === 'failed' ||
+    status === 'completed' ||
+    status === 'cancelled'
+  ) {
+    return status;
+  }
+  return 'failed';
+}
 
 export function nextTaskId(): string {
   return nextSessionTaskId();
@@ -31,7 +56,10 @@ export function nextTaskId(): string {
 export function restoreTasks(restored: GovernedTask[]): void {
   tasks.clear();
   for (const task of restored) {
-    tasks.set(task.taskId, task);
+    tasks.set(task.taskId, {
+      ...task,
+      status: normalizeTaskStatus(task.status),
+    });
   }
 }
 
@@ -45,7 +73,7 @@ export function createTask(input: {
     message: input.message,
     workspace: input.workspace,
     mode: input.mode,
-    status: 'pending',
+    status: 'queued',
     createdAt: new Date().toISOString(),
   };
   tasks.set(task.taskId, task);
@@ -66,8 +94,17 @@ export function listTasks(limit = MAX_TASKS): GovernedTask[] {
 export function updateTask(taskId: string, patch: Partial<GovernedTask>): GovernedTask | undefined {
   const current = tasks.get(taskId);
   if (!current) return undefined;
-  const next = { ...current, ...patch };
+  const next: GovernedTask = {
+    ...current,
+    ...patch,
+    status: patch.status ? normalizeTaskStatus(patch.status) : current.status,
+  };
   tasks.set(taskId, next);
   persistTasks();
   return next;
+}
+
+export function clearAllTasks(): void {
+  tasks.clear();
+  persistTasks();
 }

@@ -4,7 +4,7 @@ import { homedir } from 'node:os';
 import { join } from 'node:path';
 
 import type { StreamEvent } from './events.js';
-import type { GovernedTask } from './taskRegistry.js';
+import { normalizeTaskStatus, type GovernedTask } from './taskRegistry.js';
 
 const SESSION_DIR =
   process.env.DIETCODE_SESSION_DIR ?? join(homedir(), '.dietcode', 'session');
@@ -278,30 +278,54 @@ export async function initSessionStore(): Promise<{
   }
 
   const restoredTasks = (tasksFile.tasks ?? []).map((task) => {
-    if (task.status === 'running') {
+    const status = normalizeTaskStatus(String(task.status));
+    if (status === 'running' || status === 'awaiting_approval' || status === 'queued') {
       return {
         ...task,
         status: 'disconnected' as const,
-        error: task.error ?? 'Bridge restarted while task was running',
+        error:
+          task.error ??
+          (status === 'awaiting_approval'
+            ? 'Bridge restarted while task awaited approval'
+            : 'Bridge restarted while task was active'),
         finishedAt: task.finishedAt ?? new Date().toISOString(),
       };
     }
-    return task;
+    return { ...task, status };
   });
 
   return { tasks: restoredTasks, events: eventRing };
 }
 
+export async function clearSessionFiles(): Promise<void> {
+  eventRing = [];
+  recentDiffs = [];
+  pendingApprovals = [];
+  lastKernelEventSequence = 0;
+  bridgeEventSequence = 1_000_000;
+  initialized = false;
+  await ensureSessionDir();
+  await Promise.all([
+    writeFile(ACTIVE_TASKS_PATH, JSON.stringify({ version: 1, tasks: [], taskCounter: 0 }, null, 2)),
+    writeFile(PENDING_APPROVALS_PATH, JSON.stringify({ version: 1, approvals: [] }, null, 2)),
+    writeFile(RECENT_DIFFS_PATH, JSON.stringify({ version: 1, diffs: [] }, null, 2)),
+    writeFile(RECENT_EVENTS_PATH, '', 'utf8'),
+  ]);
+}
+
 export function buildSessionSnapshot(tasks: GovernedTask[]): SessionSnapshot {
-  const running = tasks.find((t) => t.status === 'running');
-  const disconnected = tasks.find((t) => t.status === 'disconnected');
+  const active =
+    tasks.find((t) => t.status === 'running') ??
+    tasks.find((t) => t.status === 'awaiting_approval') ??
+    tasks.find((t) => t.status === 'disconnected') ??
+    tasks.find((t) => t.status === 'queued');
   return {
     restoredAt: new Date().toISOString(),
     events: getSessionEventRing(),
     tasks,
     pendingApprovals: getSessionPendingApprovals(),
     recentDiffs: getSessionRecentDiffs(),
-    activeTaskId: running?.taskId ?? disconnected?.taskId,
+    activeTaskId: active?.taskId,
     meta: {
       lastKernelEventSequence,
       bridgeEventSequence,

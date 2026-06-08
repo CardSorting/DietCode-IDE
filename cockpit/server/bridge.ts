@@ -14,14 +14,27 @@ import {
   setLastKernelEventSequence,
   unregisterSseClient,
 } from './events.js';
-import { createTask, getTask, listTasks } from './taskRegistry.js';
-import { startGovernedTask } from './taskRunner.js';
+import { clearAllTasks, createTask, getTask, listTasks } from './taskRegistry.js';
+import {
+  cancelTask,
+  clearTaskAwaitingApproval,
+  retryTask,
+  setTaskAwaitingApproval,
+  startGovernedTask,
+} from './taskRunner.js';
 import {
   bootstrapSessionRecovery,
   getSessionState,
   syncPendingApprovalsFromKernel,
 } from './sessionRecovery.js';
-import { exportSessionBundle } from './sessionStore.js';
+import { clearSessionFiles, exportSessionBundle } from './sessionStore.js';
+import {
+  buildHealthSnapshot,
+  dismissBridgeRecovered,
+  probeKernel,
+  refreshExpiredApprovals,
+  setSessionAnchorWorkspace,
+} from './healthMonitor.js';
 
 const PORT = Number(process.env.COCKPIT_BRIDGE_PORT ?? 9477);
 const SOCKET_PATH = process.env.DIETCODE_SOCKET_PATH ?? join(homedir(), '.dietcode', 'control.sock');
@@ -92,6 +105,7 @@ async function rpcCall(method: string, params: Record<string, unknown> = {}): Pr
 
 async function pollKernelEvents(): Promise<void> {
   try {
+    await probeKernel(rpcCall);
     const result = (await rpcCall('events.recent', {
       afterSequence: getLastKernelEventSequence(),
       limit: 100,
@@ -108,15 +122,32 @@ async function pollKernelEvents(): Promise<void> {
           ...event,
           type: event.type === 'verify.complete' ? 'verify.completed' : event.type,
         });
-      } else if (event.type === 'approval.resolved' || event.type === 'approval.required') {
+      } else if (event.type === 'approval.required') {
         broadcastEvent(event);
+        const approvalId =
+          typeof event.payload?.approvalId === 'string'
+            ? event.payload.approvalId
+            : typeof (event.payload?.approval as Record<string, unknown> | undefined)?.approvalId ===
+                'string'
+              ? ((event.payload?.approval as Record<string, unknown>).approvalId as string)
+              : undefined;
+        if (event.taskId) {
+          setTaskAwaitingApproval(event.taskId, approvalId);
+        }
         void syncPendingApprovalsFromKernel(rpcCall);
+      } else if (event.type === 'approval.resolved') {
+        broadcastEvent(event);
+        if (event.taskId) {
+          clearTaskAwaitingApproval(event.taskId);
+        }
+        void syncPendingApprovalsFromKernel(rpcCall);
+        void refreshExpiredApprovals(rpcCall);
       } else {
         broadcastEvent(event);
       }
     }
   } catch {
-    // kernel may not be running yet
+    // kernel offline — health snapshot reflects it
   }
 }
 
@@ -166,9 +197,37 @@ const server = createServer(async (req, res) => {
     return;
   }
 
-  if (req.url === '/api/session' && req.method === 'GET') {
+  if (req.url === '/api/health' && req.method === 'GET') {
+    await probeKernel(rpcCall);
+    await refreshExpiredApprovals(rpcCall);
     res.writeHead(200, { 'Content-Type': 'application/json' });
-    res.end(JSON.stringify(getSessionState()));
+    res.end(JSON.stringify(buildHealthSnapshot(listTasks())));
+    return;
+  }
+
+  if (req.url === '/api/session' && req.method === 'GET') {
+    const state = getSessionState();
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(
+      JSON.stringify({
+        ...state,
+        health: buildHealthSnapshot(listTasks()),
+      }),
+    );
+    return;
+  }
+
+  if (req.url === '/api/session/clear' && req.method === 'POST') {
+    try {
+      clearAllTasks();
+      await clearSessionFiles();
+      dismissBridgeRecovered();
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ ok: true, mode: 'session_cleared' }));
+    } catch (err) {
+      res.writeHead(500, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: String(err) }));
+    }
     return;
   }
 
@@ -186,6 +245,7 @@ const server = createServer(async (req, res) => {
 
   if (req.url === '/api/status' && req.method === 'GET') {
     try {
+      await probeKernel(rpcCall);
       const ping = (await rpcCall('rpc.ping')) as Record<string, unknown>;
       const root = (await rpcCall('workspace.getRoot')) as Record<string, unknown>;
       res.writeHead(200, { 'Content-Type': 'application/json' });
@@ -197,10 +257,55 @@ const server = createServer(async (req, res) => {
     return;
   }
 
+  if (req.url === '/api/reconnect' && req.method === 'POST') {
+    try {
+      await probeKernel(rpcCall);
+      await syncPendingApprovalsFromKernel(rpcCall);
+      await refreshExpiredApprovals(rpcCall);
+      await pollKernelEvents();
+      dismissBridgeRecovered();
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ ok: true, health: buildHealthSnapshot(listTasks()) }));
+    } catch (err) {
+      res.writeHead(503, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ ok: false, error: String(err) }));
+    }
+    return;
+  }
+
   if (req.url === '/api/tasks' && req.method === 'GET') {
     res.writeHead(200, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify({ tasks: listTasks() }));
     return;
+  }
+
+  const taskActionMatch = req.url?.match(/^\/api\/tasks\/([^/]+)\/(retry|cancel)$/);
+  if (taskActionMatch && req.method === 'POST') {
+    const taskId = taskActionMatch[1];
+    const action = taskActionMatch[2];
+    if (action === 'retry') {
+      const task = retryTask(taskId);
+      if (!task) {
+        res.writeHead(400, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'retry_not_allowed' }));
+        return;
+      }
+      setSessionAnchorWorkspace(task.workspace);
+      res.writeHead(202, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ task, mode: 'task_retry' }));
+      return;
+    }
+    if (action === 'cancel') {
+      const task = cancelTask(taskId);
+      if (!task) {
+        res.writeHead(400, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'cancel_not_allowed' }));
+        return;
+      }
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ task, mode: 'task_cancelled' }));
+      return;
+    }
   }
 
   const taskMatch = req.url?.match(/^\/api\/tasks\/([^/?]+)$/);
@@ -252,6 +357,7 @@ const server = createServer(async (req, res) => {
         mode,
       });
 
+      setSessionAnchorWorkspace(workspace);
       startGovernedTask(task);
 
       res.writeHead(202, { 'Content-Type': 'application/json' });
@@ -272,6 +378,23 @@ const server = createServer(async (req, res) => {
       res.end(JSON.stringify({ result }));
     } catch (err) {
       res.writeHead(500, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: String(err) }));
+    }
+    return;
+  }
+
+  if (req.url === '/api/approvals/refresh' && req.method === 'POST') {
+    try {
+      await syncPendingApprovalsFromKernel(rpcCall);
+      await refreshExpiredApprovals(rpcCall);
+      const pending = (await rpcCall('approval.list', { status: 'pending', limit: 50 })) as Record<
+        string,
+        unknown
+      >;
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ ok: true, pending, health: buildHealthSnapshot(listTasks()) }));
+    } catch (err) {
+      res.writeHead(503, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ error: String(err) }));
     }
     return;

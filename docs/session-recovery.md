@@ -78,4 +78,44 @@ live steering + bounded mutation + approvals + recent context + recoverability
 
 Not a permanent black-box recorder. When you need a durable artifact, export explicitly or rely on kernel patch receipts in the workspace journal — not cockpit session sludge.
 
+## Failure semantics
+
+DietCode never pretends an agent is still safely operating when the control loop is broken.
+
+### Task statuses
+
+| Status | Meaning |
+|--------|---------|
+| `queued` | Accepted, not yet spawned |
+| `running` | Hermes subprocess active |
+| `awaiting_approval` | Blocked on cockpit/kernel approval |
+| `disconnected` | Bridge restarted or control loop lost mid-run |
+| `failed` | Agent process died or exited with error |
+| `completed` | Finished successfully |
+| `cancelled` | User cancelled from cockpit |
+
+### Cockpit banners
+
+| Banner | Trigger |
+|--------|---------|
+| Kernel offline | Control socket unreachable |
+| Bridge reconnected | Session restored after bridge restart |
+| Task disconnected | Orphaned task after mid-run interruption |
+| Approval expired | Kernel approvals past TTL |
+| Workspace changed externally | `workspace.revision.externalChangeDetected` or path drift |
+| Live stream stale | SSE silent >20s while kernel online |
+
+### Recovery actions
+
+| Action | Endpoint |
+|--------|----------|
+| Reconnect | `POST /api/reconnect` |
+| Retry task | `POST /api/tasks/:id/retry` |
+| Cancel task | `POST /api/tasks/:id/cancel` |
+| Refresh approvals | `POST /api/approvals/refresh` |
+| Export snapshot | `POST /api/session/export` |
+| Clear session | `POST /api/session/clear` |
+
+Health probe: `GET /api/health`
+
 See also: [governed-tasks.md](./governed-tasks.md), [approval-lifecycle.md](./approval-lifecycle.md).

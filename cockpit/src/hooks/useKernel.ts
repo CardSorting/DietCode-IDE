@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 
 export interface KernelEvent {
   id: string;
@@ -18,15 +18,50 @@ export interface KernelStatus {
   error?: string;
 }
 
+export interface HealthBanner {
+  id: string;
+  severity: 'info' | 'warning' | 'error';
+  message: string;
+  detail?: string;
+}
+
+export interface HealthSnapshot {
+  kernelConnected: boolean;
+  kernelError?: string;
+  bridgeRecovered: boolean;
+  workspaceDrift: boolean;
+  externalChangeDetected: boolean;
+  expiredApprovalCount: number;
+  banners: HealthBanner[];
+  tasks: {
+    disconnected: string[];
+    awaitingApproval: string[];
+    running: string[];
+    queued: string[];
+  };
+}
+
 export interface SessionState {
   activeTaskId?: string;
   recentDiffs?: Array<{ path: string; preview?: string; taskId?: string; timestamp: string }>;
+  health?: HealthSnapshot;
+  tasks?: Array<{ taskId: string; status: string; error?: string }>;
 }
+
+const SSE_STALE_MS = 20_000;
 
 export function useKernel() {
   const [status, setStatus] = useState<KernelStatus>({ connected: false });
   const [events, setEvents] = useState<KernelEvent[]>([]);
   const [session, setSession] = useState<SessionState>({});
+  const [health, setHealth] = useState<HealthSnapshot | null>(null);
+  const [sseStale, setSseStale] = useState(false);
+  const lastEventAt = useRef(Date.now());
+  const sseGeneration = useRef(0);
+
+  const applyHealth = useCallback((snapshot: HealthSnapshot | undefined) => {
+    if (snapshot) setHealth(snapshot);
+  }, []);
 
   const refreshStatus = useCallback(async () => {
     try {
@@ -48,39 +83,104 @@ export function useKernel() {
     }
   }, []);
 
+  const refreshHealth = useCallback(async () => {
+    try {
+      const res = await fetch('/api/health');
+      if (!res.ok) return;
+      const data = (await res.json()) as HealthSnapshot;
+      applyHealth(data);
+    } catch {
+      // bridge unavailable
+    }
+  }, [applyHealth]);
+
   const restoreSession = useCallback(async () => {
     try {
       const res = await fetch('/api/session');
       if (!res.ok) return;
-      const data = (await res.json()) as {
-        events?: KernelEvent[];
-        activeTaskId?: string;
-        recentDiffs?: SessionState['recentDiffs'];
-      };
+      const data = (await res.json()) as SessionState & { events?: KernelEvent[] };
       if (data.events?.length) {
         setEvents(data.events.slice(-299));
+        lastEventAt.current = Date.now();
       }
+      const tasks = (data as { tasks?: SessionState['tasks'] }).tasks;
       setSession({
         activeTaskId: data.activeTaskId,
         recentDiffs: data.recentDiffs,
+        tasks,
       });
+      applyHealth(data.health);
     } catch {
       // bridge may still be starting
     }
+  }, [applyHealth]);
+
+  const reconnect = useCallback(async () => {
+    await fetch('/api/reconnect', { method: 'POST' });
+    sseGeneration.current += 1;
+    setSseStale(false);
+    lastEventAt.current = Date.now();
+    await Promise.all([refreshStatus(), refreshHealth(), restoreSession()]);
+  }, [refreshHealth, refreshStatus, restoreSession]);
+
+  const clearSession = useCallback(async () => {
+    await fetch('/api/session/clear', { method: 'POST' });
+    setEvents([]);
+    setSession({});
+    setHealth(null);
+    await refreshHealth();
+  }, [refreshHealth]);
+
+  const exportSnapshot = useCallback(async (): Promise<string | null> => {
+    const res = await fetch('/api/session/export', { method: 'POST' });
+    if (!res.ok) return null;
+    const data = (await res.json()) as { path?: string };
+    return data.path ?? null;
   }, []);
+
+  const refreshApprovals = useCallback(async () => {
+    await fetch('/api/approvals/refresh', { method: 'POST' });
+    await refreshHealth();
+  }, [refreshHealth]);
+
+  const retryTask = useCallback(
+    async (taskId: string): Promise<string | null> => {
+      const res = await fetch(`/api/tasks/${encodeURIComponent(taskId)}/retry`, { method: 'POST' });
+      if (!res.ok) return null;
+      const data = (await res.json()) as { task?: { taskId: string } };
+      await restoreSession();
+      return data.task?.taskId ?? null;
+    },
+    [restoreSession],
+  );
+
+  const cancelTask = useCallback(
+    async (taskId: string) => {
+      await fetch(`/api/tasks/${encodeURIComponent(taskId)}/cancel`, { method: 'POST' });
+      await restoreSession();
+    },
+    [restoreSession],
+  );
 
   useEffect(() => {
     void refreshStatus();
+    void refreshHealth();
     void restoreSession();
     const statusTimer = setInterval(() => {
       void refreshStatus();
+      void refreshHealth();
     }, 5000);
     return () => clearInterval(statusTimer);
-  }, [refreshStatus, restoreSession]);
+  }, [refreshHealth, refreshStatus, restoreSession]);
 
   useEffect(() => {
+    const generation = sseGeneration.current;
     const source = new EventSource('/events');
+
     source.onmessage = (msg) => {
+      if (generation !== sseGeneration.current) return;
+      lastEventAt.current = Date.now();
+      setSseStale(false);
       try {
         const event = JSON.parse(msg.data) as KernelEvent;
         setEvents((prev) => [...prev.slice(-299), event]);
@@ -88,8 +188,52 @@ export function useKernel() {
         // ignore malformed frames
       }
     };
-    return () => source.close();
-  }, []);
 
-  return { status, events, session, refreshStatus, restoreSession };
+    source.onerror = () => {
+      setSseStale(true);
+    };
+
+    const staleTimer = setInterval(() => {
+      if (Date.now() - lastEventAt.current > SSE_STALE_MS && status.connected) {
+        setSseStale(true);
+      }
+    }, 5000);
+
+    return () => {
+      source.close();
+      clearInterval(staleTimer);
+    };
+  }, [status.connected]);
+
+  const banners: HealthBanner[] = [
+    ...(health?.banners ?? []),
+    ...(sseStale
+      ? [
+          {
+            id: 'sse_stale',
+            severity: 'warning' as const,
+            message: 'Live stream stale',
+            detail: 'Event stream may be disconnected. Reconnect to resume live updates.',
+          },
+        ]
+      : []),
+  ];
+
+  return {
+    status,
+    events,
+    session,
+    health,
+    banners,
+    sseStale,
+    refreshStatus,
+    refreshHealth,
+    restoreSession,
+    reconnect,
+    clearSession,
+    exportSnapshot,
+    refreshApprovals,
+    retryTask,
+    cancelTask,
+  };
 }

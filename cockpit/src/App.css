@@ -58,6 +58,74 @@ body {
   color: #f85149;
 }
 
+.status-banners {
+  border-bottom: 1px solid #30363d;
+  background: #161b22;
+  padding: 0.5rem 1rem 0.75rem;
+}
+
+.status-banner {
+  padding: 0.5rem 0.75rem;
+  border-radius: 6px;
+  margin-bottom: 0.35rem;
+  font-size: 0.85rem;
+}
+
+.status-banner.severity-error {
+  background: #da363322;
+  border: 1px solid #da363355;
+  color: #f85149;
+}
+
+.status-banner.severity-warning {
+  background: #d2992222;
+  border: 1px solid #d2992255;
+  color: #e3b341;
+}
+
+.status-banner.severity-info {
+  background: #388bfd22;
+  border: 1px solid #388bfd55;
+  color: #58a6ff;
+}
+
+.status-banner-detail {
+  display: block;
+  margin-top: 0.2rem;
+  font-size: 0.8rem;
+  opacity: 0.9;
+}
+
+.status-banner-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-top: 0.5rem;
+}
+
+.status-banner-actions button {
+  background: #21262d;
+  border: 1px solid #30363d;
+  border-radius: 6px;
+  color: #e6edf3;
+  padding: 0.35rem 0.7rem;
+  font-size: 0.75rem;
+  cursor: pointer;
+}
+
+.status-banner-actions button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.status-banner-actions button.muted {
+  color: #8b949e;
+}
+
+.timeline-item.event-task-cancelled .type {
+  color: #8b949e;
+}
+
 .layout {
   display: grid;
   grid-template-columns: 320px 1fr 360px;

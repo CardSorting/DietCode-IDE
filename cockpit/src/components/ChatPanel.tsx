@@ -2,10 +2,11 @@ import { useCallback, useState } from 'react';
 
 interface Props {
   workspace?: string;
+  kernelConnected?: boolean;
   onTaskSubmitted?: (taskId: string) => void;
 }
 
-export function ChatPanel({ workspace, onTaskSubmitted }: Props) {
+export function ChatPanel({ workspace, kernelConnected = true, onTaskSubmitted }: Props) {
   const [message, setMessage] = useState('');
   const [mode, setMode] = useState<'supervised' | 'trusted'>('supervised');
   const [busy, setBusy] = useState(false);
@@ -57,6 +58,11 @@ export function ChatPanel({ workspace, onTaskSubmitted }: Props) {
             <div>{lastTaskId}</div>
           </div>
         ) : null}
+        {!kernelConnected ? (
+          <p className="approval-error">
+            Kernel offline — tasks cannot run until the control socket is available.
+          </p>
+        ) : null}
         {error ? <p className="approval-error">{error}</p> : null}
       </div>
       <div className="chat-mode">
@@ -83,9 +89,12 @@ export function ChatPanel({ workspace, onTaskSubmitted }: Props) {
           onChange={(e) => setMessage(e.target.value)}
           onKeyDown={(e) => e.key === 'Enter' && void submitTask()}
           placeholder="Fix the failing test…"
-          disabled={busy}
+          disabled={busy || !kernelConnected}
         />
-        <button onClick={() => void submitTask()} disabled={busy || !message.trim()}>
+        <button
+          onClick={() => void submitTask()}
+          disabled={busy || !message.trim() || !kernelConnected}
+        >
           {busy ? 'Running…' : 'Run task'}
         </button>
       </div>

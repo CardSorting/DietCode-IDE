@@ -5,6 +5,7 @@ const TASK_EVENT_TYPES = new Set([
   'task.completed',
   'task.failed',
   'task.disconnected',
+  'task.cancelled',
   'agent.message',
   'tool.call.started',
   'tool.call.completed',
