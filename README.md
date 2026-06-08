@@ -47,7 +47,7 @@ One kernel holds mutation authority. The Cockpit never edits files directly — 
 
 | I want to… | Start here |
 |------------|------------|
-| **Understand the idea** (no install) | [The six checkpoints](#the-six-checkpoints) → [checkpoint model](docs/checkpoint-model.md) |
+| **Understand the idea** (no install) | [Brief](docs/brief.md) → [philosophy](docs/philosophy.md) → [checkpoints](#the-six-checkpoints) |
 | **Run DietCode on my Mac** | [Quick start](#quick-start) → [getting started](docs/getting-started.md) |
 | **Watch an agent task in the UI** | [Quick start](#quick-start) → [governed tasks](docs/governed-tasks.md) |
 | **Know if my install is healthy** | `make checkpoint-core` → [testing guide](docs/testing.md) |
@@ -175,6 +175,7 @@ make checkpoint-core   # must pass before checkpoint model changes
 
 | Job | Docs |
 |-----|------|
+| **Concept** | [brief](docs/brief.md) · [philosophy](docs/philosophy.md) · [whitepaper](docs/whitepaper.md) |
 | **Learn** | [checkpoint-model](docs/checkpoint-model.md) · [architecture](docs/architecture.md) · [governed-tasks](docs/governed-tasks.md) |
 | **Run** | [getting-started](docs/getting-started.md) · [testing](docs/testing.md) · [troubleshooting](docs/troubleshooting.md) |
 | **Build** | [agent-bridge](docs/agent-bridge.md) · [kernel-rpc](docs/kernel-rpc.md) · [integrations](docs/integrations.md) |

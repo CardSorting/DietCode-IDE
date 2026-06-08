@@ -29,12 +29,23 @@
 
 ---
 
+## Concept papers
+
+| Doc | When to read | Length |
+|-----|--------------|--------|
+| [brief.md](brief.md) | Executive companion — start here for the idea | ~5 min |
+| [philosophy.md](philosophy.md) | Why governed mutation; values and refusals | ~20 min |
+| [whitepaper.md](whitepaper.md) | Full runtime architecture and contracts | ~45 min |
+
+---
+
 ## Learn the model
 
 Start with the **six checkpoints** — every other doc maps to one of them.
 
 | Doc | When to read | Audience |
 |-----|--------------|----------|
+| [brief.md](brief.md) | Fastest orientation before the spec | Everyone |
 | [checkpoint-model.md](checkpoint-model.md) | Canonical gate map, feature → checkpoint routing | Everyone |
 | [architecture.md](architecture.md) | Kernel, bridge, Cockpit wiring and ports | Developers |
 | [governed-tasks.md](governed-tasks.md) | `POST /api/tasks`, modes, SSE events | Operators + integrators |
