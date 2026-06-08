@@ -221,5 +221,5 @@ Runs kernel + agent-bridge + cockpit builds, the 53-check `cockpit-smoke` vertic
 | [approval-lifecycle.md](./approval-lifecycle.md) | 3 |
 | [verify-gate.md](./verify-gate.md) | 5, 6 |
 | [governed-tasks.md](./governed-tasks.md) | 6 (orchestration) |
-| [kernel-cockpit-architecture.md](./kernel-cockpit-architecture.md) | All (wiring) |
+| [architecture.md](./architecture.md) | All (wiring) |
 | [session-recovery.md](./session-recovery.md) | Noise bucket |

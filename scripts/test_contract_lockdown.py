@@ -2,7 +2,7 @@
 """
 CONTRACT: Offline regression lockdown — harness schemas, fixtures, Makefile targets, source invariants.
 
-Grep: rg 'CONTRACT:|test_contract_lockdown' scripts/ docs/runtime-contracts.md
+Grep: rg 'CONTRACT:|test_contract_lockdown' scripts/ docs/testing.md
 """
 
 from __future__ import annotations
@@ -26,7 +26,7 @@ from dietcode_agent_client import REPO_ROOT, finish_test_run
 FIXTURES_DIR = REPO_ROOT / "scripts" / "fixtures" / "rpc"
 CONTROL_SERVER = REPO_ROOT / "src/platform/macos/control/MacControlServer.mm"
 MAKEFILE = REPO_ROOT / "Makefile"
-RUNTIME_CONTRACTS_DOC = REPO_ROOT / "docs/runtime-contracts.md"
+TESTING_DOC = REPO_ROOT / "docs/testing.md"
 
 
 def _read(path: Path) -> str:
@@ -99,9 +99,9 @@ def check_integration_scripts_compact() -> None:
 
 
 def check_runtime_contracts_doc() -> None:
-    assert RUNTIME_CONTRACTS_DOC.is_file(), "docs/runtime-contracts.md missing"
-    text = _read(RUNTIME_CONTRACTS_DOC)
-    assert text.count("CONTRACT:") >= 8, "runtime-contracts.md must document at least 8 CONTRACT entries"
+    assert TESTING_DOC.is_file(), "docs/testing.md missing"
+    text = _read(TESTING_DOC)
+    assert "checkpoint-core" in text
     assert "verify-agent-runtime" in text
 
 
@@ -119,7 +119,6 @@ def check_source_invariants() -> None:
     assert "build_diagnostic_snapshot" in client, "diagnostic snapshot required"
     limits = _read(REPO_ROOT / "src/domain/control/ControlRuntimeLimits.hpp")
     assert "kMaxActiveConnections" in limits, "safety limits required"
-    assert (REPO_ROOT / "docs/runtime-safety.md").is_file(), "runtime-safety.md required"
     assert (REPO_ROOT / "scripts/runtime_safety.py").is_file(), "runtime_safety.py required"
     assert (REPO_ROOT / "scripts/agent_tooling.py").is_file(), "agent_tooling.py required"
     assert (REPO_ROOT / "scripts/fixtures/tooling/sample_unified_diff.txt").is_file(), "tooling fixture required"
@@ -177,7 +176,7 @@ def check_source_invariants() -> None:
     ):
         assert (retrieval_fixtures / name).is_file(), f"missing retrieval fixture: {name}"
     assert (REPO_ROOT / "scripts/release_versions.py").is_file(), "release_versions.py required"
-    assert (REPO_ROOT / "docs/maintainer-guide.md").is_file(), "maintainer-guide.md required"
+    assert (REPO_ROOT / "docs/testing.md").is_file(), "testing.md required"
     assert "release-check-agent-runtime" in _read(MAKEFILE), "release-check target required"
 
 

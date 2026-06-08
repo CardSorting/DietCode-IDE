@@ -2,7 +2,7 @@
 """
 SAFETY: Local runtime abuse-resistance constants, redaction, and socket audit.
 
-Grep: rg 'SAFETY:|RUNTIME_LIMITS|redact_' scripts/runtime_safety.py docs/runtime-safety.md
+Grep: rg 'SAFETY:|RUNTIME_LIMITS|redact_' scripts/runtime_safety.py docs/runtime-invariants.md
 """
 
 from __future__ import annotations

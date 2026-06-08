@@ -2,7 +2,7 @@
 
 Stable `string_code` values returned in JSON-RPC error envelopes (`ok: false`). Grep this file or the server mapping when debugging agent failures.
 
-Agent-runtime audit (recovery hints, quarantined surfaces): [Agent Runtime Audit](agent-runtime-audit.md).
+Recovery hints and quarantined surfaces: [runtime-invariants.md](runtime-invariants.md), [agent-tooling.md](agent-tooling.md).
 
 **Canonical mapping:** `src/platform/macos/control/MacControlServer.mm` (`sendError:code:message:clientFd:`)
 
@@ -23,7 +23,7 @@ Agent-runtime audit (recovery hints, quarantined surfaces): [Agent Runtime Audit
 
 **Envelope contract:** every RPC returns exactly one terminal object with `id`, `ok`, and either `result` (success) or `error` with `code`, `string_code`, `message` (failure).
 
-**Diagnostic fields (failure only, optional but stable):** `request_id`, `category`, `retryable`, `phase`, `queue`, `recovery_hint`. See [Operator Diagnostics](operator-diagnostics.md).
+**Diagnostic fields (failure only, optional but stable):** `request_id`, `category`, `retryable`, `phase`, `queue`, `recovery_hint`. See [troubleshooting.md](troubleshooting.md).
 
 ```bash
 rg 'assert_envelope_shape|REQUIRED_ERROR_KEYS' scripts/test_rpc_transaction_health.py
@@ -88,7 +88,7 @@ rg 'string_code' scripts/test_*.py
 | `socket_unsafe_type` | Path is not the expected file type |
 | `socket_unsafe_path` | Invalid or empty socket path |
 
-See [Runtime Safety](runtime-safety.md).
+See [Runtime Invariants](runtime-invariants.md) and [Troubleshooting](troubleshooting.md).
 
 ## Size and limit codes
 
@@ -221,7 +221,7 @@ python3 scripts/dietcode_agent_client.py --self-test --compact | python3 -m json
 
 ## Related docs
 
-- [Agent Runtime Audit](agent-runtime-audit.md)
-- [Runtime Invariants](runtime-invariants.md)
-- [Headless Agent Control](headless-agent-control.md)
-- [Agent Tooling](agent-tooling.md)
+- [kernel-rpc.md](kernel-rpc.md)
+- [runtime-invariants.md](runtime-invariants.md)
+- [agent-tooling.md](agent-tooling.md)
+- [troubleshooting.md](troubleshooting.md)

@@ -5,542 +5,183 @@
 <h1 align="center">DietCode</h1>
 
 <p align="center">
-  <strong>DietCode gives agents bounded autonomy through visible checkpoints.</strong><br>
-  <em>C++20 kernel · web cockpit · Agent Bridge · runtime journal · adversarial reliability evaluation</em>
+  <strong>A governed local mutation runtime — not a web UI, not another editor.</strong><br>
+  <em>C++ kernel · cockpit control plane · agent bridge · visible checkpoints</em>
 </p>
 
 <p align="center">
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-4CAF50.svg?style=for-the-badge" alt="License"></a>
   <img src="https://img.shields.io/badge/platform-macOS-lightgrey.svg?style=for-the-badge" alt="Platform">
-  <img src="https://img.shields.io/badge/language-C%2B%2B20-orange.svg?style=for-the-badge" alt="Language">
+  <img src="https://img.shields.io/badge/baseline-checkpoint--core--v0.1-blue.svg?style=for-the-badge" alt="Baseline">
 </p>
 
 ---
 
-## What this is
+## What DietCode is
 
-DietCode is the **local control plane for agentic software work**.
-
-Developers do not need another editor. They need a trustworthy local runtime that lets agents work safely inside real projects.
+DietCode is the **local control plane for agentic software work** on macOS.
 
 ```text
-DietCode Kernel  = C++ headless runtime (sole workspace mutation authority)
-DietCode Cockpit = Vite + React web control surface
-Agent Bridge     = stable deterministic workflows for external agents
+dietcode-kernel   Headless C++ runtime — sole workspace mutation authority
+cockpit bridge    HTTP API + session store — governed task plane
+cockpit UI        Vite + React — checkpoints you can see and steer
+agent-bridge      TypeScript workflows for external agents (Hermes, scripts, CI)
 ```
 
-No Electron in the cockpit build path.  
-No cloud defaults.  
-No background indexing tax.
+**Hard rule:** The cockpit never edits files. Only `dietcode-kernel` mutates the workspace.
 
-**Hard rule:** The cockpit never edits files directly. Only `dietcode-kernel` mutates the workspace.
+No Electron in the cockpit path. No cloud defaults. The legacy AppKit editor in `legacy_ui/` is optional — it is not the product surface.
 
-The legacy native AppKit editor remains in `legacy_ui/` as optional later integration — it is not the product surface.
+> DietCode is not “a web UI.” It is a governed local mutation runtime, proven by a 53-check vertical slice across npm, Make, and verify.sh workspaces.
 
 ---
 
-## Checkpoint model
+## The control loop
 
-Six visible gates between agent intent and “done”:
+Six checkpoints between agent intent and “done”:
 
 ```text
-1. Context      — Did the agent read valid state?
-2. Drift        — Did the workspace change underneath it?
-3. Approval     — Is this mutation allowed?
-4. Mutation     — Did the patch apply cleanly?
-5. Verification — Did the result pass?
-6. Completion   — Can this task be called done?
+1. Context       Did the agent read valid state?
+2. Drift         Did the workspace change underneath it?
+3. Approval      Is this mutation allowed?
+4. Mutation      Did the patch apply cleanly?
+5. Verification  Did the result pass?
+6. Completion    Can this task be called done?
 ```
 
-Full feature map and noise audit: [docs/checkpoint-model.md](docs/checkpoint-model.md).  
-Agent-facing checkpoint API: [docs/agent-ergonomics.md](docs/agent-ergonomics.md).
-
-## Core idea
-
-Most “AI IDEs” optimize for generation throughput.
-
-DietCode optimizes for **bounded mutation reliability** through checkpoints you can see and steer.
-
-The project is built around a different assumption:
-
-> Before agents become more autonomous, their runtime boundaries must become more explicit, observable, replayable, and enforceable.
-
-DietCode treats agent mutation as a runtime systems problem, not an autocomplete problem.
-
-**The kernel decides what happened.**  
-**The runtime journal remembers what happened.**  
-**The benchmark proves mutation stayed bounded.**
-
----
-
-## Agent Runtime Reliability (v1.0)
-
-DietCode includes a replayable adversarial evaluation harness for bounded agent code mutation.
-
-This is not a leaderboard benchmark.
-
-It is a runtime reliability system with:
-
-- adversarial mutation traps
-- adaptive orchestration
-- semantic repair protocols
-- replayable mutation traces
-- release gates
-- negative gate tests
-- provenance verification
-- runtime contract escalation
-
-**Start here:**
-
-- [AGENT_RUNTIME_RELIABILITY.md](AGENT_RUNTIME_RELIABILITY.md)
-- [benchmarks/agent_success/README.md](benchmarks/agent_success/README.md)
-
-Evaluation pipeline:
+Full map: [docs/checkpoint-model.md](docs/checkpoint-model.md)
 
 ```text
-benchmark
-  → adversarial traps
-  → orchestrator
-  → semantic repair
-  → traces
-  → provenance
-  → replay
-  → release gates
-  → negative gates
-  → audit verdict
+prompt → read → drift check → approval → patch → verify → completed
 ```
 
-### Reliability milestones
-
-| Milestone | Result |
-|-----------|--------|
-| Base corpus | 40-task solvability corpus |
-| Adversarial layer | Explicit trap classification + recovery telemetry |
-| Nightmare tier | Concurrent mutation, stale state, rollback, semantic preservation |
-| Contract ladder | Progressive runtime visibility profiles |
-| Adaptive orchestrator | Three-axis escalation (visibility, protocol, semantic repair) |
-| Mutation traces | Replayable provenance artifacts |
-| Release gates | Automated reliability verification ladder |
-| Production audit | [AUDIT v1.0](benchmarks/agent_success/AUDIT_AGENT_RUNTIME_RELIABILITY_v1.0.md) |
-
-### Validation
-
-```bash
-# Offline schema + audit verification
-make test-agent-benchmark-schema
-
-# Full reliability release gate
-make benchmark-contract-release-check
-```
-
-Release tag: `agent-runtime-reliability-v1.0`
-
-**v1.0 is frozen.** Experimental benchmark work continues on the **v1.1** line.
-
----
-
-## Architecture
-
-```text
-agent / user
-    ↓
-cockpit UI (Vite + React)
-    ↓
-local bridge API (HTTP → Unix socket)
-    ↓
-dietcode-kernel (C++ mutation authority)
-    ↓
-workspace
-```
-
-```text
- [ External agents ]              [ Human operator ]
-          |                                |
-     Agent Bridge                     DietCode Cockpit
-     (bundled TS layer)              (task timeline, diffs, approvals)
-          |                                |
-          +----------------+----------------+
-                           |
-                 dietcode-kernel RPC
-                 (~/.dietcode/control.sock)
-                           |
-          +----------------+----------------+
-          |                                 |
-    C++ mutation kernel            BroccoliQ runtime journal
-    (authority + replay)           (timeline, receipts, recovery)
-```
-
-| Layer | Responsibility |
-|-------|----------------|
-| Cockpit | Six checkpoints surfaced: drift, approval, mutation diffs, verification, completion |
-| Bridge API | HTTP proxy + SSE event fan-out to kernel socket |
-| Agent Bridge | Stable deterministic workflows for agents |
-| `dietcode-kernel` | JSON-RPC dispatch, mutation authority, event stream |
-| Runtime journal | Durable operation memory and replay |
-| Reliability harness | Adversarial evaluation and release gates |
-
-Further reading:
-
-- [Kernel + Cockpit Architecture](docs/kernel-cockpit-architecture.md)
-- [Agent Bridge Architecture](docs/agent-bridge-architecture.md)
-- [Technical Architecture](docs/technical-architecture.md)
-- [Agent Runtime Reliability](AGENT_RUNTIME_RELIABILITY.md)
-
----
-
-## Core philosophy
-
-DietCode is built around a small set of constraints:
-
-- local-first operation
-- deterministic runtime behavior
-- explicit recovery paths
-- inspectable mutation surfaces
-- bounded autonomous mutation
-- replayable runtime history
-- stable operational contracts
-- zero cloud dependency
-- zero hidden indexing infrastructure
-
-The runtime intentionally prefers deterministic and inspectable workflows over opaque retrieval systems or probabilistic patch pipelines.
-
----
-
-## Runtime guarantees
-
-The runtime behaves as a deterministic local transaction kernel for bounded autonomous mutation.
-
-| Guarantee | Mechanism |
-|-----------|-----------|
-| Stale-write rejection | `expectBeforeHash` → `stale_content` |
-| Atomic mutation | transaction receipts + rollback |
-| Replay safety | `operation.status` + `idempotencyKey` |
-| Workspace authority | explicit runtime workspace verification |
-| Mutation authority | bridge patch telemetry |
-| Diff authority | visible diff reconciliation |
-| Verification authority | executable post-mutation verification |
-| Durable runtime memory | BroccoliQ runtime journal |
-| Deterministic retrieval | literal / token / path search only |
-| Semantic quarantine | `search.semantic` → `4008` |
-| Honest partial success | `complete`, `partial`, `warnings` |
-| Release reliability | adversarial gates + replay traces |
-
-Canonical references:
-
-- [Agent Runtime Audit](docs/agent-runtime-audit.md)
-- [Runtime Invariants](docs/runtime-invariants.md)
-- [Headless Agent Control](docs/headless-agent-control.md)
-- [BroccoliQ Runtime Memory](docs/broccoliq-runtime-memory.md)
-
----
-
-## Agent Bridge (preferred integration)
-
-The Agent Bridge ships with the kernel at `build/resources/agent-bridge/`.
-
-Agents should use the bridge or bundled CLI — **not** raw runtime RPC.
-
-```typescript
-import { DietCodeBridgeClient } from '@dietcode/agent-bridge';
-
-const bridge = new DietCodeBridgeClient({
-  startApp: false,
-});
-
-await bridge.connect();
-
-await bridge.searchLiteral('expectBeforeHash', {
-  maxResults: 10,
-});
-
-const outcome = await bridge.safePatchFile(
-  'src/foo.ts',
-  unifiedDiff,
-);
-
-await bridge.close();
-```
-
-CLI examples:
-
-```bash
-build/resources/bin/dietcode-agent-client profile
-
-build/resources/bin/dietcode-agent-client verify fast
-
-build/resources/bin/dietcode-agent-client patch safe-file \
-  src/foo.ts \
-  /tmp/foo.patch
-```
-
-### Bridge workflows
-
-| Method | Purpose |
-|--------|---------|
-| `connect()` | Runtime readiness + capability detection |
-| `searchLiteral()` | Deterministic literal search |
-| `searchTokens()` | Exact token search |
-| `searchPaths()` | Deterministic path search |
-| `safePatchFile()` | Validate → reconcile → apply |
-| `safePatchBatch()` | Atomic batch mutation |
-| `getOperationStatus()` | Replay-safe recovery |
-| `getTimeline()` | Runtime journal stream |
-| `verifyFast()` | Runtime health check |
-
-References:
-
-- [Agent Bridge](docs/agent-bridge.md)
-- [Integration Guide](docs/agent-bridge-integration-guide.md)
-- [Bridge Audit](docs/agent-bridge-audit.md)
-
----
-
-## Agent Chat (Hermes in IDE)
-
-DietCode includes a native **Agent Chat sidebar** (⌘⇧A) wired to the bundled `dietcode-agent-chat` CLI.
-
-This is a real bounded mutation loop:
-
-```text
-sidebar
-  → Hermes
-  → dietcode_ide
-  → Agent Bridge
-  → runtime mutation kernel
-  → verification
-```
-
-Not a mock shell wrapper.  
-Not direct file writes.  
-Not hidden background mutation.
-
-### Authority chain
-
-Each run is auditable through four explicit runtime authority layers:
-
-| Authority | Proves |
-|-----------|--------|
-| Workspace authority | Agent edited the intended workspace |
-| Mutation authority | Edits occurred through the approved bridge path |
-| Diff authority | Exact changed-file set is inspectable |
-| Verification authority | Executable verification passed after mutation |
-
-Run artifacts persist outside the workspace at `~/.dietcode/agent-chat/runs/<run_id>/` (`diff.patch`, verify logs, `verification.json`).
-
-### Enable Hermes
-
-```bash
-build/DietCode.app/Contents/Resources/bin/dietcode-enable-agent --doctor
-```
-
-### Run chat directly
-
-```bash
-build/DietCode.app/Contents/Resources/bin/dietcode-agent-chat \
-  --workspace /path/to/project \
-  --prompt "inspect this project" \
-  --format json
-```
-
-### Reliability ladder
-
-```bash
-make smoke-agent-chat-live
-make test-agent-chat-workspace-switch
-make test-mutation-authority
-make test-diff-authority
-make test-verification-authority
-make verify-hermes-bridge
-make verify-agent-runtime-full
-```
-
-See:
-
-- [Agent Chat Sidebar](docs/agent-chat-sidebar.md)
-- [Hermes Integration](integrations/README.md)
-- [Agent Runtime Reliability](AGENT_RUNTIME_RELIABILITY.md)
-
----
-
-## What DietCode is not
-
-DietCode is not:
-
-- Electron
-- Chromium
-- Qt
-- extension-host infrastructure
-- embeddings-based retrieval
-- semantic ranking infrastructure
-- cloud-native IDE infrastructure
-- telemetry-first tooling
-- hidden background orchestration
-- “AI that edits files behind your back”
-
-The runtime intentionally prioritizes inspectability, bounded mutation, replayability, and deterministic operational behavior.
-
-See:
-
-- [Anti-Scope Checklist](docs/anti-scope-checklist.md)
-- [MVP Scope](docs/mvp-scope.md)
+Agent exit does **not** mean done. Tasks reach `completed` only after verification passes or is explicitly waived.
 
 ---
 
 ## Quick start
 
-### Requirements
-
-- macOS 12+
-- Xcode Command Line Tools (`xcode-select --install`)
-- Node.js 18+ (agent bridge + cockpit)
-- Python 3 (benchmark + harness tooling)
-- Hermes (installed on demand via `dietcode-enable-agent`; not vendored in repo)
-
-### Build
-
 ```bash
-git clone <repo-url> DietCode-IDE
-cd DietCode-IDE
+git clone <repo> && cd DietCode-IDE
 
-make test
-make kernel          # builds build/dietcode-kernel (default)
+# Frozen baseline (build + 53-check vertical slice + unit tests + docs drift)
+make checkpoint-core
+
+# Day-to-day development
+make kernel
+make restart-agent-server-fast
+cd cockpit && npm install && npm run dev   # UI + bridge on :9477
 ```
 
-### Run kernel + cockpit
+| Command | Purpose |
+|---------|---------|
+| `make checkpoint-core` | Release gate — tag `checkpoint-core-v0.1` |
+| `make cockpit-smoke` | 53-check vertical slice only |
+| `make kernel` | Build `build/dietcode-kernel` |
+| `make restart-agent-server-fast` | Restart kernel socket (no rebuild) |
+| `make agent-bridge-fast` | Build TypeScript agent bridge |
+| `make cockpit` | Build cockpit UI + server types |
+
+Details: [docs/getting-started.md](docs/getting-started.md) · [docs/testing.md](docs/testing.md)
+
+---
+
+## Current baseline (`checkpoint-core-v0.1`)
+
+| Layer | Status |
+|-------|--------|
+| **Kernel** | Headless; JSON-RPC on `~/.dietcode/control.sock` |
+| **Cockpit** | Checkpoint rail, drift panel, approval panel, verify gate, diff ring |
+| **Bridge** | Governed tasks, session recovery, checkpoint API |
+| **Safety** | Supervised approvals (autonomy 3), drift gate, verify gate |
+| **Recovery** | Bounded session restore after bridge reload |
+| **Validation** | `cockpit-smoke` — npm-test, make-test, verify-sh fixtures |
 
 ```bash
-# Terminal 1 — kernel (mutation authority)
-./build/dietcode-kernel --workspace /path/to/project
-
-# Terminal 2 — web cockpit
-make cockpit-dev
-# open http://localhost:5173
-```
-
-### Agent integration
-
-```bash
-make ensure-socket
-make agent-ready
-build/resources/bin/dietcode-agent-client profile
-```
-
-### Legacy native editor (optional)
-
-```bash
-make legacy-app
-make run
+make checkpoint-core   # must pass before Hermes / benchmark work moves
 ```
 
 ---
 
-## Development workflow
+## Architecture (one screen)
 
-After runtime changes:
-
-```bash
-make restart-agent-server
+```text
+Human / agent
+    ↓
+Cockpit UI  ──SSE──┐
+    ↓              │
+POST /api/tasks    │
+    ↓              │
+Bridge (tsx)  ─────┘
+    ↓ Unix socket + session token
+dietcode-kernel
+    ↓
+Workspace (patches, verify, git, shell)
 ```
 
-Fast bridge iteration:
+Wiring: [docs/architecture.md](docs/architecture.md)
+
+---
+
+## Documentation
+
+| Doc | Read when |
+|-----|-----------|
+| [docs/README.md](docs/README.md) | Full index |
+| [checkpoint-model.md](docs/checkpoint-model.md) | Canonical six-gate map |
+| [getting-started.md](docs/getting-started.md) | Build, run cockpit, kernel socket |
+| [testing.md](docs/testing.md) | Make targets, `checkpoint-core`, smoke |
+| [governed-tasks.md](docs/governed-tasks.md) | `POST /api/tasks`, modes, events |
+| [agent-ergonomics.md](docs/agent-ergonomics.md) | `GET /api/checkpoints`, agent loop |
+| [agent-bridge.md](docs/agent-bridge.md) | TypeScript bridge for agents |
+| [kernel-rpc.md](docs/kernel-rpc.md) | RPC surface, CLI, permissions |
+| [troubleshooting.md](docs/troubleshooting.md) | Socket, token, drift, verify failures |
+
+Checkpoint deep dives: [workspace-drift](docs/workspace-drift.md) · [approval-lifecycle](docs/approval-lifecycle.md) · [verify-gate](docs/verify-gate.md) · [session-recovery](docs/session-recovery.md)
+
+---
+
+## Optional: Hermes + legacy app
+
+Hermes Agent integration is **optional** — not required for the checkpoint loop.
 
 ```bash
-make agent-bridge-fast
-make test-agent-bridge-fast
+make app                              # legacy AppKit bundle + kernel resources
+make smoke-agent-chat-live            # bounded Hermes edit (separate from cockpit-smoke)
 ```
 
-Agent Chat bundle:
+See [integrations/README.md](integrations/README.md).
 
-```bash
-make agent-chat-bundle
-make test-dietcode-agent-chat
-```
+---
 
-Daily runtime ladder:
+## Reliability evaluation (parallel track)
 
-```bash
-make verify-agent-runtime
-```
+Adversarial mutation benchmarks live under `benchmarks/agent_success/`. They evaluate runtime reliability; they are **not** the cockpit checkpoint gate.
 
-Full release ladder:
+- [AGENT_RUNTIME_RELIABILITY.md](AGENT_RUNTIME_RELIABILITY.md)
+- [benchmarks/agent_success/README.md](benchmarks/agent_success/README.md)
 
-```bash
-make verify-agent-runtime-full
-```
-
-Reliability benchmark:
-
-```bash
-make test-agent-benchmark-schema
-make benchmark-contract-orchestrator
-make benchmark-contract-release-check
-```
-
-Details: [Build & Test System](docs/build-and-test-system.md) · [Testing Checklist](docs/testing-checklist.md)
+Run separately from `make checkpoint-core`.
 
 ---
 
 ## Repository layout
 
 ```text
-DietCode-IDE/
-  AGENT_RUNTIME_RELIABILITY.md
-  src/
-  runtime/memory/
-  agent-bridge/
-  integrations/hermes-dietcode-plugin/
-  benchmarks/agent_success/
-  scripts/
-  docs/
-  tests/
-  resources/
+src/kernel/                  dietcode-kernel entry + workspace adapter
+src/platform/macos/control/  JSON-RPC server (MacControlServer)
+cockpit/                     React UI + bridge server (tsx)
+agent-bridge/                @dietcode/agent-bridge package
+scripts/                     Harnesses, cockpit-smoke, dietcode_agent_client.py
+scripts/fixtures/cockpit_smoke/   Vertical-slice fixture repos
+legacy_ui/                   Optional native editor (not cockpit)
+integrations/                Hermes plugin sync boundary
 ```
 
-[File Structure](docs/file-structure.md)
-
----
-
-## Documentation
-
-### Reliability
-
-- [AGENT_RUNTIME_RELIABILITY.md](AGENT_RUNTIME_RELIABILITY.md)
-- [Benchmark README](benchmarks/agent_success/README.md)
-- [WHITEPAPER](benchmarks/agent_success/WHITEPAPER.md)
-- [AUDIT v1.0](benchmarks/agent_success/AUDIT_AGENT_RUNTIME_RELIABILITY_v1.0.md)
-- [Reliability case](docs/agent-runtime-reliability-case.md)
-
-### Agent Chat
-
-- [Agent Chat Sidebar](docs/agent-chat-sidebar.md)
-- [Hermes Integration](integrations/README.md)
-
-### Agent Bridge
-
-- [Agent Bridge](docs/agent-bridge.md)
-- [Agent Bridge Architecture](docs/agent-bridge-architecture.md)
-- [Integration Guide](docs/agent-bridge-integration-guide.md)
-- [Bridge Audit](docs/agent-bridge-audit.md)
-
-### Runtime
-
-- [Agent Runtime Audit](docs/agent-runtime-audit.md)
-- [Runtime Invariants](docs/runtime-invariants.md)
-- [Headless Agent Control](docs/headless-agent-control.md)
-- [BroccoliQ Runtime Memory](docs/broccoliq-runtime-memory.md)
-- [Error Codes](docs/error-codes.md)
-
-### Development
-
-- [Documentation Index](docs/README.md)
-- [Build & Test System](docs/build-and-test-system.md)
-- [Testing Checklist](docs/testing-checklist.md)
-- [Maintainer Guide](docs/maintainer-guide.md)
-- [Getting Started Tutorial](docs/getting-started-tutorial.md)
-- [FAQ & Troubleshooting](docs/faq-and-troubleshooting.md)
+[docs/file-structure.md](docs/file-structure.md)
 
 ---
 
 ## License
 
-DietCode is open-source software released under the [MIT License](LICENSE).
+MIT — see [LICENSE](LICENSE).

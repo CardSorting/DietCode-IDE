@@ -23,7 +23,7 @@ make verify-hermes-bridge           # integration ladder
 make verify-agent-runtime-full      # full release ladder
 ```
 
-Details: [Agent Chat Sidebar](docs/agent-chat-sidebar.md).
+Details: [Integrations](docs/integrations.md) · [Agent Bridge](docs/agent-bridge.md).
 
 ## Run the release gate
 

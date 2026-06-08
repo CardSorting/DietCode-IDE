@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-DRIFT: Pass VI docs-to-code contract alignment checks.
+Docs-to-code contract alignment for checkpoint-core baseline.
 
 Grep: rg 'test_docs_code_drift|docs_code_drift' scripts/ Makefile docs/
 """
@@ -65,16 +65,17 @@ def test_internal_namespaces_documented() -> None:
         assert prefix in tooling, f"agent-tooling.md must document internal namespace {prefix}"
 
 
-def test_testing_checklist_has_verify_commands() -> None:
-    text = (DOCS / "testing-checklist.md").read_text(encoding="utf-8")
+def test_testing_doc_has_gates() -> None:
+    text = (DOCS / "testing.md").read_text(encoding="utf-8")
     for target in (
-        "verify-agent-runtime",
+        "checkpoint-core",
+        "cockpit-smoke",
         "verify-agent-runtime-full",
         "test-agent-workflow-smoke",
         "test-agent-shell-tooling",
         "test-agent-shell-workflows",
     ):
-        assert target in text, f"testing-checklist.md missing {target}"
+        assert target in text, f"testing.md missing {target}"
 
 
 def test_agent_shell_tooling_doc_lists_methods() -> None:
@@ -138,16 +139,16 @@ def test_frozen_key_sets_nonempty() -> None:
     assert "failureRecoveryHint" in TOOL_REGISTRY_ENTRY_KEYS
 
 
-def test_root_readme_mentions_audit_and_verify() -> None:
+def test_root_readme_documents_baseline() -> None:
     text = (REPO_ROOT / "README.md").read_text(encoding="utf-8")
-    for needle in ("agent-runtime-audit.md", "verify-agent-runtime-full", "restart-agent-server"):
+    for needle in ("checkpoint-core", "cockpit-smoke", "restart-agent-server", "docs/README.md"):
         assert needle in text, f"README.md missing {needle}"
 
 
-def test_build_instructions_mentions_agent_verify() -> None:
-    text = (DOCS / "build-instructions.md").read_text(encoding="utf-8")
-    for needle in ("verify-agent-runtime", "restart-agent-server", "test-docs-code-drift"):
-        assert needle in text, f"build-instructions.md missing {needle}"
+def test_getting_started_mentions_baseline() -> None:
+    text = (DOCS / "getting-started.md").read_text(encoding="utf-8")
+    for needle in ("checkpoint-core", "restart-agent-server", "test-docs-code-drift"):
+        assert needle in text, f"getting-started.md missing {needle}"
 
 
 def test_agent_environment_mentions_restart_target() -> None:
@@ -167,8 +168,14 @@ def test_file_structure_documents_control_tree() -> None:
         assert needle in text, f"file-structure.md missing {needle}"
 
 
+def test_docs_index_links_core_docs() -> None:
+    text = (DOCS / "README.md").read_text(encoding="utf-8")
+    for needle in ("checkpoint-model.md", "architecture.md", "getting-started.md", "testing.md"):
+        assert needle in text, f"docs/README.md missing {needle}"
+
+
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Pass VI docs-to-code drift checks.")
+    parser = argparse.ArgumentParser(description="Docs-to-code drift checks.")
     add_output_args(parser)
     args = parser.parse_args()
     recorder = CheckRecorder(compact=output_compact(args), verbose=args.verbose)
@@ -179,7 +186,7 @@ def main() -> int:
         ("drift.runtime_diagnostics_source", test_runtime_diagnostics_source_has_hints),
         ("drift.agent_tooling_doc", test_agent_tooling_doc_lists_methods),
         ("drift.internal_namespaces", test_internal_namespaces_documented),
-        ("drift.testing_checklist", test_testing_checklist_has_verify_commands),
+        ("drift.testing_doc", test_testing_doc_has_gates),
         ("drift.agent_shell_tooling_doc", test_agent_shell_tooling_doc_lists_methods),
         ("drift.agent_bridge_shell_doc", test_agent_bridge_doc_lists_shell_methods),
         ("drift.shell_error_codes", test_shell_error_codes_documented),
@@ -187,11 +194,12 @@ def main() -> int:
         ("drift.makefile_targets", test_makefile_has_required_targets),
         ("drift.contract_key_sets", test_contract_key_sets_documented),
         ("drift.frozen_key_sets_nonempty", test_frozen_key_sets_nonempty),
-        ("drift.root_readme", test_root_readme_mentions_audit_and_verify),
-        ("drift.build_instructions", test_build_instructions_mentions_agent_verify),
+        ("drift.root_readme", test_root_readme_documents_baseline),
+        ("drift.getting_started", test_getting_started_mentions_baseline),
         ("drift.agent_environment", test_agent_environment_mentions_restart_target),
         ("drift.checkpoint_release_gate", test_checkpoint_model_documents_release_gate),
         ("drift.file_structure", test_file_structure_documents_control_tree),
+        ("drift.docs_index", test_docs_index_links_core_docs),
     ]:
         recorder.run(name, fn)
 

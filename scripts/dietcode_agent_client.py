@@ -374,15 +374,14 @@ def load_token(token_path: str = TOKEN_PATH) -> str:
 
 RUNTIME_DIAGNOSTIC_LOG = os.path.expanduser("~/.dietcode/agent-runtime.ndjson")
 DIAGNOSTIC_DOCS = {
-    "operatorDiagnostics": "docs/operator-diagnostics.md",
-    "runtimeSafety": "docs/runtime-safety.md",
-    "operatorPolicy": "docs/operator-policy.md",
+    "checkpointModel": "docs/checkpoint-model.md",
+    "testing": "docs/testing.md",
     "agentTooling": "docs/agent-tooling.md",
     "runtimeInvariants": "docs/runtime-invariants.md",
-    "runtimeContracts": "docs/runtime-contracts.md",
+    "kernelRpc": "docs/kernel-rpc.md",
     "errorCodes": "docs/error-codes.md",
-    "queueContract": "docs/queue-contract.md",
-    "taskServerRecovery": "docs/task-server-recovery.md",
+    "troubleshooting": "docs/troubleshooting.md",
+    "architecture": "docs/architecture.md",
 }
 
 

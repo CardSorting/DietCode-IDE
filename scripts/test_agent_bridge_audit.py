@@ -19,9 +19,7 @@ from agent_test_support import CheckRecorder, add_output_args, output_compact
 REPO_ROOT = Path(__file__).resolve().parents[1]
 BRIDGE = REPO_ROOT / "agent-bridge"
 DOCS = REPO_ROOT / "docs" / "agent-bridge.md"
-DOCS_AUDIT = REPO_ROOT / "docs" / "agent-bridge-audit.md"
-DOCS_ARCH = REPO_ROOT / "docs" / "agent-bridge-architecture.md"
-DOCS_GUIDE = REPO_ROOT / "docs" / "agent-bridge-integration-guide.md"
+DOCS_INDEX = REPO_ROOT / "docs" / "README.md"
 PACKAGED = (
     REPO_ROOT
     / "build"
@@ -71,14 +69,11 @@ def test_docs_forbid_raw_rpc() -> None:
 
 
 def test_extended_docs_exist() -> None:
-    for path in (DOCS_AUDIT, DOCS_ARCH, DOCS_GUIDE):
-        assert path.is_file(), f"missing {path.name}"
-    audit = DOCS_AUDIT.read_text(encoding="utf-8")
-    assert "Pass I" in audit and "Pass II" in audit
-    assert "test_agent_bridge_audit" in audit
-    index = (REPO_ROOT / "docs" / "README.md").read_text(encoding="utf-8")
-    for name in ("agent-bridge-architecture.md", "agent-bridge-integration-guide.md", "agent-bridge-audit.md"):
-        assert name in index, f"docs/README.md missing link to {name}"
+    assert DOCS.is_file(), "agent-bridge.md missing"
+    index = DOCS_INDEX.read_text(encoding="utf-8")
+    assert "agent-bridge.md" in index, "docs/README.md missing link to agent-bridge.md"
+    text = DOCS.read_text(encoding="utf-8")
+    assert "test-agent-bridge-fast" in text, "agent-bridge.md must document bridge test targets"
 
 
 def test_client_exports_no_mock_transport() -> None:

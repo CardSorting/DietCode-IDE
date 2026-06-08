@@ -26,11 +26,9 @@ from release_versions import (
 )
 
 DOCS = {
-    "runtime_contracts": REPO_ROOT / "docs/runtime-contracts.md",
-    "release_upgrade": REPO_ROOT / "docs/release-upgrade-rollback.md",
-    "deprecation_policy": REPO_ROOT / "docs/deprecation-policy.md",
-    "maintainer_guide": REPO_ROOT / "docs/maintainer-guide.md",
-    "release_notes_template": REPO_ROOT / "docs/templates/runtime-release-notes.md",
+    "testing": REPO_ROOT / "docs/testing.md",
+    "checkpoint_model": REPO_ROOT / "docs/checkpoint-model.md",
+    "getting_started": REPO_ROOT / "docs/getting-started.md",
 }
 
 
@@ -75,11 +73,10 @@ def test_release_docs_present() -> None:
         assert path.is_file(), f"missing doc: {name} ({path})"
 
 
-def test_runtime_contracts_mentions_versions() -> None:
-    text = DOCS["runtime_contracts"].read_text(encoding="utf-8")
-    assert "RELEASE:" in text or "Contract versions" in text
-    assert CONTRACT_INVENTORY_VERSION in text
-    assert "release-check-agent-runtime" in text
+def test_testing_doc_mentions_release() -> None:
+    text = DOCS["testing"].read_text(encoding="utf-8")
+    assert "checkpoint-core" in text
+    assert "verify-agent-runtime-full" in text or "release-check-agent-runtime" in text
 
 
 def test_emit_config_has_versions() -> None:
@@ -124,7 +121,7 @@ def main() -> int:
         ("release.stable_makefile_targets", test_stable_makefile_targets_exist),
         ("release.stable_fixtures", test_stable_fixtures_exist),
         ("release.docs_present", test_release_docs_present),
-        ("release.contracts_doc_versions", test_runtime_contracts_mentions_versions),
+        ("release.testing_doc", test_testing_doc_mentions_release),
         ("release.emit_config_versions", test_emit_config_has_versions),
         ("release.makefile_target_registered", test_release_target_in_contracts),
     ]

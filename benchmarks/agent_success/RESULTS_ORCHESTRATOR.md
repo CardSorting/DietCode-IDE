@@ -251,4 +251,4 @@ Each orchestrated row in JSONL includes:
 
 **Source:** `orchestrator20260608T120655Z.jsonl` · Regenerate: `make benchmark-contract-orchestrator`
 
-**Release gates (Phase 4):** `make benchmark-contract-release-check` · Reliability case: [docs/agent-runtime-reliability-case.md](../../docs/agent-runtime-reliability-case.md)
+**Release gates (Phase 4):** `make benchmark-contract-release-check` · Reliability case: [AGENT_RUNTIME_RELIABILITY.md](../../AGENT_RUNTIME_RELIABILITY.md)

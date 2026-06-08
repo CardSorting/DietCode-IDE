@@ -61,7 +61,7 @@ This is a **defensible evaluation artifact**, not a pass-rate leaderboard.
 | [NIGHTMARE_RESULTS.md](NIGHTMARE_RESULTS.md) | Runtime contract tier (051–060) | Reference **20/20** |
 | [RESULTS_CONTRACT_LADDER.md](RESULTS_CONTRACT_LADDER.md) | Static profile sweep | Best: `contract_full` **9/10** |
 | [RESULTS_ORCHESTRATOR.md](RESULTS_ORCHESTRATOR.md) | Adaptive broker (Phase 3–3.2) | **Orchestrated 10/10** |
-| [Reliability case](../../docs/agent-runtime-reliability-case.md) | Phase 4 gates + evidence | Release gate spec |
+| [Reliability case](../../AGENT_RUNTIME_RELIABILITY.md) | Phase 4 gates + evidence | Release gate spec |
 | [AUDIT v1.0](AUDIT_AGENT_RUNTIME_RELIABILITY_v1.0.md) | Phase 4.1 hostile review | Research release: **yes** |
 
 ### Nightmare head-to-head
@@ -349,7 +349,7 @@ Negative proof: `make test-release-gate-negative`
 | [RESULTS_CONTRACT_LADDER.md](RESULTS_CONTRACT_LADDER.md) | Static profile ladder |
 | [RESULTS_ORCHESTRATOR.md](RESULTS_ORCHESTRATOR.md) | Orchestrator findings + MCS + retry honesty |
 | [AUDIT_AGENT_RUNTIME_RELIABILITY_v1.0.md](AUDIT_AGENT_RUNTIME_RELIABILITY_v1.0.md) | Production audit verdict |
-| [agent-runtime-reliability-case.md](../../docs/agent-runtime-reliability-case.md) | Reliability case for reviewers |
+| [AGENT_RUNTIME_RELIABILITY.md](../../AGENT_RUNTIME_RELIABILITY.md) | Reliability case for reviewers |
 
 ---
 

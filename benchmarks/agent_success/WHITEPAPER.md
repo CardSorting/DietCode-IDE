@@ -385,7 +385,7 @@ Phase 4 hardens the architecture against regression:
 
 - **Mutation traces** — `results/traces/<run_id>/<task_id>.mutation_trace.json` per orchestrated task
 - **Release gates** — `make benchmark-contract-release-check` enforces reference 10/10, orchestrated 10/10, integrity counters, and escalation proofs (052/057/059)
-- **Reliability case** — [docs/agent-runtime-reliability-case.md](../../docs/agent-runtime-reliability-case.md)
+- **Reliability case** — [AGENT_RUNTIME_RELIABILITY.md](../../AGENT_RUNTIME_RELIABILITY.md)
 
 **Claim (Phase 4):** DietCode emits replayable mutation traces and enforces release gates for bounded agent code mutation across visibility, execution, and semantic-repair controls.
 
@@ -606,8 +606,8 @@ The desired property:
 
 The benchmark exercises the DietCode control plane documented in:
 
-- [Agent Bridge Architecture](../../docs/agent-bridge-architecture.md)
-- [Agent Runtime Audit](../../docs/agent-runtime-audit.md)
+- [Agent Bridge](../../docs/agent-bridge.md)
+- [Testing & release gates](../../docs/testing.md)
 - [Runtime Invariants](../../docs/runtime-invariants.md)
 
 Key runtime properties under test:

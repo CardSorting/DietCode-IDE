@@ -43,10 +43,10 @@ def _validate_stable_fixtures() -> tuple[bool, dict]:
 
 def _docs_command_sanity() -> tuple[bool, dict]:
     required_snippets = [
-        ("docs/release-upgrade-rollback.md", "make release-check-agent-runtime"),
-        ("docs/maintainer-guide.md", "rg "),
-        ("docs/deprecation-policy.md", "deprecated"),
-        ("docs/runtime-contracts.md", "contractInventory"),
+        ("docs/testing.md", "checkpoint-core"),
+        ("docs/testing.md", "verify-agent-runtime-full"),
+        ("docs/checkpoint-model.md", "checkpoint-core-v0.1"),
+        ("docs/getting-started.md", "restart-agent-server"),
     ]
     errors: list[str] = []
     for rel, needle in required_snippets:

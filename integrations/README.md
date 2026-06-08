@@ -31,7 +31,7 @@ build/DietCode.app/Contents/Resources/bin/dietcode-agent-chat \
   --workspace /path/to/project --prompt "inspect this project"
 ```
 
-Agent Chat sidebar in the IDE uses `dietcode-agent-chat` for real Hermes sessions. Each run is auditable through four authorities (workspace, mutation, diff, verification). See [Agent Chat Sidebar](../docs/agent-chat-sidebar.md).
+Agent Chat sidebar in the legacy IDE uses `dietcode-agent-chat` for Hermes sessions (optional — not part of `checkpoint-core`). See [integrations.md](../docs/integrations.md).
 
 Live bounded-edit proof (all four authorities):
 
