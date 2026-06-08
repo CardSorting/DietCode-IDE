@@ -168,3 +168,101 @@ body {
   background: #238636;
   border-color: #238636;
 }
+
+.approval-item button.reject {
+  background: #da3633;
+  border-color: #da3633;
+}
+
+.approval-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.approval-section-title {
+  font-size: 0.7rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: #8b949e;
+  margin-bottom: 0.5rem;
+}
+
+.approval-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.approval-id {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.75rem;
+  color: #58a6ff;
+}
+
+.approval-type,
+.approval-status {
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-transform: uppercase;
+}
+
+.approval-status.approved {
+  color: #3fb950;
+}
+
+.approval-status.rejected,
+.approval-status.failed {
+  color: #f85149;
+}
+
+.approval-status.expired {
+  color: #8b949e;
+}
+
+.approval-reason {
+  margin-top: 0.35rem;
+}
+
+.approval-meta {
+  font-size: 0.75rem;
+  color: #8b949e;
+  margin-top: 0.25rem;
+}
+
+.approval-preview {
+  margin-top: 0.5rem;
+}
+
+.approval-path {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.8rem;
+}
+
+.approval-diff {
+  margin: 0.35rem 0 0;
+  padding: 0.5rem;
+  background: #161b22;
+  border: 1px solid #30363d;
+  border-radius: 6px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.75rem;
+  white-space: pre-wrap;
+  max-height: 200px;
+  overflow: auto;
+}
+
+.approval-actions {
+  margin-top: 0.5rem;
+}
+
+.approval-error {
+  color: #f85149;
+  font-size: 0.8rem;
+  margin-bottom: 0.5rem;
+}
+
+.approval-item.resolved {
+  opacity: 0.85;
+}

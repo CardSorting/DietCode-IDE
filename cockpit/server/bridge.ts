@@ -182,6 +182,65 @@ const server = createServer(async (req, res) => {
     return;
   }
 
+  const approvalsMatch = req.url?.match(/^\/api\/approvals(?:\/([^/?]+)(?:\/resolve)?)?(?:\?(.*))?$/);
+  if (approvalsMatch) {
+    const approvalId = approvalsMatch[1];
+    const isResolve = req.url?.endsWith('/resolve');
+    const query = new URLSearchParams(approvalsMatch[2] ?? '');
+
+    if (!approvalId && req.method === 'GET') {
+      try {
+        const status = query.get('status') ?? undefined;
+        const limit = query.get('limit') ? Number(query.get('limit')) : undefined;
+        const result = (await rpcCall('approval.list', {
+          ...(status ? { status } : {}),
+          ...(limit ? { limit } : {}),
+        })) as Record<string, unknown>;
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify(result));
+      } catch (err) {
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: String(err) }));
+      }
+      return;
+    }
+
+    if (approvalId && !isResolve && req.method === 'GET') {
+      try {
+        const result = (await rpcCall('approval.get', { approvalId })) as Record<string, unknown>;
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify(result));
+      } catch (err) {
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: String(err) }));
+      }
+      return;
+    }
+
+    if (approvalId && isResolve && req.method === 'POST') {
+      try {
+        const body = await readBody(req);
+        const parsed = JSON.parse(body || '{}') as {
+          decision?: string;
+          reason?: string;
+          resolvedBy?: string;
+        };
+        const result = (await rpcCall('approval.resolve', {
+          approvalId,
+          decision: parsed.decision,
+          reason: parsed.reason,
+          resolvedBy: parsed.resolvedBy ?? 'cockpit',
+        })) as Record<string, unknown>;
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify(result));
+      } catch (err) {
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: String(err) }));
+      }
+      return;
+    }
+  }
+
   res.writeHead(404, { 'Content-Type': 'application/json' });
   res.end(JSON.stringify({ error: 'not_found' }));
 });

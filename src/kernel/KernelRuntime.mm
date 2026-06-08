@@ -8,7 +8,7 @@
     self = [super init];
     if (self) {
         _workspaceSession = [[DietCodeWorkspaceSession alloc] init];
-        [_workspaceSession setAgentAutonomyLevel:1];
+        [_workspaceSession setAgentAutonomyLevel:3];
         _controlServer = [[DietCodeControlServer alloc] initWithWorkspaceSession:_workspaceSession];
     }
     return self;

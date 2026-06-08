@@ -10,6 +10,7 @@
 #import "MacControlTaskRuntime.hpp"
 #import "MacControlComboRuntime.hpp"
 #import "MacControlMemoryService.hpp"
+#import "MacControlApprovalService.hpp"
 
 @class DietCodeClientConnection;
 
@@ -25,6 +26,7 @@
     MacControlTaskRuntime* _taskRuntime;
     MacControlComboRuntime* _comboRuntime;
     MacControlMemoryService* _memoryService;
+    MacControlApprovalService* _approvalService;
     int _serverFd;
     NSThread* _acceptThread;
     NSString* _lastVerifyCommand;
@@ -78,7 +80,16 @@
                  outErrCode:(NSString**)outErrCode
                     outErrMsg:(NSString**)outErrMsg
                    outPaths:(NSString**)outPaths;
+- (void)executeMethod:(NSString*)method
+               params:(NSDictionary*)params
+            outResult:(NSDictionary**)outResult
+           outErrCode:(NSString**)outErrCode
+              outErrMsg:(NSString**)outErrMsg
+             outPaths:(NSString**)outPaths;
 - (void)configureServices;
+- (NSInteger)safeAgentAutonomyLevel;
+- (BOOL)isDestructiveRequestSafe:(NSString*)method params:(NSDictionary*)params;
+- (void)sendSuccess:(NSString*)reqId result:(NSDictionary*)result clientFd:(int)clientFd;
 
 @end
 
@@ -115,4 +126,10 @@
 
 @interface DietCodeControlServer (Shell)
 - (void)executeShellMethod:(NSString*)method params:(NSDictionary*)params outResult:(NSDictionary**)outResult outErrCode:(NSString**)outErrCode outErrMsg:(NSString**)outErrMsg outPaths:(NSString**)outPaths;
+@end
+
+@interface DietCodeControlServer (Approval)
+- (void)executeApprovalMethod:(NSString*)method params:(NSDictionary*)params outResult:(NSDictionary**)outResult outErrCode:(NSString**)outErrCode outErrMsg:(NSString**)outErrMsg outPaths:(NSString**)outPaths;
+- (BOOL)queueDestructiveApprovalIfNeeded:(NSString*)method params:(NSDictionary*)params caller:(NSString*)caller rationale:(NSString*)rationale reqId:(NSString*)reqId clientFd:(int)clientFd;
+- (BOOL)validateDestructiveApprovalIfPresent:(NSString*)method params:(NSDictionary*)params outErrCode:(NSString**)outErrCode outErrMsg:(NSString**)outErrMsg;
 @end

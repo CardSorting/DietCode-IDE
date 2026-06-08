@@ -118,6 +118,13 @@ Bridge endpoints:
 | `GET /api/status` | Kernel health + workspace |
 | `POST /api/rpc` | JSON-RPC proxy |
 | `GET /events` | SSE structured event stream |
+| `GET /api/approvals` | List pending/resolved approvals |
+| `GET /api/approvals/:id` | Fetch one approval |
+| `POST /api/approvals/:id/resolve` | Approve or reject a queued mutation |
+
+Kernel RPCs: `approval.list`, `approval.get`, `approval.resolve`. Destructive mutations in supervised mode (autonomy 3, kernel default) emit `approval.required` and return `approvalRequired: true` until resolved.
+
+See [approval-lifecycle.md](./approval-lifecycle.md) for the full safety loop.
 
 ## Legacy native UI
 

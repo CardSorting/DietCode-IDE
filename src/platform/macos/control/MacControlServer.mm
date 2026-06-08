@@ -128,6 +128,7 @@ static const void* kDietCodeReadQueueKey = &kDietCodeReadQueueKey;
                                                                 patchService:_patchService
                                                                  taskRuntime:_taskRuntime
                                                                     executor:nestedExecutor];
+        _approvalService = [[MacControlApprovalService alloc] init];
 
         _isRunning = NO;
         _serverFd = -1;
@@ -691,13 +692,29 @@ static const void* kDietCodeReadQueueKey = &kDietCodeReadQueueKey;
             });
         }
         
+        if ([permission isEqualToString:@"Destructive"]) {
+            NSString* approvalErrCode = nil;
+            NSString* approvalErrMsg = nil;
+            if (![self validateDestructiveApprovalIfPresent:method params:params outErrCode:&approvalErrCode outErrMsg:&approvalErrMsg]) {
+                [self sendError:reqId code:approvalErrCode ?: @"approval_invalid" message:approvalErrMsg ?: @"Invalid approval." clientFd:clientFd];
+                return;
+            }
+            if ([self queueDestructiveApprovalIfNeeded:method params:params caller:caller rationale:rationale reqId:reqId clientFd:clientFd]) {
+                return;
+            }
+        }
+
         __block BOOL allowed = YES;
         if ([permission isEqualToString:@"Destructive"]) {
             NSInteger autonomy = [self safeAgentAutonomyLevel];
-            if (autonomy == 1 || _isKernelMode || _windowController.isHeadless) {
+            if (autonomy == 1) {
                 allowed = YES;
             } else if (autonomy == 2) {
-                allowed = [self isDestructiveRequestSafe:method params:params];
+                if (_windowController && !_windowController.isHeadless) {
+                    allowed = [self isDestructiveRequestSafe:method params:params];
+                } else {
+                    allowed = YES;
+                }
             } else {
                 NSMutableString* alertMsg = [NSMutableString stringWithFormat:@"An external agent is requesting to execute a destructive command:\n\nMethod: %@\nParams: %@", method, params];
                 if (rationale.length > 0) {
@@ -1140,6 +1157,13 @@ static const void* kDietCodeReadQueueKey = &kDietCodeReadQueueKey;
 }
 
 - (NSString*)permissionLevelForMethod:(NSString*)method params:(NSDictionary*)params {
+    if ([method isEqualToString:@"approval.list"] || [method isEqualToString:@"approval.get"]) {
+        return @"Read";
+    }
+    if ([method isEqualToString:@"approval.resolve"]) {
+        return @"Execute";
+    }
+
     if ([method isEqualToString:@"git.discard"] ||
         [method isEqualToString:@"git.commit"] ||
         [method isEqualToString:@"changes.revertFile"] ||
@@ -1343,6 +1367,11 @@ static const void* kDietCodeReadQueueKey = &kDietCodeReadQueueKey;
         return;
     }
 
+    if ([method hasPrefix:@"approval."]) {
+        [self executeApprovalMethod:method params:params outResult:outResult outErrCode:outErrCode outErrMsg:outErrMsg outPaths:outPaths];
+        return;
+    }
+
     // Route based on namespace prefixes to respective categories
     if ([method hasPrefix:@"runtime."] || [method isEqualToString:@"workspace.activity"]) {
         [self executeRuntimeMethod:method params:params outResult:outResult outErrCode:outErrCode outErrMsg:outErrMsg outPaths:outPaths];
@@ -1473,6 +1502,7 @@ static const void* kDietCodeReadQueueKey = &kDietCodeReadQueueKey;
         else if ([stringCode isEqualToString:@"rollback_conflict"] || [stringCode isEqualToString:@"rollback_failed"]) numericCode = @(4005);
         else if ([stringCode isEqualToString:@"permission_denied"]) numericCode = @(4006);
         else if ([stringCode isEqualToString:@"task_not_active"]) numericCode = @(4007);
+        else if ([stringCode isEqualToString:@"approval_invalid"] || [stringCode isEqualToString:@"approval_resolve_failed"]) numericCode = @(4010);
         else if ([stringCode isEqualToString:@"response_serialization_failed"]) numericCode = @(-32603);
         else if ([stringCode isEqualToString:@"connection_limit_exceeded"] ||
                  [stringCode isEqualToString:@"too_many_pending"] ||

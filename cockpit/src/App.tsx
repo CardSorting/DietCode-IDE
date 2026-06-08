@@ -1,4 +1,4 @@
-import { ApprovalQueue } from './components/ApprovalQueue';
+import { ApprovalPanel } from './components/ApprovalPanel';
 import { ChatPanel } from './components/ChatPanel';
 import { DiffPanel } from './components/DiffPanel';
 import { LogStream } from './components/LogStream';
@@ -47,7 +47,7 @@ export default function App() {
         <section className="panel">
           <div className="panel-header">Approvals</div>
           <div className="panel-body">
-            <ApprovalQueue events={events} />
+            <ApprovalPanel events={events} />
           </div>
           <div className="panel-header">Logs</div>
           <div className="panel-body">

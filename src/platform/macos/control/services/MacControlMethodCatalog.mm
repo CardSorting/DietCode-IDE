@@ -157,7 +157,10 @@ NSArray<NSDictionary*>* MacControlRPCMethodDescriptions(void) {
             @{ @"name": @"system.info", @"permission": @"Read", @"params": @{}, @"returns": @{ @"os": @"string", @"arch": @"string", @"memoryGB": @"number", @"cpuCount": @"number", @"appVersion": @"string" } },
             @{ @"name": @"event.subscribe", @"permission": @"Read", @"params": @{ @"types": @"non-empty string array" }, @"returns": @{ @"subscribed": @"boolean", @"types": @"array" } },
             @{ @"name": @"event.unsubscribe", @"permission": @"Read", @"params": @{ @"types": @"non-empty string array" }, @"returns": @{ @"unsubscribed": @"boolean", @"types": @"array" } },
-            @{ @"name": @"events.recent", @"permission": @"Read", @"params": @{ @"limit": @"number optional", @"afterSequence": @"number optional", @"types": @"string array optional" }, @"returns": @{ @"events": @"array", @"truncated": @"boolean", @"mode": @"string" } }
+            @{ @"name": @"events.recent", @"permission": @"Read", @"params": @{ @"limit": @"number optional", @"afterSequence": @"number optional", @"types": @"string array optional" }, @"returns": @{ @"events": @"array", @"truncated": @"boolean", @"mode": @"string" } },
+            @{ @"name": @"approval.list", @"permission": @"Read", @"params": @{ @"status": @"pending|approved|rejected|expired optional", @"limit": @"number optional" }, @"returns": @{ @"approvals": @"array", @"count": @"number", @"mode": @"approval_list" } },
+            @{ @"name": @"approval.get", @"permission": @"Read", @"params": @{ @"approvalId": @"string" }, @"returns": @{ @"approval": @"object", @"mode": @"approval_get" } },
+            @{ @"name": @"approval.resolve", @"permission": @"Execute", @"params": @{ @"approvalId": @"string", @"decision": @"approved|rejected", @"reason": @"string optional", @"resolvedBy": @"string optional" }, @"returns": @{ @"resolution": @"object", @"approval": @"object", @"mode": @"approval_resolve" } }
         ];
     });
     return methods;
