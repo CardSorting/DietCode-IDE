@@ -290,6 +290,12 @@ static NSString* ReadHashForPath(NSString* absPath, DietCodeControlWindowBridge*
     [_externallyChangedPaths removeAllObjects];
 }
 
+- (void)recordRuntimeError:(NSString*)stringCode method:(NSString*)method envelope:(NSDictionary*)envelope {
+    MacControlMemoryService* memory = self.memoryService;
+    if (!memory.available) return;
+    [memory recordErrorEvent:stringCode method:method envelope:envelope ?: @{}];
+}
+
 - (void)persistMutationToMemory:(NSString*)method
                    idempotencyKey:(NSString*)idempotencyKey
                        paramsHash:(NSString*)paramsHash
@@ -301,7 +307,7 @@ static NSString* ReadHashForPath(NSString* absPath, DietCodeControlWindowBridge*
     MacControlMemoryService* memory = self.memoryService;
     if (!memory.available) return;
 
-    NSString* opId = [[NSUUID UUID] UUIDString];
+    NSString* opId = resultPayload[@"operationId"] ?: [[NSUUID UUID] UUIDString];
     NSString* receiptJson = [[NSString alloc] initWithData:[NSJSONSerialization dataWithJSONObject:receipt ?: @{} options:0 error:nil] encoding:NSUTF8StringEncoding] ?: @"";
     NSString* receiptHash = StableHashForString(receiptJson);
 

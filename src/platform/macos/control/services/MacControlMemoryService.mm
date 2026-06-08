@@ -49,6 +49,8 @@ static NSString* SqliteError(sqlite3* db) {
     NSInteger _shardCount;
     NSString* _backpressureMode;
     dispatch_queue_t _writeQueue;
+    NSDictionary* _startupDiagnostics;
+    BOOL _recoveredFromShutdown;
 }
 
 - (instancetype)initWithWorkspacePath:(NSString*)workspacePath {
@@ -71,6 +73,7 @@ static NSString* SqliteError(sqlite3* db) {
 - (NSString*)checkpointStatus { return _checkpointStatus; }
 - (NSInteger)droppedTelemetryCount { return _droppedTelemetryCount; }
 - (NSInteger)bufferedOperations { return _bufferedOperations; }
+- (NSDictionary*)startupDiagnostics { return _startupDiagnostics ?: @{}; }
 
 - (void)openDatabase {
     NSString* dbPath = MemoryDbPathForWorkspace(_workspacePath);
@@ -104,6 +107,7 @@ static NSString* SqliteError(sqlite3* db) {
     [self seedCheckpointDefaults];
     _available = YES;
     _checkpointStatus = @"ready";
+    [self performStartupRestoration];
 }
 
 - (void)seedCheckpointDefaults {
@@ -130,7 +134,9 @@ static NSString* SqliteError(sqlite3* db) {
 }
 
 - (void)shutdown {
+    [self markCleanShutdown];
     if (_db) {
+        sqlite3_wal_checkpoint_v2(_db, nullptr, SQLITE_CHECKPOINT_TRUNCATE, nullptr, nullptr);
         sqlite3_close(_db);
         _db = nullptr;
     }
@@ -142,9 +148,9 @@ static NSString* SqliteError(sqlite3* db) {
     return _bufferedOperations >= _maxBufferedOperations;
 }
 
-- (NSDictionary*)memoryStatusPayload {
-    return @{
-        @"mode": @"memory_status",
+- (NSDictionary*)runtimeDiagnosticsPayload {
+    NSMutableDictionary* payload = [@{
+        @"mode": @"runtime_diagnostics",
         @"available": @(_available),
         @"checkpointStatus": _checkpointStatus ?: @"unknown",
         @"maxMemoryBytes": @(_maxMemoryBytes),
@@ -155,9 +161,22 @@ static NSString* SqliteError(sqlite3* db) {
         @"bufferedOperations": @(_bufferedOperations),
         @"droppedTelemetryCount": @(_droppedTelemetryCount),
         @"mutationAuthority": @"cpp_kernel",
-        @"memoryAuthority": @"broccoliq_record_only",
+        @"recordAuthority": @"runtime_journal",
         @"workspacePath": _workspacePath ?: @"",
-    };
+        @"startup": _startupDiagnostics ?: @{},
+        @"runtimeRecoveredFromShutdown": @(_recoveredFromShutdown),
+        @"complete": @(_available),
+        @"partial": @(!_available || [_backpressureMode isEqualToString:@"degraded"]),
+        @"warnings": (_available ? @[] : @[@"runtime_journal_degraded"]),
+        @"nextRecommendedCommand": @"runtime.timeline",
+        @"recoveryHint": _available ? @"inspect_runtime_timeline" : @"retry_runtime_diagnostics",
+    } mutableCopy];
+    if (![payload[@"warnings"] count]) payload[@"warnings"] = @[];
+    return payload;
+}
+
+- (NSDictionary*)memoryStatusPayload {
+    return [self runtimeDiagnosticsPayload];
 }
 
 #pragma mark - Operations
@@ -233,6 +252,17 @@ static NSString* SqliteError(sqlite3* db) {
         return NO;
     }
     _bufferedOperations++;
+    [self recordTimelineEvent:@{
+        @"eventType": @"mutation_applied",
+        @"operationId": opId,
+        @"revisionId": record[@"revisionAfter"] ?: @0,
+        @"revisionBefore": record[@"revisionBefore"] ?: @0,
+        @"idempotencyKey": idempotencyKey ?: @"",
+        @"receiptHash": receiptHash,
+        @"method": method,
+        @"summary": [NSString stringWithFormat:@"%@ completed", method],
+        @"payload": @{@"status": status},
+    } error:nil];
     return YES;
 }
 
@@ -260,8 +290,10 @@ static NSString* SqliteError(sqlite3* db) {
         NSDictionary* receipt = [NSJSONSerialization JSONObjectWithData:[json dataUsingEncoding:NSUTF8StringEncoding] options:0 error:nil];
         if (receipt) row[@"receipt"] = receipt;
     }
-    row[@"mode"] = @"memory_operation";
-    return row;
+    NSMutableDictionary* rowMut = [row mutableCopy];
+    rowMut[@"mode"] = @"runtime_operation";
+    rowMut[@"correlation"] = MacControlOperationIdentity(rowMut);
+    return rowMut;
 }
 
 - (NSDictionary*)operationForIdempotencyKey:(NSString*)key {
@@ -390,6 +422,13 @@ static NSString* SqliteError(sqlite3* db) {
         if (errorOut) *errorOut = SqliteError(_db);
         return NO;
     }
+    [self recordTimelineEvent:@{
+        @"eventType": @"replay_cached",
+        @"idempotencyKey": key,
+        @"receiptHash": receiptHash,
+        @"method": record[@"method"] ?: @"",
+        @"summary": [NSString stringWithFormat:@"replay cached for %@", key],
+    } error:nil];
     return YES;
 }
 
@@ -484,6 +523,17 @@ static NSString* SqliteError(sqlite3* db) {
     else sqlite3_bind_null(stmt, 8);
     int rc = sqlite3_step(stmt);
     sqlite3_finalize(stmt);
+    if (rc == SQLITE_DONE) {
+        [self recordTimelineEvent:@{
+            @"eventType": @"revision_recorded",
+            @"operationId": record[@"operationId"] ?: @"",
+            @"revisionId": record[@"revisionId"] ?: @0,
+            @"revisionBefore": record[@"previousRevisionId"] ?: @0,
+            @"receiptHash": record[@"receiptHash"] ?: @"",
+            @"summary": [NSString stringWithFormat:@"revision %@ recorded", record[@"revisionId"] ?: @0],
+            @"payload": @{@"mutationSource": record[@"mutationSource"] ?: @"agent"},
+        } error:nil];
+    }
     return rc == SQLITE_DONE;
 }
 
@@ -871,6 +921,287 @@ static NSString* SqliteError(sqlite3* db) {
         sqlite3_step(stmt);
         sqlite3_finalize(stmt);
     }
+    [self recordTimelineEvent:@{
+        @"eventType": @"error_recorded",
+        @"stringCode": stringCode,
+        @"method": method ?: @"",
+        @"summary": [NSString stringWithFormat:@"error %@ on %@", stringCode, method ?: @"unknown"],
+        @"payload": envelope ?: @{},
+    } error:nil];
+}
+
+#pragma mark - Timeline + startup continuity (Pass VIII)
+
+- (void)writeCheckpoint:(NSString*)key value:(NSDictionary*)value {
+    if (!_db || key.length == 0) return;
+    NSData* json = [NSJSONSerialization dataWithJSONObject:value ?: @{} options:0 error:nil];
+    NSString* jsonStr = [[NSString alloc] initWithData:json encoding:NSUTF8StringEncoding] ?: @"{}";
+    const char* sql = "INSERT OR REPLACE INTO runtime_checkpoint (key, value_json, updated_at) VALUES (?, ?, ?)";
+    sqlite3_stmt* stmt = nullptr;
+    if (sqlite3_prepare_v2(_db, sql, -1, &stmt, nullptr) == SQLITE_OK) {
+        sqlite3_bind_text(stmt, 1, key.UTF8String, -1, SQLITE_TRANSIENT);
+        sqlite3_bind_text(stmt, 2, jsonStr.UTF8String, -1, SQLITE_TRANSIENT);
+        sqlite3_bind_double(stmt, 3, [[NSDate date] timeIntervalSince1970]);
+        sqlite3_step(stmt);
+        sqlite3_finalize(stmt);
+    }
+}
+
+- (NSDictionary*)readCheckpoint:(NSString*)key {
+    if (!_db || key.length == 0) return nil;
+    const char* sql = "SELECT value_json FROM runtime_checkpoint WHERE key = ? LIMIT 1";
+    sqlite3_stmt* stmt = nullptr;
+    if (sqlite3_prepare_v2(_db, sql, -1, &stmt, nullptr) != SQLITE_OK) return nil;
+    sqlite3_bind_text(stmt, 1, key.UTF8String, -1, SQLITE_TRANSIENT);
+    NSDictionary* result = nil;
+    if (sqlite3_step(stmt) == SQLITE_ROW) {
+        NSString* json = [NSString stringWithUTF8String:(const char*)sqlite3_column_text(stmt, 0)];
+        result = [NSJSONSerialization JSONObjectWithData:[json dataUsingEncoding:NSUTF8StringEncoding] options:0 error:nil];
+    }
+    sqlite3_finalize(stmt);
+    return result;
+}
+
+- (void)performStartupRestoration {
+    if (!_available) return;
+    NSInteger evicted = 0;
+    [self evictExpiredReplayEntries:&evicted error:nil];
+
+    NSInteger replayRetained = 0;
+    const char* replayCountSql = "SELECT COUNT(*) FROM runtime_replay_cache WHERE workspace_path = ? AND expires_at > ?";
+    sqlite3_stmt* replayStmt = nullptr;
+    double now = [[NSDate date] timeIntervalSince1970];
+    if (sqlite3_prepare_v2(_db, replayCountSql, -1, &replayStmt, nullptr) == SQLITE_OK) {
+        sqlite3_bind_text(replayStmt, 1, _workspacePath.UTF8String, -1, SQLITE_TRANSIENT);
+        sqlite3_bind_double(replayStmt, 2, now);
+        if (sqlite3_step(replayStmt) == SQLITE_ROW) replayRetained = sqlite3_column_int64(replayStmt, 0);
+        sqlite3_finalize(replayStmt);
+    }
+
+    NSInteger lastKnownRevision = 0;
+    const char* revSql = "SELECT MAX(revision_id) FROM runtime_revisions WHERE workspace_path = ?";
+    sqlite3_stmt* revStmt = nullptr;
+    if (sqlite3_prepare_v2(_db, revSql, -1, &revStmt, nullptr) == SQLITE_OK) {
+        sqlite3_bind_text(revStmt, 1, _workspacePath.UTF8String, -1, SQLITE_TRANSIENT);
+        if (sqlite3_step(revStmt) == SQLITE_ROW) lastKnownRevision = sqlite3_column_int64(revStmt, 0);
+        sqlite3_finalize(revStmt);
+    }
+
+    NSDictionary* lastShutdown = [self readCheckpoint:@"last_shutdown"];
+    BOOL cleanShutdown = [lastShutdown[@"clean"] boolValue];
+    _recoveredFromShutdown = lastShutdown != nil && !cleanShutdown;
+
+    _startupDiagnostics = @{
+        @"mode": @"runtime_startup",
+        @"replayCacheRestoredCount": @(replayRetained),
+        @"replayCacheEvictedCount": @(evicted),
+        @"lastKnownRevision": @(lastKnownRevision),
+        @"runtimeRecoveredFromShutdown": @(_recoveredFromShutdown),
+        @"cleanShutdown": @(cleanShutdown),
+        @"recoveredShutdown": @(_recoveredFromShutdown),
+        @"checkpointStatus": _checkpointStatus ?: @"ready",
+    };
+
+    [self writeCheckpoint:@"session_start" value:@{
+        @"timestamp": @(now),
+        @"lastKnownRevision": @(lastKnownRevision),
+        @"replayCacheRestoredCount": @(replayRetained),
+    }];
+
+    if (_recoveredFromShutdown) {
+        [self recordTimelineEvent:@{
+            @"eventType": @"startup_recovered",
+            @"summary": @"runtime recovered from unclean shutdown",
+            @"payload": _startupDiagnostics,
+        } error:nil];
+    }
+}
+
+- (void)markCleanShutdown {
+    if (!_db) return;
+    [self writeCheckpoint:@"last_shutdown" value:@{@"clean": @YES, @"timestamp": @([[NSDate date] timeIntervalSince1970])}];
+}
+
+- (BOOL)recordTimelineEvent:(NSDictionary*)event error:(NSString**)errorOut {
+    if (!_available || !_db) {
+        if (errorOut) *errorOut = @"runtime_journal_unavailable";
+        return NO;
+    }
+    NSString* eventId = event[@"eventId"] ?: [[NSUUID UUID] UUIDString];
+    NSString* eventType = event[@"eventType"] ?: @"runtime_event";
+    NSString* summary = event[@"summary"] ?: eventType;
+    NSDictionary* payload = event[@"payload"];
+    NSData* payloadData = payload ? [NSJSONSerialization dataWithJSONObject:payload options:0 error:nil] : nil;
+    NSString* payloadJson = payloadData ? [[NSString alloc] initWithData:payloadData encoding:NSUTF8StringEncoding] : nil;
+    double ts = [event[@"timestamp"] doubleValue] ?: [[NSDate date] timeIntervalSince1970];
+
+    const char* sql =
+        "INSERT OR REPLACE INTO runtime_timeline_events "
+        "(event_id, event_type, timestamp, operation_id, revision_id, revision_before, idempotency_key, "
+        "workflow_id, receipt_hash, method, string_code, summary, payload_json, workspace_path) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
+    sqlite3_stmt* stmt = nullptr;
+    if (sqlite3_prepare_v2(_db, sql, -1, &stmt, nullptr) != SQLITE_OK) {
+        if (errorOut) *errorOut = SqliteError(_db);
+        return NO;
+    }
+    sqlite3_bind_text(stmt, 1, eventId.UTF8String, -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text(stmt, 2, eventType.UTF8String, -1, SQLITE_TRANSIENT);
+    sqlite3_bind_double(stmt, 3, ts);
+    NSString* opId = event[@"operationId"];
+    if (opId.length > 0) sqlite3_bind_text(stmt, 4, opId.UTF8String, -1, SQLITE_TRANSIENT); else sqlite3_bind_null(stmt, 4);
+    if (event[@"revisionId"]) sqlite3_bind_int64(stmt, 5, [event[@"revisionId"] longLongValue]); else sqlite3_bind_null(stmt, 5);
+    if (event[@"revisionBefore"]) sqlite3_bind_int64(stmt, 6, [event[@"revisionBefore"] longLongValue]); else sqlite3_bind_null(stmt, 6);
+    NSString* idem = event[@"idempotencyKey"];
+    if (idem.length > 0) sqlite3_bind_text(stmt, 7, idem.UTF8String, -1, SQLITE_TRANSIENT); else sqlite3_bind_null(stmt, 7);
+    NSString* wf = event[@"workflowId"];
+    if (wf.length > 0) sqlite3_bind_text(stmt, 8, wf.UTF8String, -1, SQLITE_TRANSIENT); else sqlite3_bind_null(stmt, 8);
+    NSString* rh = event[@"receiptHash"];
+    if (rh.length > 0) sqlite3_bind_text(stmt, 9, rh.UTF8String, -1, SQLITE_TRANSIENT); else sqlite3_bind_null(stmt, 9);
+    NSString* method = event[@"method"];
+    if (method.length > 0) sqlite3_bind_text(stmt, 10, method.UTF8String, -1, SQLITE_TRANSIENT); else sqlite3_bind_null(stmt, 10);
+    NSString* code = event[@"stringCode"];
+    if (code.length > 0) sqlite3_bind_text(stmt, 11, code.UTF8String, -1, SQLITE_TRANSIENT); else sqlite3_bind_null(stmt, 11);
+    sqlite3_bind_text(stmt, 12, summary.UTF8String, -1, SQLITE_TRANSIENT);
+    if (payloadJson.length > 0) sqlite3_bind_text(stmt, 13, payloadJson.UTF8String, -1, SQLITE_TRANSIENT); else sqlite3_bind_null(stmt, 13);
+    sqlite3_bind_text(stmt, 14, _workspacePath.UTF8String, -1, SQLITE_TRANSIENT);
+    int rc = sqlite3_step(stmt);
+    sqlite3_finalize(stmt);
+    if (rc != SQLITE_DONE) {
+        if (errorOut) *errorOut = SqliteError(_db);
+        return NO;
+    }
+    return YES;
+}
+
+- (NSDictionary*)timelineEventFromStatement:(sqlite3_stmt*)stmt compact:(BOOL)compact {
+    NSMutableDictionary* row = [NSMutableDictionary dictionary];
+    row[@"eventId"] = [NSString stringWithUTF8String:(const char*)sqlite3_column_text(stmt, 0)];
+    row[@"eventType"] = [NSString stringWithUTF8String:(const char*)sqlite3_column_text(stmt, 1)];
+    row[@"timestamp"] = @(sqlite3_column_double(stmt, 2));
+    if (sqlite3_column_type(stmt, 3) != SQLITE_NULL) row[@"operationId"] = [NSString stringWithUTF8String:(const char*)sqlite3_column_text(stmt, 3)];
+    if (sqlite3_column_type(stmt, 4) != SQLITE_NULL) row[@"revisionId"] = @(sqlite3_column_int64(stmt, 4));
+    if (sqlite3_column_type(stmt, 5) != SQLITE_NULL) row[@"revisionBefore"] = @(sqlite3_column_int64(stmt, 5));
+    if (sqlite3_column_type(stmt, 6) != SQLITE_NULL) row[@"idempotencyKey"] = [NSString stringWithUTF8String:(const char*)sqlite3_column_text(stmt, 6)];
+    if (sqlite3_column_type(stmt, 7) != SQLITE_NULL) row[@"workflowId"] = [NSString stringWithUTF8String:(const char*)sqlite3_column_text(stmt, 7)];
+    if (sqlite3_column_type(stmt, 8) != SQLITE_NULL) row[@"receiptHash"] = [NSString stringWithUTF8String:(const char*)sqlite3_column_text(stmt, 8)];
+    if (sqlite3_column_type(stmt, 9) != SQLITE_NULL) row[@"method"] = [NSString stringWithUTF8String:(const char*)sqlite3_column_text(stmt, 9)];
+    if (sqlite3_column_type(stmt, 10) != SQLITE_NULL) row[@"stringCode"] = [NSString stringWithUTF8String:(const char*)sqlite3_column_text(stmt, 10)];
+    row[@"summary"] = [NSString stringWithUTF8String:(const char*)sqlite3_column_text(stmt, 11)];
+    if (!compact && sqlite3_column_type(stmt, 12) != SQLITE_NULL) {
+        NSString* json = [NSString stringWithUTF8String:(const char*)sqlite3_column_text(stmt, 12)];
+        NSDictionary* payload = [NSJSONSerialization JSONObjectWithData:[json dataUsingEncoding:NSUTF8StringEncoding] options:0 error:nil];
+        if (payload) row[@"payload"] = payload;
+    }
+    row[@"correlation"] = MacControlOperationIdentity(row);
+    row[@"mode"] = @"runtime_timeline_event";
+    return row;
+}
+
+- (NSDictionary*)timelineWithParams:(NSDictionary*)params {
+    if (!_available) return @{@"status": @"degraded", @"events": @[], @"mode": @"runtime_timeline"};
+    NSInteger limit = params[@"limit"] ? MIN(MAX([params[@"limit"] integerValue], 1), 100) : 50;
+    NSInteger offset = MAX([params[@"offset"] integerValue], 0);
+    NSInteger sinceRevision = [params[@"sinceRevision"] integerValue];
+    NSInteger untilRevision = [params[@"untilRevision"] integerValue];
+    BOOL errorsOnly = [params[@"errorsOnly"] boolValue];
+    BOOL compact = [params[@"compact"] boolValue];
+    NSString* operationId = params[@"operationId"];
+    NSString* workflowId = params[@"workflowId"];
+    NSArray* eventTypes = params[@"eventTypes"];
+
+    NSMutableString* sql = [NSMutableString stringWithString:
+        @"SELECT event_id, event_type, timestamp, operation_id, revision_id, revision_before, "
+        @"idempotency_key, workflow_id, receipt_hash, method, string_code, summary, payload_json "
+        @"FROM runtime_timeline_events WHERE workspace_path = ?"];
+    if (sinceRevision > 0) [sql appendString:@" AND revision_id >= ?"];
+    if (untilRevision > 0) [sql appendString:@" AND revision_id <= ?"];
+    if (errorsOnly) [sql appendString:@" AND string_code IS NOT NULL"];
+    if (operationId.length > 0) [sql appendString:@" AND operation_id = ?"];
+    if (workflowId.length > 0) [sql appendString:@" AND workflow_id = ?"];
+    [sql appendString:@" ORDER BY timestamp DESC LIMIT ? OFFSET ?"];
+
+    sqlite3_stmt* stmt = nullptr;
+    if (sqlite3_prepare_v2(_db, sql.UTF8String, -1, &stmt, nullptr) != SQLITE_OK) {
+        return @{@"events": @[], @"mode": @"runtime_timeline", @"status": @"error"};
+    }
+
+    int bindIdx = 1;
+    sqlite3_bind_text(stmt, bindIdx++, _workspacePath.UTF8String, -1, SQLITE_TRANSIENT);
+    if (sinceRevision > 0) sqlite3_bind_int64(stmt, bindIdx++, sinceRevision);
+    if (untilRevision > 0) sqlite3_bind_int64(stmt, bindIdx++, untilRevision);
+    if (operationId.length > 0) sqlite3_bind_text(stmt, bindIdx++, operationId.UTF8String, -1, SQLITE_TRANSIENT);
+    if (workflowId.length > 0) sqlite3_bind_text(stmt, bindIdx++, workflowId.UTF8String, -1, SQLITE_TRANSIENT);
+    sqlite3_bind_int64(stmt, bindIdx++, limit + 1);
+    sqlite3_bind_int64(stmt, bindIdx++, offset);
+
+    NSMutableArray* events = [NSMutableArray array];
+    while (sqlite3_step(stmt) == SQLITE_ROW) {
+        NSDictionary* row = [self timelineEventFromStatement:stmt compact:compact];
+        if (eventTypes.count > 0 && ![eventTypes containsObject:row[@"eventType"]]) continue;
+        [events addObject:row];
+    }
+    sqlite3_finalize(stmt);
+
+    BOOL truncated = events.count > (NSUInteger)limit;
+    if (truncated) [events removeLastObject];
+
+    return @{
+        @"mode": @"runtime_timeline",
+        @"events": events,
+        @"limit": @(limit),
+        @"offset": @(offset),
+        @"sinceRevision": @(sinceRevision),
+        @"untilRevision": @(untilRevision),
+        @"errorsOnly": @(errorsOnly),
+        @"compact": @(compact),
+        @"eventCount": @(events.count),
+        @"truncated": @(truncated),
+        @"nextOffset": truncated ? @(offset + limit) : [NSNull null],
+        @"sortOrder": @"timestamp_desc",
+        @"startup": _startupDiagnostics ?: @{},
+    };
+}
+
+- (NSDictionary*)compactOperationSummaries:(NSInteger)limit {
+    NSArray* ops = [self recentOperations:MAX(1, MIN(limit, 20))];
+    NSMutableArray* summaries = [NSMutableArray array];
+    for (NSDictionary* op in ops) {
+        [summaries addObject:@{
+            @"operationId": op[@"operationId"] ?: @"",
+            @"method": op[@"method"] ?: @"",
+            @"status": op[@"status"] ?: @"",
+            @"revisionAfter": op[@"revisionAfter"] ?: @0,
+            @"receiptHash": op[@"receiptHash"] ?: @"",
+            @"correlation": op[@"correlation"] ?: MacControlOperationIdentity(op),
+        }];
+    }
+    return @{
+        @"mode": @"runtime_operation_summary",
+        @"summaries": summaries,
+        @"complete": @YES,
+        @"partial": @NO,
+    };
+}
+
+- (NSArray<NSDictionary*>*)recentWarnings:(NSInteger)limit {
+    if (!_available) return @[];
+    NSInteger lim = MAX(1, MIN(limit, 50));
+    const char* sql =
+        "SELECT event_id, event_type, timestamp, operation_id, revision_id, revision_before, "
+        "idempotency_key, workflow_id, receipt_hash, method, string_code, summary, payload_json "
+        "FROM runtime_timeline_events WHERE workspace_path = ? AND string_code IS NOT NULL "
+        "ORDER BY timestamp DESC LIMIT ?";
+    sqlite3_stmt* stmt = nullptr;
+    if (sqlite3_prepare_v2(_db, sql, -1, &stmt, nullptr) != SQLITE_OK) return @[];
+    sqlite3_bind_text(stmt, 1, _workspacePath.UTF8String, -1, SQLITE_TRANSIENT);
+    sqlite3_bind_int64(stmt, 2, lim);
+    NSMutableArray* rows = [NSMutableArray array];
+    while (sqlite3_step(stmt) == SQLITE_ROW) {
+        [rows addObject:[self timelineEventFromStatement:stmt compact:YES]];
+    }
+    sqlite3_finalize(stmt);
+    return rows;
 }
 
 @end

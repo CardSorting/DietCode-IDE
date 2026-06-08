@@ -1,7 +1,7 @@
 {
   "schemaVersion": "1.0.0",
   "mutationAuthority": "cpp_kernel",
-  "memoryAuthority": "broccoliq_record_only",
+  "recordAuthority": "runtime_journal",
   "methods": [
     "memory.status",
     "memory.operation.get",

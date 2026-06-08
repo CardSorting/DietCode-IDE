@@ -37,6 +37,8 @@
 - (void)clearExternalChangeFlag;
 - (void)trackHashesForPaths:(NSArray<NSString*>*)paths workspace:(NSString*)ws windowBridge:(DietCodeControlWindowBridge*)windowBridge;
 
+- (void)recordRuntimeError:(NSString*)stringCode method:(NSString*)method envelope:(NSDictionary*)envelope;
+
 - (void)persistMutationToMemory:(NSString*)method
                    idempotencyKey:(NSString*)idempotencyKey
                        paramsHash:(NSString*)paramsHash

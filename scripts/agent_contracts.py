@@ -1,4 +1,9 @@
 #!/usr/bin/env python3
+# pass-viii-native
+# broccoliq-memory-test
+# broccoliq-memory-test
+# broccoliq-memory-test
+# pass-viii-native
 # broccoliq-memory-test
 # broccoliq-memory-test
 # broccoliq-memory-test
@@ -353,8 +358,8 @@ OPERATION_STATUS_COMPLETED_KEYS = frozenset({
     "completedAt",
 })
 
-# CONTRACT: memory.status response keys (BroccoliQ runtime memory layer).
-MEMORY_STATUS_KEYS = frozenset({
+# CONTRACT: runtime.diagnostics / memory.status response keys (native runtime journal).
+RUNTIME_DIAGNOSTICS_KEYS = frozenset({
     "mode",
     "available",
     "checkpointStatus",
@@ -366,17 +371,39 @@ MEMORY_STATUS_KEYS = frozenset({
     "bufferedOperations",
     "droppedTelemetryCount",
     "mutationAuthority",
-    "memoryAuthority",
+    "recordAuthority",
     "workspacePath",
+    "startup",
+    "runtimeRecoveredFromShutdown",
+    "complete",
+    "partial",
+    "warnings",
+    "nextRecommendedCommand",
+    "recoveryHint",
 })
 
-# CONTRACT: memory.operation record keys.
+# Back-compat alias for Pass VII contract name.
+MEMORY_STATUS_KEYS = RUNTIME_DIAGNOSTICS_KEYS
+
+# CONTRACT: unified operation identity (Pass VIII).
+RUNTIME_OPERATION_IDENTITY_KEYS = frozenset({
+    "operationId",
+    "revisionId",
+    "revisionBefore",
+    "revisionAfter",
+    "idempotencyKey",
+    "workflowId",
+    "receiptHash",
+})
+
+# CONTRACT: runtime.operation / memory.operation record keys.
 MEMORY_OPERATION_KEYS = frozenset({
     "operationId",
     "method",
     "paramsHash",
     "status",
     "mode",
+    "correlation",
 })
 
 # CONTRACT: memory.operation completed optional keys.
@@ -444,7 +471,45 @@ MEMORY_VERIFICATION_KEYS = frozenset({
     "mode",
 })
 
-# CONTRACT: memory.* RPC method names (frozen agent-safe query surface).
+# CONTRACT: runtime.timeline response keys.
+RUNTIME_TIMELINE_KEYS = frozenset({
+    "mode",
+    "events",
+    "limit",
+    "offset",
+    "sinceRevision",
+    "sortOrder",
+    "complete",
+    "partial",
+    "truncated",
+    "warnings",
+    "nextRecommendedCommand",
+    "recoveryHint",
+})
+
+# CONTRACT: runtime.timeline event keys.
+RUNTIME_TIMELINE_EVENT_KEYS = frozenset({
+    "eventId",
+    "eventType",
+    "timestamp",
+    "summary",
+    "mode",
+    "correlation",
+})
+
+# CONTRACT: runtime.* native surfaces (Pass VIII).
+RUNTIME_RPC_METHODS = frozenset({
+    "runtime.diagnostics",
+    "runtime.status",
+    "runtime.timeline",
+    "runtime.history",
+    "workspace.activity",
+    "runtime.operation.recent",
+    "runtime.warnings.recent",
+    "runtime.correlate",
+})
+
+# CONTRACT: memory.* RPC method names (frozen durable-store query surface).
 MEMORY_RPC_METHODS = frozenset({
     "memory.status",
     "memory.operation.get",
@@ -966,17 +1031,48 @@ def validate_tool_capabilities_response(result: dict[str, Any]) -> list[str]:
     return errors
 
 
-def validate_memory_status(result: dict[str, Any]) -> list[str]:
+def validate_runtime_diagnostics(result: dict[str, Any]) -> list[str]:
     errors: list[str] = []
-    missing = MEMORY_STATUS_KEYS - set(result.keys())
+    missing = RUNTIME_DIAGNOSTICS_KEYS - set(result.keys())
     if missing:
-        errors.append(f"memory.status missing keys: {sorted(missing)}")
-    if result.get("mode") != "memory_status":
-        errors.append("mode must be memory_status")
+        errors.append(f"runtime.diagnostics missing keys: {sorted(missing)}")
+    if result.get("mode") != "runtime_diagnostics":
+        errors.append("mode must be runtime_diagnostics")
     if result.get("mutationAuthority") != "cpp_kernel":
         errors.append("mutationAuthority must be cpp_kernel")
-    if result.get("memoryAuthority") != "broccoliq_record_only":
-        errors.append("memoryAuthority must be broccoliq_record_only")
+    if result.get("recordAuthority") != "runtime_journal":
+        errors.append("recordAuthority must be runtime_journal")
+    errors.extend(validate_partial_success_signals(result))
+    return errors
+
+
+def validate_memory_status(result: dict[str, Any]) -> list[str]:
+    return validate_runtime_diagnostics(result)
+
+
+def validate_runtime_timeline(result: dict[str, Any]) -> list[str]:
+    errors: list[str] = []
+    missing = RUNTIME_TIMELINE_KEYS - set(result.keys())
+    if missing:
+        errors.append(f"runtime.timeline missing keys: {sorted(missing)}")
+    if result.get("mode") != "runtime_timeline":
+        errors.append("mode must be runtime_timeline")
+    if result.get("sortOrder") != "timestamp_desc":
+        errors.append("sortOrder must be timestamp_desc")
+    errors.extend(validate_partial_success_signals(result))
+    events = result.get("events")
+    if isinstance(events, list) and events:
+        event_missing = RUNTIME_TIMELINE_EVENT_KEYS - set(events[0].keys())
+        if event_missing:
+            errors.append(f"runtime.timeline event missing keys: {sorted(event_missing)}")
+    return errors
+
+
+def validate_runtime_operation_identity(correlation: dict[str, Any]) -> list[str]:
+    errors: list[str] = []
+    missing = RUNTIME_OPERATION_IDENTITY_KEYS - set(correlation.keys())
+    if missing:
+        errors.append(f"operation identity missing keys: {sorted(missing)}")
     return errors
 
 
@@ -985,8 +1081,11 @@ def validate_memory_operation(result: dict[str, Any]) -> list[str]:
     missing = MEMORY_OPERATION_KEYS - set(result.keys())
     if missing:
         errors.append(f"memory.operation missing keys: {sorted(missing)}")
-    if result.get("mode") != "memory_operation":
-        errors.append("mode must be memory_operation")
+    if result.get("mode") != "runtime_operation":
+        errors.append("mode must be runtime_operation")
+    correlation = result.get("correlation")
+    if isinstance(correlation, dict):
+        errors.extend(validate_runtime_operation_identity(correlation))
     return errors
 
 

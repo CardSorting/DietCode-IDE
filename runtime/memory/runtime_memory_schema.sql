@@ -119,3 +119,27 @@ CREATE TABLE IF NOT EXISTS runtime_checkpoint (
     value_json TEXT NOT NULL,
     updated_at REAL NOT NULL
 );
+
+-- Pass VIII: unified deterministic runtime timeline (native primitive, not plugin cache).
+CREATE TABLE IF NOT EXISTS runtime_timeline_events (
+    event_id TEXT PRIMARY KEY,
+    event_type TEXT NOT NULL,
+    timestamp REAL NOT NULL,
+    operation_id TEXT,
+    revision_id INTEGER,
+    revision_before INTEGER,
+    idempotency_key TEXT,
+    workflow_id TEXT,
+    receipt_hash TEXT,
+    method TEXT,
+    string_code TEXT,
+    summary TEXT NOT NULL,
+    payload_json TEXT,
+    workspace_path TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_runtime_timeline_ws_time
+    ON runtime_timeline_events(workspace_path, timestamp DESC);
+CREATE INDEX IF NOT EXISTS idx_runtime_timeline_revision
+    ON runtime_timeline_events(workspace_path, revision_id);
+CREATE INDEX IF NOT EXISTS idx_runtime_timeline_operation
+    ON runtime_timeline_events(operation_id);

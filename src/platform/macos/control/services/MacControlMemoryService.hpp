@@ -10,9 +10,17 @@
 @property (nonatomic, readonly, copy) NSString* checkpointStatus;
 @property (nonatomic, readonly) NSInteger droppedTelemetryCount;
 @property (nonatomic, readonly) NSInteger bufferedOperations;
+@property (nonatomic, readonly, copy) NSDictionary* startupDiagnostics;
 
 - (instancetype)initWithWorkspacePath:(NSString*)workspacePath;
 - (void)shutdown;
+
+// Pass VIII: native runtime timeline + continuity
+- (BOOL)recordTimelineEvent:(NSDictionary*)event error:(NSString**)errorOut;
+- (NSDictionary*)timelineWithParams:(NSDictionary*)params;
+- (NSDictionary*)runtimeDiagnosticsPayload;
+- (NSDictionary*)compactOperationSummaries:(NSInteger)limit;
+- (NSArray<NSDictionary*>*)recentWarnings:(NSInteger)limit;
 
 // Operation history
 - (BOOL)recordOperation:(NSDictionary*)record error:(NSString**)errorOut;
@@ -50,7 +58,10 @@
 - (void)recordTelemetryEvent:(NSString*)eventType payload:(NSDictionary*)payload;
 - (void)recordErrorEvent:(NSString*)stringCode method:(NSString*)method envelope:(NSDictionary*)envelope;
 
-// Status
+// Status (memory.status — alias of runtime diagnostics)
 - (NSDictionary*)memoryStatusPayload;
+
+- (void)performStartupRestoration;
+- (void)markCleanShutdown;
 
 @end

@@ -1,0 +1,15 @@
+{
+  "schemaVersion": "1.0.0",
+  "mutationAuthority": "cpp_kernel",
+  "recordAuthority": "runtime_journal",
+  "methods": [
+    "runtime.diagnostics",
+    "runtime.status",
+    "runtime.timeline",
+    "runtime.history",
+    "workspace.activity",
+    "runtime.operation.recent",
+    "runtime.warnings.recent",
+    "runtime.correlate"
+  ]
+}

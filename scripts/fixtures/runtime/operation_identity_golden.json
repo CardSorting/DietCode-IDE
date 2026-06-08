@@ -1,0 +1,12 @@
+{
+  "schemaVersion": "1.0.0",
+  "correlation": {
+    "operationId": "op-native-001",
+    "revisionId": 12,
+    "revisionBefore": 11,
+    "revisionAfter": 12,
+    "idempotencyKey": "idem-native-001",
+    "workflowId": "",
+    "receiptHash": "abc123def4567890"
+  }
+}

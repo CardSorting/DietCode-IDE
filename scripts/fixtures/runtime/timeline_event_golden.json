@@ -1,0 +1,17 @@
+{
+  "schemaVersion": "1.0.0",
+  "eventId": "evt-001",
+  "eventType": "mutation_applied",
+  "timestamp": 1710000000,
+  "summary": "patch.apply completed",
+  "mode": "runtime_timeline_event",
+  "correlation": {
+    "operationId": "op-native-001",
+    "revisionId": 12,
+    "revisionBefore": 11,
+    "revisionAfter": 12,
+    "idempotencyKey": "idem-native-001",
+    "workflowId": "",
+    "receiptHash": "abc123def4567890"
+  }
+}

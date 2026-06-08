@@ -224,6 +224,13 @@ static BOOL ApplyUnifiedPatchToDisk(NSString* absPath, NSString* beforeText, NSS
     if (!beforeText) beforeText = DietCodeReadTextFileForPatchService(absPath);
     NSString* beforeHash = StableHashForString(beforeText ?: @"");
     if (expectBeforeHash.length > 0 && ![expectBeforeHash isEqualToString:beforeHash]) {
+        if (_workspaceState) {
+            [_workspaceState recordRuntimeError:@"stale_content" method:@"patch.apply" envelope:@{
+                @"recovery_hint": @"revalidate_patch_with_patch.validate",
+                @"nextRecommendedCommand": @"patch.validate",
+                @"path": targetPath ?: @"",
+            }];
+        }
         if (errorCodeOut) *errorCodeOut = @"stale_content";
         if (errorOut) *errorOut = @"Target file content changed since validation (expectBeforeHash mismatch).";
         return nil;
@@ -289,7 +296,9 @@ static BOOL ApplyUnifiedPatchToDisk(NSString* absPath, NSString* beforeText, NSS
                                          idempotencyKey:idempotencyKey
                                          revisionBefore:revisionBefore];
         [_workspaceState trackHashesForPaths:@[targetPath] workspace:ws windowBridge:_windowBridge];
+        NSString* opId = [[NSUUID UUID] UUIDString];
         NSDictionary* resultPayload = @{
+            @"operationId": opId,
             @"patched": @YES,
             @"path": absPath,
             @"mutationReceipt": mutationReceipt,

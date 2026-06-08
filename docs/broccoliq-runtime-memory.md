@@ -1,5 +1,7 @@
 # BroccoliQ Native Runtime Memory (Pass VII)
 
+> Pass VIII native integration: [Runtime Native Integration](runtime-native-integration.md) — timeline, identity, continuity.
+
 BroccoliQ is embedded as the **durable memory and coordination layer** for the DietCode agent runtime. The C++ mutation kernel remains the sole authority for file correctness.
 
 ```bash

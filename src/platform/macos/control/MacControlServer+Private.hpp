@@ -101,3 +101,8 @@
 - (void)executeMemoryMethod:(NSString*)method params:(NSDictionary*)params outResult:(NSDictionary**)outResult outErrCode:(NSString**)outErrCode outErrMsg:(NSString**)outErrMsg outPaths:(NSString**)outPaths;
 - (void)persistMutationToMemory:(NSString*)method idempotencyKey:(NSString*)idempotencyKey paramsHash:(NSString*)paramsHash receipt:(NSDictionary*)receipt changedPaths:(NSArray<NSString*>*)paths revisionBefore:(NSInteger)revisionBefore revisionAfter:(NSInteger)revisionAfter resultPayload:(NSDictionary*)resultPayload;
 @end
+
+@interface DietCodeControlServer (Runtime)
+- (NSDictionary*)runtimeTimelineResult:(NSDictionary*)params activityOnly:(BOOL)activityOnly;
+- (void)executeRuntimeMethod:(NSString*)method params:(NSDictionary*)params outResult:(NSDictionary**)outResult outErrCode:(NSString**)outErrCode outErrMsg:(NSString**)outErrMsg outPaths:(NSString**)outPaths;
+@end

@@ -498,6 +498,54 @@ NSDictionary* MacControlEnrichSnapshotResult(NSDictionary* result) {
     return enriched;
 }
 
+NSDictionary* MacControlOperationIdentity(NSDictionary* record) {
+    if (![record isKindOfClass:[NSDictionary class]]) return @{};
+    NSInteger revisionAfter = [record[@"revisionAfter"] integerValue];
+    if (revisionAfter <= 0) revisionAfter = [record[@"revisionId"] integerValue];
+    return @{
+        @"operationId": record[@"operationId"] ?: @"",
+        @"revisionId": @(revisionAfter),
+        @"revisionBefore": record[@"revisionBefore"] ?: @0,
+        @"revisionAfter": @(revisionAfter),
+        @"idempotencyKey": record[@"idempotencyKey"] ?: @"",
+        @"workflowId": record[@"workflowId"] ?: @"",
+        @"receiptHash": record[@"receiptHash"] ?: @"",
+    };
+}
+
+NSDictionary* MacControlEnrichRuntimeSurface(NSDictionary* result, NSString* mode, NSString* nextCommand) {
+    if (![result isKindOfClass:[NSDictionary class]]) return result ?: @{};
+    NSMutableDictionary* enriched = [result mutableCopy];
+    enriched[@"mode"] = mode ?: @"runtime_surface";
+    enriched[@"complete"] = result[@"complete"] ?: @YES;
+    enriched[@"partial"] = result[@"partial"] ?: @NO;
+    if (!enriched[@"warnings"]) enriched[@"warnings"] = @[];
+    if (nextCommand.length > 0 && !enriched[@"nextRecommendedCommand"]) {
+        enriched[@"nextRecommendedCommand"] = nextCommand;
+    }
+    if (result[@"correlation"]) enriched[@"correlation"] = result[@"correlation"];
+    else if (result[@"operationId"] || result[@"revisionAfter"] || result[@"revisionId"]) {
+        enriched[@"correlation"] = MacControlOperationIdentity(result);
+    }
+    return enriched;
+}
+
+NSDictionary* MacControlEnrichRuntimeListResult(NSDictionary* result, NSString* mode, NSString* nextCommand, BOOL truncated) {
+    if (![result isKindOfClass:[NSDictionary class]]) return result ?: @{};
+    NSMutableDictionary* enriched = [result mutableCopy];
+    enriched[@"mode"] = mode ?: @"runtime_list";
+    enriched[@"complete"] = @(!truncated);
+    enriched[@"partial"] = @(truncated);
+    enriched[@"truncated"] = @(truncated);
+    NSMutableArray* warnings = [NSMutableArray array];
+    if (truncated) [warnings addObject:@"results_truncated"];
+    enriched[@"warnings"] = warnings;
+    enriched[@"nextRecommendedCommand"] = nextCommand ?: @"runtime.timeline";
+    enriched[@"recoveryHint"] = truncated ? @"paginate_with_offset" : @"filter_with_sinceRevision";
+    enriched[@"sortOrder"] = @"timestamp_desc";
+    return enriched;
+}
+
 NSDictionary* MacControlEnrichDiffHunksResult(NSDictionary* result, NSString* methodName) {
     if (![result isKindOfClass:[NSDictionary class]]) return result ?: @{};
     BOOL truncated = [result[@"truncated"] boolValue];

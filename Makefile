@@ -73,6 +73,7 @@ MACOS_MM := \
 	src/platform/macos/control/services/MacControlWorkspaceState.mm \
 	src/platform/macos/control/services/MacControlMemoryService.mm \
 	src/platform/macos/control/categories/MacControlServer+Memory.mm \
+	src/platform/macos/control/categories/MacControlServer+Runtime.mm \
 	src/platform/macos/control/services/MacControlTaskRuntime.mm \
 	src/platform/macos/control/services/MacControlComboRuntime.mm \
 	src/platform/macos/control/services/MacControlRoutingPolicy.mm \
@@ -88,7 +89,7 @@ MACOS_MM := \
 	src/filesystem/FileWatcher.mm \
 	src/core/LSPClient.mm
 
-.PHONY: all app run headless ensure-socket restart-agent-server restart-agent-server-fast agent-ready agent-status agent-ping agent-methods agent-capabilities agent-self-test test-agent-offline control-smoke test-task-health test-rpc-transaction test-ergonomics test-grep-diff-tooling test-runtime-determinism test-transaction-kernel test-harness-realism test-deterministic-retrieval test-agent-workflow-smoke test-cli-agent-failures test-docs-code-drift test-partial-success-closure test-broccoliq-runtime-memory test-broccoliq-runtime-memory-fast test-agent-integration agent-integration verify-agent-runtime verify-agent-runtime-fast verify-agent-runtime-full verify-agent-runtime-full-fast test clean
+.PHONY: all app run headless ensure-socket restart-agent-server restart-agent-server-fast agent-ready agent-status agent-ping agent-methods agent-capabilities agent-self-test test-agent-offline control-smoke test-task-health test-rpc-transaction test-ergonomics test-grep-diff-tooling test-runtime-determinism test-transaction-kernel test-harness-realism test-deterministic-retrieval test-agent-workflow-smoke test-cli-agent-failures test-docs-code-drift test-partial-success-closure test-broccoliq-runtime-memory test-broccoliq-runtime-memory-fast test-runtime-native-integration test-runtime-native-integration-fast test-agent-integration agent-integration verify-agent-runtime verify-agent-runtime-fast verify-agent-runtime-full verify-agent-runtime-full-fast test clean
 
 all: app test
 
@@ -210,6 +211,15 @@ test-broccoliq-runtime-memory: restart-agent-server
 # BroccoliQ runtime memory: fast iteration — no rebuild/restart; assumes server/binary already match HEAD.
 test-broccoliq-runtime-memory-fast:
 	DIETCODE_REPO_ROOT=$(CURDIR) python3 scripts/test_broccoliq_runtime_memory.py --compact
+
+# Pass VIII: native runtime integration — full rebuild/restart before live harness.
+test-runtime-native-integration: restart-agent-server
+	DIETCODE_REPO_ROOT=$(CURDIR) python3 scripts/dietcode_agent_client.py --wait-ready --compact --error-json --quiet
+	DIETCODE_REPO_ROOT=$(CURDIR) python3 scripts/test_runtime_native_integration.py --compact
+
+# Pass VIII: fast iteration — assumes server/binary already match HEAD.
+test-runtime-native-integration-fast:
+	DIETCODE_REPO_ROOT=$(CURDIR) python3 scripts/test_runtime_native_integration.py --compact
 
 test-ergonomics: app
 	python3 scripts/dietcode_agent_client.py --wait-ready --compact --error-json --quiet

@@ -1,0 +1,14 @@
+{
+  "schemaVersion": "1.0.0",
+  "startup": {
+    "mode": "runtime_startup",
+    "replayCacheRestoredCount": 3,
+    "replayCacheEvictedCount": 1,
+    "lastKnownRevision": 42,
+    "runtimeRecoveredFromShutdown": false,
+    "cleanShutdown": true,
+    "recoveredShutdown": false,
+    "checkpointStatus": "ready"
+  },
+  "runtimeRecoveredFromShutdown": false
+}

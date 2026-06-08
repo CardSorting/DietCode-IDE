@@ -96,9 +96,20 @@ Audit context: [Agent Runtime Audit](agent-runtime-audit.md). Full ladder: `make
 
 - [ ] `make test-broccoliq-runtime-memory-fast` passes during iteration (assumes fresh server/binary; no rebuild)
 - [ ] `make test-broccoliq-runtime-memory` passes before merge (full rebuild + restart)
-- [ ] `memory.status` reports `mutationAuthority: cpp_kernel` and `memoryAuthority: broccoliq_record_only`
+- [ ] `runtime.diagnostics` reports `mutationAuthority: cpp_kernel` and `recordAuthority: runtime_journal`
 - [ ] `operation.status` / `memory.operation.findByIdempotencyKey` resolve durable replay after mutation
 - [ ] Docs: [BroccoliQ Runtime Memory](broccoliq-runtime-memory.md)
+
+---
+
+## Pass VIII — Native runtime integration
+
+- [ ] `make test-runtime-native-integration-fast` passes during iteration
+- [ ] `make test-runtime-native-integration` passes before merge
+- [ ] `runtime.timeline` / `workspace.activity` return deterministic `timestamp_desc` ordering
+- [ ] `runtime.correlate` joins operation + replay + timeline by `idempotencyKey`
+- [ ] `runtime.diagnostics` exposes `startup.lastKnownRevision` and replay restoration counts
+- [ ] Docs: [Runtime Native Integration](runtime-native-integration.md)
 
 ---
 

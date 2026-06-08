@@ -90,4 +90,8 @@ NSDictionary* MacControlEnrichPatchApplyBatchResult(NSDictionary* result);
 NSDictionary* MacControlEnrichSnapshotResult(NSDictionary* result);
 NSDictionary* MacControlEnrichDiffHunksResult(NSDictionary* result, NSString* methodName);
 
+NSDictionary* MacControlOperationIdentity(NSDictionary* record);
+NSDictionary* MacControlEnrichRuntimeSurface(NSDictionary* result, NSString* mode, NSString* nextCommand);
+NSDictionary* MacControlEnrichRuntimeListResult(NSDictionary* result, NSString* mode, NSString* nextCommand, BOOL truncated);
+
 using namespace dietcode::platform::macos;

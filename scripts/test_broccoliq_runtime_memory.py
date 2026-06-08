@@ -19,10 +19,10 @@ from agent_contracts import (
     MEMORY_SAFETY_BOUNDARY_FORBIDDEN_AUTHORITY,
     validate_memory_operation,
     validate_memory_revision,
-    validate_memory_status,
     validate_memory_verification,
     validate_memory_workflow,
     validate_mutation_receipt,
+    validate_runtime_diagnostics,
 )
 from agent_test_support import CheckRecorder, add_output_args, output_compact
 from agent_tooling import stable_hash_for_string
@@ -35,7 +35,7 @@ def test_offline_memory_rpc_contract_frozen() -> None:
     fixture = json.load(open(os.path.join(FIXTURES_DIR, "memory_rpc_methods.json"), encoding="utf-8"))
     assert set(fixture["methods"]) == set(MEMORY_RPC_METHODS)
     assert fixture["mutationAuthority"] == "cpp_kernel"
-    assert fixture["memoryAuthority"] == "broccoliq_record_only"
+    assert fixture["recordAuthority"] == "runtime_journal"
 
 
 def test_offline_safety_boundary_no_mutation_authority() -> None:
@@ -79,9 +79,10 @@ def test_offline_expired_replay_fixture() -> None:
 def test_live_memory_status(sock: socket.socket, token: str) -> None:
     response = send_rpc(sock, token, "memory.status", {})
     assert response.get("ok"), response
-    errors = validate_memory_status(response["result"])
+    errors = validate_runtime_diagnostics(response["result"])
     assert not errors, errors
     assert response["result"]["mutationAuthority"] == "cpp_kernel"
+    assert response["result"]["recordAuthority"] == "runtime_journal"
 
 
 def test_live_operation_persistence(sock: socket.socket, token: str) -> None:
@@ -227,7 +228,7 @@ def test_live_no_mutation_authority_leakage(sock: socket.socket, token: str) -> 
     for forbidden in MEMORY_SAFETY_BOUNDARY_FORBIDDEN_AUTHORITY:
         assert forbidden not in result
     assert result["mutationAuthority"] == "cpp_kernel"
-    assert result["memoryAuthority"] == "broccoliq_record_only"
+    assert result["recordAuthority"] == "runtime_journal"
 
 
 def main() -> int:

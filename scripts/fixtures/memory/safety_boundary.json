@@ -1,7 +1,7 @@
 {
   "schemaVersion": "1.0.0",
   "mutationKernelRemainsAuthoritative": true,
-  "memoryLayerRole": "record_only",
+  "recordLayerRole": "runtime_journal",
   "forbiddenAuthority": [
     "patch_validity",
     "stale_content_decision",

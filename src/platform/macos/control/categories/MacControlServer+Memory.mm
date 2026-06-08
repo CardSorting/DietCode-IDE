@@ -25,20 +25,20 @@
     [self ensureMemoryServiceForWorkspace];
 
     if ([method isEqualToString:@"memory.status"]) {
-        *outResult = [_memoryService memoryStatusPayload];
+        *outResult = MacControlEnrichRuntimeSurface([_memoryService runtimeDiagnosticsPayload], @"runtime_diagnostics", @"runtime.timeline");
         return;
     }
 
     if (!_memoryService.available) {
-        *outErrCode = @"memory_degraded";
-        *outErrMsg = @"BroccoliQ memory layer unavailable; mutation kernel remains authoritative.";
-        *outResult = @{
+        *outErrCode = @"runtime_journal_degraded";
+        *outErrMsg = @"Runtime journal unavailable; mutation kernel remains authoritative.";
+        *outResult = MacControlEnrichRuntimeSurface(@{
             @"degraded": @YES,
             @"checkpointStatus": _memoryService.checkpointStatus ?: @"unavailable",
-            @"recoveryHint": @"retry_memory_status_or_continue_with_operation_status",
-            @"nextRecommendedCommand": @"memory.status",
+            @"recoveryHint": @"retry_runtime_diagnostics_or_operation_status",
+            @"nextRecommendedCommand": @"runtime.diagnostics",
             @"mutationAuthority": @"cpp_kernel",
-        };
+        }, @"runtime_degraded", @"runtime.diagnostics");
         return;
     }
 
@@ -49,44 +49,48 @@
             *outResult = @{ @"status": @"unknown", @"operationId": opId ?: @"" };
             return;
         }
-        *outResult = op;
+        *outResult = MacControlEnrichRuntimeSurface(op, @"runtime_operation", @"runtime.correlate");
         return;
     }
 
     if ([method isEqualToString:@"memory.operation.list"]) {
         NSInteger limit = params[@"limit"] ? [params[@"limit"] integerValue] : 50;
         NSInteger offset = params[@"offset"] ? [params[@"offset"] integerValue] : 0;
-        *outResult = @{
+        *outResult = MacControlEnrichRuntimeListResult(@{
             @"operations": [_memoryService listOperations:limit offset:offset],
-            @"mode": @"memory_operation_list",
-        };
+            @"mode": @"runtime_operation_list",
+        }, @"runtime_operation_list", @"runtime.timeline", NO);
         return;
     }
 
     if ([method isEqualToString:@"memory.operation.findByIdempotencyKey"]) {
         NSString* key = params[@"idempotencyKey"];
         NSDictionary* op = [_memoryService operationForIdempotencyKey:key];
-        *outResult = op ?: @{ @"status": @"unknown", @"idempotencyKey": key ?: @"" };
+        *outResult = op ? MacControlEnrichRuntimeSurface(op, @"runtime_operation", @"runtime.correlate") : @{ @"status": @"unknown", @"idempotencyKey": key ?: @"" };
         return;
     }
 
     if ([method isEqualToString:@"memory.operation.findByRevision"]) {
         NSInteger revisionId = [params[@"revisionId"] integerValue];
         NSInteger limit = params[@"limit"] ? [params[@"limit"] integerValue] : 20;
-        *outResult = @{
+        *outResult = MacControlEnrichRuntimeListResult(@{
             @"revisionId": @(revisionId),
             @"operations": [_memoryService operationsForRevision:revisionId limit:limit],
-            @"mode": @"memory_operation_by_revision",
-        };
+            @"mode": @"runtime_operation_by_revision",
+        }, @"runtime_operation_by_revision", @"runtime.timeline", NO);
         return;
     }
 
     if ([method isEqualToString:@"memory.operation.recent"]) {
         NSInteger limit = params[@"limit"] ? [params[@"limit"] integerValue] : 20;
-        *outResult = @{
+        if ([params[@"compact"] boolValue]) {
+            *outResult = MacControlEnrichRuntimeSurface([_memoryService compactOperationSummaries:limit], @"runtime_operation_summary", @"runtime.timeline");
+            return;
+        }
+        *outResult = MacControlEnrichRuntimeListResult(@{
             @"operations": [_memoryService recentOperations:limit],
-            @"mode": @"memory_operation_recent",
-        };
+            @"mode": @"runtime_operation_recent",
+        }, @"runtime_operation_recent", @"runtime.timeline", NO);
         return;
     }
 
