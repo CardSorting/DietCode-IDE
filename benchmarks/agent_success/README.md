@@ -9,7 +9,8 @@ End-to-end benchmark harness for DietCode agent workflows — **mutation safety,
 | [RESULTS.md](RESULTS.md) | Normal + adversarial (001–030) | Reference **60/60** · Agent **30/30** |
 | [NIGHTMARE_RESULTS.md](NIGHTMARE_RESULTS.md) | Runtime contract tier (051–060) | Reference **20/20** · Agent **6/10** (`grep_only`) |
 | [RESULTS_CONTRACT_LADDER.md](RESULTS_CONTRACT_LADDER.md) | Profile sweep on nightmare tier | Best: **`contract_full` 9/10** (avg CRI 95) |
-| [RESULTS_ORCHESTRATOR.md](RESULTS_ORCHESTRATOR.md) | Adaptive escalation (Phase 3) | MCS per task — see live run |
+| [RESULTS_ORCHESTRATOR.md](RESULTS_ORCHESTRATOR.md) | Adaptive escalation (Phase 3–3.2) | **Orchestrated 10/10** + three-axis findings |
+| [agent-runtime-reliability-case.md](../../docs/agent-runtime-reliability-case.md) | Phase 4 release gates + traces | Mutation provenance · CI gates |
 
 > Which runtime contract must be visible to the agent before bounded mutation becomes reliable?
 
@@ -204,10 +205,35 @@ Adversarial tasks set `metadata.json` fields: `adversarial`, `trapType`,
 Nightmare tasks set `metadata.json` fields: `nightmare`, `tier: "nightmare"`, plus
 adversarial trap metadata. Tasks 052+ may ship `verify_invariant.sh` for a second-phase check.
 
-**Current findings (live runs, DietCode 1.6.5):**
+**Current findings (live runs, DietCode 1.6.5):** Full analysis in [RESULTS_ORCHESTRATOR.md](RESULTS_ORCHESTRATOR.md).
 
-- Reference passes **100%** on all 40 tasks (80 rows across `raw_rpc` + `bridge`).
-- Phase 2: `grep_only` **6/10** nightmare → `contract_full` **9/10** (static maximal visibility).
-- Phase 3–3.2: **`orchestrated` 10/10** nightmare — MCS + protocol path + semantic repair telemetry.
-- Task **052**: visibility (`hidden_invariant`). **057**: execution (`lock_read_validate_apply`). **059**: semantic (`semantic_repair_loop`).
-- Zero wrong-file edits across all live runs.
+| Evaluation mode | Nightmare pass | What it shows |
+|-----------------|----------------|---------------|
+| Reference executor | **20/20** | Fixtures are mechanically solvable |
+| Agent `grep_only` | **6/10** | Minimal visibility fails half of contract traps |
+| Agent `contract_full` (static) | **9/10** | Maximal upfront visibility still misses races (057) |
+| Agent **`orchestrated`** | **10/10** | Adaptive broker: visibility + execution + semantic axes |
+
+**Three-axis model:** (1) *contract visibility* — what truth exists; (2) *execution protocol* — safe mutation under changing state; (3) *semantic repair* — behavior fixes without API drift. Representative unlocks: **052** visibility · **057** `lock_read_validate_apply` · **059** `semantic_repair_loop`.
+
+Zero wrong-file edits across all live runs.
+
+### Phase 4 — release hardening
+
+```bash
+make benchmark-contract-release-check   # reference 10/10 + orchestrated 10/10 + escalation proofs
+make test-contract-release-gates        # unit tests for gates + trace schema
+```
+
+Orchestrated runs emit mutation traces: `results/traces/<run_id>/<task_id>.mutation_trace.json`
+
+### Stability tiers
+
+| Surface | Stability |
+|---------|-----------|
+| `task_001`–`task_030` | stable |
+| `task_051`–`task_060` (`nightmare_v1`) | stable |
+| JSONL core telemetry + mutation trace schema | stable |
+| Release gate predicates | stable |
+| CRI formula · MCS reference | experimental |
+| `task_061+` (future) | experimental |

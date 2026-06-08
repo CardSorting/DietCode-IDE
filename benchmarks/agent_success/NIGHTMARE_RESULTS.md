@@ -26,7 +26,9 @@ We ran the nightmare tier against a live DietCode headless runtime on macOS:
 
 **Agent (`grep_only`, 6/10)** is the first meaningful separation from the base corpus's 30/30. At minimal contract visibility the agent passes simple grep-and-patch nightmares (053, 056, 058, 060) but fails on **hidden invariants** (052), **behavior checks** (055), **semantic preservation** (059), and **concurrent stale recovery** (057).
 
-**Agent (`contract_full`, 9/10)** — see [RESULTS_CONTRACT_LADDER.md](RESULTS_CONTRACT_LADDER.md) — unlocks 052 via `invariant_aware`, 055/059 via `verify_exec`. Task **057** still fails all profiles (needs organic multi-writer stale recovery, not verify planning). Zero wrong-file edits across all profile runs.
+**Agent (`contract_full`, 9/10)** — see [RESULTS_CONTRACT_LADDER.md](RESULTS_CONTRACT_LADDER.md) — unlocks 052 via `invariant_aware`, 055/059 via `verify_exec`. Task **057** fails all static profiles (execution-protocol gap, not visibility).
+
+**Agent (`orchestrated`, 10/10)** — see [RESULTS_ORCHESTRATOR.md](RESULTS_ORCHESTRATOR.md) — adaptive broker escalates visibility, execution protocols (`lock_read_validate_apply` on 057), and semantic repair (`semantic_repair_loop` on 059). Zero wrong-file edits across all runs.
 
 > Can probabilistic mutation remain bounded under adversarial state, contradictory specs, concurrent writes, and destructive temptations?
 

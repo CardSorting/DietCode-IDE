@@ -27,7 +27,9 @@ Six agent profiles were run on nightmare tasks 051–060 (`bridge` mode). Each p
 
 **Diagnostic example:** task 052 requires `hidden_invariant` — `grep_only`/`verify_exec` fail; `invariant_aware` passes (9/10 on that profile).
 
-**Best profile this run:** `contract_full` at 9/10 (avg CRI 95). Baseline `grep_only`: 6/10.
+**Best static profile:** `contract_full` at 9/10 (avg CRI 95). Baseline `grep_only`: 6/10.
+
+**Orchestrated broker (Phase 3–3.2)** reaches **10/10** with measured MCS per task — see [RESULTS_ORCHESTRATOR.md](RESULTS_ORCHESTRATOR.md) for the three-axis findings write-up.
 
 Source: `results/ladder_final_20260608_combined.jsonl`
 

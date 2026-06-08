@@ -379,6 +379,18 @@ snapshot → capture API shape → run behavior check → derive implementation 
 
 **Claim (Phase 3.2):** Bounded mutation reliability requires three separable controls: **contract visibility**, **safe execution protocol**, and **semantic repair discipline**.
 
+### 6.8 Phase 4 — Reliability Case & Release Gates
+
+Phase 4 hardens the architecture against regression:
+
+- **Mutation traces** — `results/traces/<run_id>/<task_id>.mutation_trace.json` per orchestrated task
+- **Release gates** — `make benchmark-contract-release-check` enforces reference 10/10, orchestrated 10/10, integrity counters, and escalation proofs (052/057/059)
+- **Reliability case** — [docs/agent-runtime-reliability-case.md](../../docs/agent-runtime-reliability-case.md)
+
+**Claim (Phase 4):** DietCode emits replayable mutation traces and enforces release gates for bounded agent code mutation across visibility, execution, and semantic-repair controls.
+
+**Stability tiers:** tasks 001–030 and 051–060 are **stable**; CRI and MCS reference are **experimental**.
+
 ---
 
 ## 7. Metrics
@@ -417,6 +429,7 @@ Each run emits one JSONL `task_result` row:
 | `apiShapeChanged` | Public `def` signatures differ after mutation |
 | `semanticRepairSucceeded` | Behavior + API shape + verify passed after repair |
 | `semanticRollbackTriggered` | Repair rolled back due to shape/behavior violation |
+| `mutationTraceFile` | Path to replayable per-task mutation trace (Phase 4) |
 | `mcsReferenceMatch` | Observed MCS vs diagnostic reference |
 | `executor` | `reference` or `agent` |
 | `mode` | `raw_rpc` or `bridge` |
@@ -451,6 +464,8 @@ Every `summary.md` includes an **Evaluation Claim** section:
 - Agent evaluation constraints — README + verify only
 - Adversarial purpose — predictable failure under traps
 - Framing sentence — transactional runtime, not autocomplete
+
+**Orchestrator findings (Phase 3–3.2):** [RESULTS_ORCHESTRATOR.md](RESULTS_ORCHESTRATOR.md) documents the three-axis control model (visibility · execution protocol · semantic repair), static-vs-adaptive pass rates, failure attribution matrix, MCS interpretation, and representative case studies for tasks 052, 057, and 059.
 
 ### 8.3 Executor coverage
 
@@ -676,3 +691,4 @@ DietCode does not only measure whether an agent can patch code. It measures **wh
 | 1.2 | June 2026 | Phase 3: Runtime Contract Orchestrator, adaptive escalation, MCS metric, `orchestrated` agent profile |
 | 1.3 | June 2026 | Phase 3.1: execution protocols (`lock_read_validate_apply`, etc.), dual-axis escalation, `executionProtocolPath` metric |
 | 1.4 | June 2026 | Phase 3.2: `semantic_repair_loop`, `api_shape_contract`, semantic repair telemetry, CRI semantic penalties |
+| 1.5 | June 2026 | Phase 4: mutation traces, `release_check.py`, reliability case doc, release gates |

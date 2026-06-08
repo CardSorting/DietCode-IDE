@@ -58,7 +58,11 @@ def run_orchestrated_agent(
         execute_plan_with_contracts,
     )
 
+    from mutation_trace import MutationTraceRecorder
+
     ctx.agent_profile = "orchestrated"
+    if ctx.mutation_trace is None:
+        ctx.mutation_trace = MutationTraceRecorder()
     broker = ContractBroker()
     fixture_snap = _snapshot_workspace(workspace)
 
@@ -70,6 +74,7 @@ def run_orchestrated_agent(
             ctx.retries += 1
 
         visible = set(broker.visible)
+        protocol = broker.active_protocol
         outcome = measure_verify_outcome(workspace, task_id)
 
         try:
@@ -90,6 +95,12 @@ def run_orchestrated_agent(
             outcome.semantic_preservation_failed = ctx.metrics.api_shape_changed
             outcome.behavior_failure_uncaptured = ctx.metrics.behavior_failure_uncaptured
             if outcome.verify_rc == 0 and outcome.invariant_rc in (None, 0):
+                ctx.mutation_trace.record(
+                    attempt=step + 1,
+                    contracts=sorted(visible),
+                    protocol=protocol,
+                    result="pass",
+                )
                 _finalize_orchestration(ctx, broker, task_id, succeeded=True)
                 return
             last_error = (
@@ -110,6 +121,13 @@ def run_orchestrated_agent(
                 outcome.execution_error = last_error
 
         failure_class = classify_failure(task_id, outcome)
+        ctx.mutation_trace.record(
+            attempt=step + 1,
+            contracts=sorted(visible),
+            protocol=protocol,
+            result="fail",
+            failure_class=failure_class,
+        )
         granted = broker.escalate(failure_class, step=step)
         if not granted:
             break

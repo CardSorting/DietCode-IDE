@@ -74,6 +74,7 @@ class RunMetrics:
     semantic_repair_succeeded: bool = False
     semantic_rollback_triggered: bool = False
     mcs_reference_match: dict[str, Any] = field(default_factory=dict)
+    mutation_trace_file: str | None = None
 
     def to_json(self) -> dict[str, Any]:
         payload: dict[str, Any] = {
@@ -120,6 +121,8 @@ class RunMetrics:
             "mcsReferenceMatch": self.mcs_reference_match,
             "timestamp": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
         }
+        if self.mutation_trace_file:
+            payload["mutationTraceFile"] = self.mutation_trace_file
         if self.agent_profile:
             payload["agentProfile"] = self.agent_profile
         return payload
@@ -132,6 +135,8 @@ class WorkflowContext:
     patch: str
     metrics: RunMetrics
     agent_profile: str = "grep_only"
+    run_id: str | None = None
+    mutation_trace: Any = None
     tool_calls: int = 0
     retries: int = 0
     hints: list[str] = field(default_factory=list)
@@ -1037,12 +1042,64 @@ def run_task_bridge(workspace: Path, ctx: WorkflowContext) -> None:
     _sync_metrics_from_ctx(ctx)
 
 
+def _finalize_agent_task_metrics(
+    workspace: Path,
+    task_id: str,
+    metrics: RunMetrics,
+) -> None:
+    """Post-run verify and nightmare integrity checks for agent tasks."""
+    from contract_ladder import compute_cri
+
+    try:
+        meta = load_task(task_id)
+        metrics.verify_passed = run_verify(task_id, workspace)
+        metrics.second_invariant_passed = run_verify_invariant(task_id, workspace)
+        if meta.get("verify_invariant") or (TASKS_DIR / task_id / "verify_invariant.sh").is_file():
+            if not metrics.second_invariant_passed:
+                metrics.verify_passed = False
+        metrics.wrong_file_edited = check_wrong_files(
+            workspace, meta.get("targetFiles", []), task_id, meta
+        )
+        finalize_nightmare_metrics(workspace, meta, metrics)
+        metrics.final_verify_passed = metrics.verify_passed
+        if not metrics.verify_passed:
+            metrics.task_success = False
+        metrics.contract_reliability_index = compute_cri(metrics.to_json(), meta=meta)
+    except Exception:
+        metrics.verify_passed = False
+        metrics.task_success = False
+
+
+def _write_orchestrator_mutation_trace(
+    ctx: WorkflowContext,
+    task_id: str,
+    mode: str,
+    *,
+    succeeded: bool,
+) -> None:
+    if ctx.run_id is None or ctx.mutation_trace is None:
+        return
+    from mutation_trace import build_mutation_trace, write_mutation_trace
+
+    trace = build_mutation_trace(
+        task_id=task_id,
+        run_id=ctx.run_id,
+        mode=mode,
+        recorder=ctx.mutation_trace,
+        metrics_json=ctx.metrics.to_json(),
+        succeeded=succeeded,
+    )
+    path = write_mutation_trace(ctx.run_id, task_id, trace)
+    ctx.metrics.mutation_trace_file = str(path)
+
+
 def run_single_task(
     task_id: str,
     mode: str,
     *,
     executor: str = "reference",
     agent_profile: str = "grep_only",
+    run_id: str | None = None,
 ) -> RunMetrics:
     from contract_ladder import AGENT_PROFILES, compute_cri, contract_coverage
 
@@ -1057,7 +1114,13 @@ def run_single_task(
         meta["id"] = task_id
         patch = load_expected_patch(task_id)
         workspace = copy_task_workspace(task_id)
-        ctx = WorkflowContext(workspace=workspace, meta=meta, patch=patch, metrics=metrics)
+        ctx = WorkflowContext(
+            workspace=workspace,
+            meta=meta,
+            patch=patch,
+            metrics=metrics,
+            run_id=run_id,
+        )
         if executor == "reference":
             if mode == "raw_rpc":
                 run_task_rpc(workspace, ctx)
@@ -1079,26 +1142,29 @@ def run_single_task(
         if ctx is not None and executor == "agent":
             _sync_metrics_from_ctx(ctx)
         metrics.duration_ms = (time.monotonic() - started) * 1000.0
-        if workspace and metrics.task_success:
-            try:
-                meta = load_task(task_id)
-                metrics.verify_passed = run_verify(task_id, workspace)
-                metrics.second_invariant_passed = run_verify_invariant(task_id, workspace)
-                if meta.get("verify_invariant") or (TASKS_DIR / task_id / "verify_invariant.sh").is_file():
-                    if not metrics.second_invariant_passed:
-                        metrics.verify_passed = False
-                metrics.wrong_file_edited = check_wrong_files(
-                    workspace, meta.get("targetFiles", []), task_id, meta
+        if workspace and executor == "agent":
+            if agent_profile == "orchestrated" and ctx is not None:
+                _finalize_agent_task_metrics(workspace, task_id, metrics)
+                _write_orchestrator_mutation_trace(
+                    ctx,
+                    task_id,
+                    mode,
+                    succeeded=metrics.task_success and metrics.verify_passed,
                 )
-                finalize_nightmare_metrics(workspace, meta, metrics)
-                if not metrics.verify_passed:
-                    metrics.task_success = False
-                metrics.contract_reliability_index = compute_cri(metrics.to_json(), meta=meta)
-            except Exception:
-                metrics.verify_passed = False
-                metrics.task_success = False
+            elif metrics.task_success:
+                _finalize_agent_task_metrics(workspace, task_id, metrics)
+            else:
+                try:
+                    from contract_ladder import compute_cri
+
+                    meta = load_task(task_id)
+                    metrics.contract_reliability_index = compute_cri(metrics.to_json(), meta=meta)
+                except Exception:
+                    pass
         elif workspace:
             try:
+                from contract_ladder import compute_cri
+
                 meta = load_task(task_id)
                 metrics.contract_reliability_index = compute_cri(metrics.to_json(), meta=meta)
             except Exception:
@@ -1184,6 +1250,7 @@ def main() -> int:
                 mode,
                 executor=args.executor,
                 agent_profile=args.agent_profile,
+                run_id=run_id,
             )
             results.append(metrics)
             print(json.dumps(metrics.to_json(), separators=(",", ":")))

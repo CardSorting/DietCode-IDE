@@ -331,9 +331,17 @@ test-contract-orchestrator:
 	python3 benchmarks/agent_success/test_contracts.py
 	python3 benchmarks/agent_success/test_execution_protocols.py
 	python3 benchmarks/agent_success/test_semantic_repair.py
+	python3 benchmarks/agent_success/test_release_gates.py
 
 benchmark-contract-orchestrator: agent-bridge-fast
 	DIETCODE_REPO_ROOT=$(CURDIR) python3 benchmarks/agent_success/run_orchestrator_benchmark.py --assume-server-ready
+
+# Phase 4 — release gates: reference + orchestrated nightmare, mutation traces, escalation proofs.
+benchmark-contract-release-check: agent-bridge-fast
+	DIETCODE_REPO_ROOT=$(CURDIR) python3 benchmarks/agent_success/release_check.py --assume-server-ready
+
+test-contract-release-gates:
+	python3 benchmarks/agent_success/test_release_gates.py
 
 # Agent success benchmark: fast iteration — assumes server/binary/bridge already match HEAD.
 benchmark-agent-success-fast: agent-bridge-fast
