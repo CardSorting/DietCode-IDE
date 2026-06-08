@@ -6,7 +6,7 @@
 
 <p align="center">
   <strong>A native, local-first macOS coding environment with a bundled deterministic agent runtime.</strong><br>
-  <em>C++20 core · AppKit shell · Agent Bridge · runtime journal</em>
+  <em>C++20 core · AppKit shell · Agent Bridge · runtime journal · agent reliability evaluation</em>
 </p>
 
 <p align="center">
@@ -36,6 +36,40 @@ Agents get a deterministic operating layer.
 
 ---
 
+## Agent Runtime Reliability (v1.0)
+
+DietCode includes a **research-grade evaluation harness** for bounded agent code mutation — not a pass-rate leaderboard, but a defensible artifact with adversarial traps, adaptive orchestration, replayable mutation traces, and enforced release gates.
+
+**Start here:** [AGENT_RUNTIME_RELIABILITY.md](AGENT_RUNTIME_RELIABILITY.md)
+
+```text
+benchmark → adversarial traps → orchestrator → semantic repair
+  → traces → provenance → replay → gates → negative gates → audit verdict
+```
+
+| Milestone | Achievement |
+|-----------|-------------|
+| 40-task corpus | Reference **80/80** solvability (001–030 + 051–060 nightmare) |
+| Contract ladder | Static profiles → nightmare **9/10** at `contract_full` |
+| Adaptive orchestrator | Three-axis escalation → nightmare **10/10** |
+| Mutation traces | SLSA-style provenance per orchestrated run |
+| Release gates | `make benchmark-contract-release-check` |
+| Production audit | [AUDIT v1.0](benchmarks/agent_success/AUDIT_AGENT_RUNTIME_RELIABILITY_v1.0.md) |
+
+```bash
+# Validate schemas (offline)
+make test-agent-benchmark-schema
+
+# Full release gate (requires DietCode server)
+make benchmark-contract-release-check
+```
+
+Tag: `agent-runtime-reliability-v1.0` · Benchmark docs: [benchmarks/agent_success/README.md](benchmarks/agent_success/README.md)
+
+**v1.0 is frozen.** Future benchmark work goes on the **v1.1 experimental** line.
+
+---
+
 ## Architecture
 
 ```text
@@ -53,6 +87,9 @@ Agents get a deterministic operating layer.
          |                        |
    C++ mutation kernel    BroccoliQ runtime journal
    (patch, stale guards)  (timeline, receipts, replay)
+                      |
+              Agent Success Benchmark
+              (traps, orchestrator, traces, gates)
 ```
 
 | Layer | Role | Who uses it |
@@ -61,8 +98,9 @@ Agents get a deterministic operating layer.
 | **Runtime RPC** | JSON-RPC dispatch, queues, contracts | Bridge adapters |
 | **C++ mutation kernel** | Mutation authority — `expectBeforeHash`, receipts, atomic batch | Source of truth for all writes |
 | **Runtime journal** | Durable operation memory, timeline, replay, diagnostics | Runtime + agents |
+| **Agent benchmark** | Adversarial evaluation, contract orchestration, mutation provenance | Researchers + CI |
 
-Deep dive: [Agent Bridge Architecture](docs/agent-bridge-architecture.md) · [Technical Architecture](docs/technical-architecture.md).
+Deep dive: [Agent Bridge Architecture](docs/agent-bridge-architecture.md) · [Technical Architecture](docs/technical-architecture.md) · [Agent Runtime Reliability](AGENT_RUNTIME_RELIABILITY.md).
 
 ---
 
@@ -82,7 +120,8 @@ DietCode is built around a few constraints:
 The runtime is designed so agents can mutate code safely without relying on opaque retrieval systems or probabilistic patch workflows.
 
 **The kernel decides what happened.**  
-**The runtime journal remembers what happened.**
+**The runtime journal remembers what happened.**  
+**The benchmark proves mutation stayed bounded.**
 
 ---
 
@@ -156,8 +195,9 @@ The runtime behaves as a deterministic local transaction kernel for bounded auto
 | Semantic quarantine | `search.semantic` → `4008` |
 | Honest partial success | `complete`, `partial`, `warnings` |
 | Safe batch mutation | atomic apply + rollback proof |
+| Evaluated mutation bounds | Agent Success Benchmark + release gates |
 
-Canonical C++ audit: [Agent Runtime Audit](docs/agent-runtime-audit.md). Maintainer RPC reference: [Headless Agent Control](docs/headless-agent-control.md).
+Canonical C++ audit: [Agent Runtime Audit](docs/agent-runtime-audit.md). Reliability evaluation: [AGENT_RUNTIME_RELIABILITY.md](AGENT_RUNTIME_RELIABILITY.md). Maintainer RPC reference: [Headless Agent Control](docs/headless-agent-control.md).
 
 ---
 
@@ -190,7 +230,7 @@ See [Anti-Scope Checklist](docs/anti-scope-checklist.md) and [MVP Scope](docs/mv
 - macOS 12+
 - Xcode Command Line Tools (`xcode-select --install`)
 - Node.js 18+ (bridge build only; bundled after `make app`)
-- Python 3 (maintainer harnesses)
+- Python 3 (maintainer harnesses + benchmark)
 
 ### Build
 
@@ -244,7 +284,15 @@ Full release ladder:
 make verify-agent-runtime-full
 ```
 
-Details: [Build & Test System](docs/build-and-test-system.md) · [Testing Checklist](docs/testing-checklist.md).
+Agent reliability benchmark:
+
+```bash
+make test-agent-benchmark-schema          # offline schema + audit tests
+make benchmark-contract-orchestrator      # orchestrated nightmare sweep
+make benchmark-contract-release-check     # v1.0 release gate
+```
+
+Details: [Build & Test System](docs/build-and-test-system.md) · [Testing Checklist](docs/testing-checklist.md) · [Benchmark README](benchmarks/agent_success/README.md).
 
 ---
 
@@ -252,13 +300,15 @@ Details: [Build & Test System](docs/build-and-test-system.md) · [Testing Checkl
 
 ```text
 DietCode-IDE/
-  src/                 # C++20 core + AppKit runtime/UI
-  runtime/memory/      # BroccoliQ runtime journal
-  agent-bridge/        # Bundled TypeScript bridge
-  scripts/             # Python harnesses + verification ladders
-  docs/                # Specifications and architecture docs
-  tests/               # C++ editor tests
-  resources/           # App bundle assets
+  AGENT_RUNTIME_RELIABILITY.md   # v1.0 research release entry point
+  src/                           # C++20 core + AppKit runtime/UI
+  runtime/memory/                # BroccoliQ runtime journal
+  agent-bridge/                  # Bundled TypeScript bridge
+  benchmarks/agent_success/      # Agent reliability evaluation harness
+  scripts/                       # Python harnesses + verification ladders
+  docs/                          # Specifications and architecture docs
+  tests/                         # C++ editor tests
+  resources/                     # App bundle assets
 ```
 
 [File Structure](docs/file-structure.md)
@@ -266,6 +316,14 @@ DietCode-IDE/
 ---
 
 ## Documentation
+
+### Agent Runtime Reliability
+
+- [AGENT_RUNTIME_RELIABILITY.md](AGENT_RUNTIME_RELIABILITY.md) — start here
+- [Benchmark README](benchmarks/agent_success/README.md)
+- [WHITEPAPER](benchmarks/agent_success/WHITEPAPER.md)
+- [AUDIT v1.0](benchmarks/agent_success/AUDIT_AGENT_RUNTIME_RELIABILITY_v1.0.md)
+- [Reliability case](docs/agent-runtime-reliability-case.md)
 
 ### Agent Bridge
 
