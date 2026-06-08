@@ -2,6 +2,8 @@
 
 Stable `string_code` values returned in JSON-RPC error envelopes (`ok: false`). Grep this file or the server mapping when debugging agent failures.
 
+Agent-runtime audit (recovery hints, quarantined surfaces): [Agent Runtime Audit](agent-runtime-audit.md).
+
 **Canonical mapping:** `src/platform/macos/control/MacControlServer.mm` (`sendError:code:message:clientFd:`)
 
 **Client mirror:** `scripts/dietcode_agent_client.py` (`local_error_response`, `exception_error_response`)
@@ -193,3 +195,12 @@ python3 scripts/dietcode_agent_client.py --self-test --compact | python3 -m json
 3. Re-run the failing RPC with `--raw-response --compact` to capture the full envelope.
 4. For mutation failures, check `recovery.list` / `combo.status` before retrying.
 5. For path errors, verify `workspace.getRoot` and re-run with `DIETCODE_TEST_WORKSPACE` set when using integration scripts.
+6. For `stale_content`, re-run `patch.validate` and apply with fresh `expectBeforeHash` from validation.
+7. For `semantic_disabled` / `ranked_search_disabled`, switch to `search.literal` or `workspace.grep` per `nextRecommendedCommand`.
+
+## Related docs
+
+- [Agent Runtime Audit](agent-runtime-audit.md)
+- [Runtime Invariants](runtime-invariants.md)
+- [Headless Agent Control](headless-agent-control.md)
+- [Agent Tooling](agent-tooling.md)

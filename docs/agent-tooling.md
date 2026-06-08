@@ -1,14 +1,17 @@
-# Agent Tooling (Deterministic Grep / Diff / Patch)
+# Agent Tooling (Deterministic Grep / Diff / Patch / Retrieval)
 
 Plain-text contracts for local-first agent workflows. No semantic search, embeddings, or fuzzy matching.
 
+**Canonical audit record:** [Agent Runtime Audit](agent-runtime-audit.md) (Passes I–VI). This document is the operational reference for grep/diff/patch/retrieval contracts.
+
 ```bash
 rg 'TOOLING:|GREP_RESPONSE_KEYS|PATCH_VALIDATION_KEYS' scripts/ docs/
+make verify-agent-runtime-full
 ```
 
 ---
 
-## Audit summary (grep/diff/patch pass)
+## Audit summary (Pass I — grep/diff/patch)
 
 | Issue | Root cause | Fix |
 |-------|------------|-----|
@@ -240,7 +243,10 @@ python3 scripts/dietcode_agent_client.py --expect-before-hash <hash> --patch-fil
 
 ## Related docs
 
+- [Agent Runtime Audit](agent-runtime-audit.md)
 - [Runtime Invariants](runtime-invariants.md)
 - [Headless Agent Control](headless-agent-control.md)
 - [Runtime Contracts](runtime-contracts.md)
+- [Error Codes](error-codes.md)
+- [Build & Test System](build-and-test-system.md)
 - [Operator Policy](operator-policy.md)

@@ -174,6 +174,7 @@ Regressions should surface via **grep misses**, **limit constant drift**, **harn
 
 ## Related docs
 
+- [Agent Runtime Audit](agent-runtime-audit.md)
 - [Operator Policy](operator-policy.md)
 - [Operator Diagnostics](operator-diagnostics.md)
 - [Runtime Contracts](runtime-contracts.md)

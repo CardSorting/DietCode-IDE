@@ -1,9 +1,10 @@
 # Runtime Invariants (Deterministic Agent Kernel)
 
-Frozen invariants for local-first agent execution. Grep inventory:
+Frozen invariants for local-first agent execution. Implementation history and pass mapping: [Agent Runtime Audit](agent-runtime-audit.md).
 
 ```bash
 rg 'INVARIANT:|stale_content|beforeContentHash|sortOrder' src/ scripts/ docs/
+make verify-agent-runtime
 ```
 
 ---
@@ -201,6 +202,8 @@ State divergence must be **visible** via hashes, receipts, and stable error code
 
 ## Related docs
 
+- [Agent Runtime Audit](agent-runtime-audit.md)
 - [Agent Tooling](agent-tooling.md)
 - [Runtime Contracts](runtime-contracts.md)
 - [Error Codes](error-codes.md)
+- [Headless Agent Control](headless-agent-control.md)

@@ -80,6 +80,69 @@ rg 'CheckRecorder|finish_test_run' scripts/test_*.py
 
 ---
 
+## How to add an agent-safe search or read surface
+
+1. Implement in `MacControlSearchService.mm` (or read path in `MacControlSupport.mm`).
+2. Set explicit `searchMode` / `sortOrder` — no `score`, `relevance`, or fuzzy expansion.
+3. Call `MacControlEnrichReadSearchResult` (or sibling enrich helper) for partial-success fields.
+4. Add frozen keys to `scripts/agent_contracts.py` and a golden fixture under `scripts/fixtures/retrieval/` or `scripts/fixtures/tooling/`.
+5. Register in `MacControlToolRegistry.mm` with `agentSafe: true`, `deterministic: true`.
+6. Add harness check in `test_deterministic_retrieval.py` or `test_grep_diff_tooling.py`.
+7. Document in `docs/agent-tooling.md` and bump [Agent Runtime Audit](agent-runtime-audit.md) if pass-level.
+
+**Do not** add semantic embeddings, probabilistic ranking, or hidden relevance — see [Anti-Scope Checklist](anti-scope-checklist.md).
+
+---
+
+## How to add partial-success enrichment to a surface
+
+1. Add or extend an enrich helper in `MacControlSupport.mm` (`MacControlEnrich*`).
+2. Set `complete`, `partial`, `warnings` (always include `warnings` key — empty array when none).
+3. Set `nextRecommendedCommand` and `recoveryHint` when `complete: false` or validation requires follow-up.
+4. Add keys to `PARTIAL_SUCCESS_OPTIONAL_KEYS` in `agent_contracts.py`.
+5. Add recovery row to `scripts/fixtures/recovery/error_recovery_hints.json` if new error path.
+6. Add check in `test_partial_success_closure.py` or `test_agent_workflow_smoke.py`.
+7. Run `make test-docs-code-drift` — docs must match fixture recovery table.
+
+```bash
+rg 'MacControlEnrich' src/platform/macos/control/utils/MacControlSupport.mm
+make test-partial-success-closure
+```
+
+---
+
+## How to register a method in tool.registry
+
+1. Add entry in `MacControlToolRegistry.mm` with `agentSafe`, `deterministic`, `mutatesWorkspace`, `requiresConfirmation`.
+2. For deprecated methods, set `deprecated: true` and `replacementMethod`.
+3. For internal-only surfaces (`analysis.*`, `language.*`, …), add prefix to `internalNamespaces` — **do not** add to registry list.
+4. Update `scripts/fixtures/release/surface_classification.json` and `internal_method_namespaces.json`.
+5. Run `make test-deterministic-retrieval`.
+
+```bash
+python3 scripts/dietcode_agent_client.py tool.registry --compact
+python3 scripts/dietcode_agent_client.py tool.capabilities --compact
+```
+
+---
+
+## Agent runtime audit passes (I–VI)
+
+Canonical record: [Agent Runtime Audit](agent-runtime-audit.md).
+
+| Pass | Maintainer touchpoints |
+|------|------------------------|
+| I — Grep | `TextForSearchAtPath`, `agent_tooling.py`, `GREP_RESPONSE_KEYS` |
+| II — Determinism | `expectBeforeHash`, `mutationReceipt`, `test_runtime_determinism.py` |
+| III — Transaction | `MacControlWorkspaceState.mm`, `patch.applyBatch`, revision/snapshot |
+| IV — Harness | `search.files` deterministic mode, `harness_support.py`, symlink fixture |
+| V — Retrieval | `MacControlToolRegistry.mm`, semantic quarantine, `search.literal` |
+| VI — Failure traps | `MacControlEnrich*`, workflow smoke, `test_docs_code_drift.py` |
+
+After any C++ change to control services: `make restart-agent-server` before live harnesses.
+
+---
+
 ## How to update contract inventory
 
 1. Edit `docs/runtime-contracts.md` — add row to contract index with ID `C-*`.
@@ -140,7 +203,10 @@ Ship with: **version bump → release notes template → `make release-check-age
 
 ## Related docs
 
+- [Agent Runtime Audit](agent-runtime-audit.md)
+- [Agent Tooling](agent-tooling.md)
 - [Runtime Contracts](runtime-contracts.md)
+- [Runtime Invariants](runtime-invariants.md)
 - [Release Upgrade & Rollback](release-upgrade-rollback.md)
 - [Deprecation Policy](deprecation-policy.md)
 - [Runtime Safety](runtime-safety.md)

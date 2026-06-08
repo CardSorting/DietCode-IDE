@@ -6,6 +6,14 @@ DietCode exposes a high-fidelity local Unix socket control surface designed for 
 **Protocol:** Newline-delimited JSON-RPC (2.0-style)
 **Authentication:** Requires a session token from `~/.dietcode/session.token`
 
+**Audit record:** Passes I–VI hardened this surface into a deterministic local transaction kernel. See [Agent Runtime Audit](agent-runtime-audit.md) for the full change log, contracts, and verification ladder.
+
+```bash
+make restart-agent-server   # after C++ changes
+make verify-agent-runtime-full
+python3 scripts/dietcode_agent_client.py tool.capabilities --compact
+```
+
 ---
 
 ## 🏗️ The "Chip & Combo" Runtime
@@ -37,22 +45,25 @@ DietCode features a deterministic execution runtime where individual operations 
 - `rpc.describe`: Returns a detailed schema for one or all methods.
 - `system.info`: Returns OS version, architecture, CPU count, and memory info.
 
-### Workspace & Search
+### Workspace & Search (agent-safe)
+
 - `workspace.getRoot`: Get the absolute path of the opened workspace.
 - `workspace.openFolder`: Change the active workspace.
 - `workspace.findFiles`: Discover files using glob patterns (e.g., `src/**/*.hpp`).
 - `workspace.listFiles`: Recursively list files in the workspace.
 - `workspace.openFile`: Open a file in the editor. In headless mode, this validates the file, updates recent-file state, and returns `{ "opened": true, "headless": true }` without touching UI-only editor views.
-- `workspace.grep`: Perform a high-speed literal substring scan across the workspace. Now includes absolute file offsets and lengths for match spans.
-- `workspace.searchStart`: Start an incremental workspace search session.
-- `workspace.searchNext`: Poll the next batch of search results. `maxFiles` must be positive and is capped.
-- `workspace.searchCancel`: Cancel an incremental search session.
-- `search.text`: Advanced text search with context and offsets.
-- `search.files`: Find files by name/glob.
-- `search.todo`: Scan for TODO/FIXME comments.
-- `search.literal` / `search.tokens` / `search.references`: Deterministic agent-safe retrieval (Pass V).
-- `search.semantic`: **Deprecated** — returns `semantic_disabled` (4008) unless `allowExperimental: true`. Use `search.literal` or `search.tokens`.
-- `tool.registry` / `tool.capabilities`: Agent-safe method catalog with `agentSafe`, `deprecated`, `replacementMethod`.
+- `workspace.grep`: Literal substring scan (`searchMode: literal_substring`). Editor buffer preferred; **disk fallback** when headless. Sorted `path_line_column` results; scan accounting (`filesRead`, `filesSkippedSymlink`, …).
+- `workspace.revision`: Monotonic `revisionId`, `changedFiles`, `lastMutationReceipt` (Pass III).
+- `workspace.snapshot`: Point-in-time `fileHashes`; modes `mutated_only` | `tracked_files` | `explicit_paths`. Partial-success fields when truncated.
+- `workspace.searchStart` / `workspace.searchNext` / `workspace.searchCancel`: Incremental search session (paged).
+- `search.literal`: Agent-safe literal substring search (`rankingPolicy: none`).
+- `search.tokens`: Conjunctive literal token match (`matchReason: all_tokens_literal`).
+- `search.paths`: Alias of `search.files` (`deterministic_path_match`, no score).
+- `search.files`: Deterministic path match (`matchReason`: `basename_exact` | `path_substring`, `sortOrder: match_reason_path`).
+- `search.text` / `search.todo`: Same accounting model as grep; context lines on `search.text`.
+- `search.references`: Exact symbol references (`symbol_exact`, sorted `path_line_column`).
+- `search.semantic`: **Quarantined** — returns `semantic_disabled` (4008) unless `allowExperimental: true`. Use `search.literal` or `search.tokens`.
+- `tool.registry` / `tool.capabilities`: Agent-safe method catalog (`agentSafe`, `deterministic`, `deprecated`, `replacementMethod`, `internalNamespaces`).
 
 ### File & Editor Operations
 - `file.read`: Read entire file content.
@@ -71,18 +82,26 @@ DietCode features a deterministic execution runtime where individual operations 
 - `editor.goto`: Navigate to a specific line/column.
 
 ### Advanced Analysis & Symbols
+
+**Internal namespaces** (`analysis.*`, `language.*`) are **not** in `tool.registry`. Use agent-safe search surfaces for automation.
+
 - `analysis.workspaceSummary`: Statistical overview of the workspace (languages, file counts).
-- `symbols.document`: Extract a flat list of symbols (classes, functions, etc.) for a file. Now includes `offset` and `endOffset`.
-- `symbols.hierarchy`: Extract a nested tree of symbols for a file, providing structural context.
-- `symbols.references`: Find all usages of a specific symbol.
+- `analysis.searchRanked`: **Quarantined** — returns `ranked_search_disabled` (4008). Use `workspace.grep` or `search.literal`.
+- `symbols.document`: Extract a flat list of symbols (classes, functions, etc.) for a file. Includes `offset` and `endOffset`.
+- `symbols.hierarchy`: Extract a nested tree of symbols for a file.
+- `symbols.references`: Find all usages of a specific symbol (deterministic; no score ranking).
 - `symbols.atCursor`: Identify the symbol under the editor cursor.
 
-### Diff & Patch (Agent Optimized)
+### Diff & Patch (agent transaction kernel)
+
+Recommended flow: `patch.validate` → read `beforeContentHash` → `patch.apply` with `expectBeforeHash` → check `mutationReceipt` → `workspace.revision`.
+
 - `diff.chunk`: Read large diffs in chunks to avoid frame limits.
-- `diff.hunks`: Get structured unified diff hunks with old/new line mapping.
-- `patch.validate`: Dry-run a patch to check for conflicts or syntax dangers.
-- `patch.apply`: Execute a patch with optional confirmation logic.
-- `patch.applyBatch`: Apply multiple patches across multiple files atomically.
+- `diff.hunks` / `patch.hunks`: Structured unified diff hunks (`literal_unified_diff_hunks`). Partial-success when paginated.
+- `patch.validate`: Dry-run; returns `beforeContentHash`, `patchFingerprint`, `requiresConfirmation`.
+- `patch.apply`: Applies with `expectBeforeHash` stale guard → `stale_content` (4004) on drift. Emits `mutationReceipt` on success. Rejects symlink targets → `symlink_target`.
+- `patch.applyBatch`: Atomic multi-file apply with `batchMutationReceipt` and rollback on any failure.
+- `operation.status`: Lookup completed mutation by `idempotencyKey` (safe retry after timeout).
 
 ### Git Integration
 - `git.status`: Get staged, modified, and untracked file lists.
@@ -118,6 +137,25 @@ Use a dedicated socket connection for long-running event subscriptions. Event no
 
 ---
 
+## Partial success and recovery (Pass VI)
+
+Success payloads on read/search/patch surfaces may include:
+
+| Field | Meaning |
+|-------|---------|
+| `complete` | `false` when truncated, paginated, or scan-limited |
+| `partial` | `true` when warnings, skips, or disk fallback occurred |
+| `warnings` | Stable tokens (`results_truncated`, `requires_confirmation`, …) |
+| `fallbackUsed` | Disk read fallback was used |
+| `recoveryHint` | Next safe action when incomplete |
+| `nextRecommendedCommand` | RPC method to call next |
+
+Error envelopes add `recovery_hint` and `nextRecommendedCommand`. See [Error Codes](error-codes.md).
+
+Enriched surfaces: `workspace.grep`, `search.*`, `patch.validate`, `patch.apply`, `patch.applyBatch`, `workspace.snapshot`, `diff.hunks`, `patch.hunks`.
+
+---
+
 ## Headless Ergonomics Notes
 
 Recent agent ergonomics work tightened the behavior of the headless control surface:
@@ -126,6 +164,8 @@ Recent agent ergonomics work tightened the behavior of the headless control surf
 - The Python client no longer unlinks an existing current-user socket during startup recovery. A stale or refused socket is diagnosed and the native `--ensure-socket` path is used to start a fresh server.
 - Headless-safe UI-adjacent RPCs return explicit headless results rather than terminating the headless process.
 - Incremental workspace search and batch file read/stat methods are advertised in `rpc.methods` / `rpc.describe` and are treated as read-only agent methods.
+- Symlinks are never followed during search (`symlinkPolicy: skip_never_follow`); patch targets through symlinks are rejected.
+- After C++ control-server changes, run `make restart-agent-server` before live harnesses — stale binaries cause false failures.
 
 ---
 
@@ -206,13 +246,18 @@ export DIETCODE_AGENT_CONFIG=docs/headless-agent-config.example.json
 ### Verification ladder
 
 ```bash
-make app && make agent-self-test
+make app && make restart-agent-server
+make agent-self-test && make test-docs-code-drift
 make agent-ready && make agent-status && make agent-ping
+make verify-agent-runtime
+make verify-agent-runtime-full
 make control-smoke | rg '"type":"(check|summary)"'
 make agent-integration | rg '"type":"summary"'
 ```
 
 Integration scripts resolve the workspace from `DIETCODE_TEST_WORKSPACE`, then the repo root, then `workspace.getRoot`.
+
+See [Agent Runtime Audit](agent-runtime-audit.md), [Agent Tooling](agent-tooling.md), and [Build & Test System](build-and-test-system.md) for per-pass targets.
 
 ---
 
@@ -222,6 +267,9 @@ Integration scripts resolve the workspace from `DIETCODE_TEST_WORKSPACE`, then t
 |------|---------|
 | `--grep QUERY` | `workspace.grep` literal substring scan |
 | `--grep-format rg` | ripgrep-style `path:line:column:preview` lines (exit 1 when no matches) |
+| `--search-literal QUERY` | Agent-safe `search.literal` alias (Pass V) |
+| `--search-semantic QUERY` | **Deprecated** — stderr warning; use `--search-literal` |
+| `--expect-before-hash HASH` | Pass `expectBeforeHash` to `patch.apply` (Pass II) |
 | `--diff-summary` | Compact `diff_summary` JSON with `--diff-hunks` |
 | `--patch-summary` | Compact `patch_validation_summary` JSON for patch.validate/preview |
 | `--search-text QUERY` | `search.text` with optional `--before` / `--after` |

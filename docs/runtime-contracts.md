@@ -59,6 +59,21 @@ Stability classification: `scripts/fixtures/release/surface_classification.json`
 | C-DIAG-02 | Runtime NDJSON log schema | `make test-operator-diagnostics` |
 | C-DIAG-03 | Error envelope diagnostics | `assert_rpc_error_diagnostics` in harnesses |
 | C-DIAG-04 | Diagnostic snapshot command | `python3 scripts/dietcode_agent_client.py --diagnose --json` |
+| C-AGENT-01 | Literal grep disk fallback | `make test-grep-diff-tooling` |
+| C-AGENT-02 | Grep response schema | `GREP_RESPONSE_KEYS` in `agent_contracts.py` |
+| C-AGENT-03 | Stale-write rejection | `expectBeforeHash` → `stale_content` (`make test-runtime-determinism`) |
+| C-AGENT-04 | Mutation receipt shape | `MUTATION_RECEIPT_KEYS` (`make test-runtime-determinism`) |
+| C-AGENT-05 | Workspace revision monotonicity | `make test-transaction-kernel` |
+| C-AGENT-06 | Batch atomicity + rollback | `patch.applyBatch` (`make test-transaction-kernel`) |
+| C-AGENT-07 | Symlink skip-never-follow | `make test-harness-realism` |
+| C-AGENT-08 | Deterministic path search (no score) | `SEARCH_FILES_RESPONSE_KEYS` (`make test-harness-realism`) |
+| C-AGENT-09 | Semantic search quarantine | `semantic_disabled` (4008) (`make test-deterministic-retrieval`) |
+| C-AGENT-10 | Tool registry agent-safe surface | `TOOL_REGISTRY_*` (`make test-deterministic-retrieval`) |
+| C-AGENT-11 | Partial-success enrichment | `PARTIAL_SUCCESS_OPTIONAL_KEYS` (`make test-partial-success-closure`) |
+| C-AGENT-12 | Error recovery hints | `ERROR_RECOVERY_HINTS` (`make test-docs-code-drift`) |
+| C-AGENT-13 | Internal method namespaces | `INTERNAL_METHOD_NAMESPACES` fixture |
+
+Audit pass mapping: [Agent Runtime Audit](agent-runtime-audit.md).
 
 ---
 
@@ -308,8 +323,26 @@ Regressions should surface as **grep misses**, **diff-visible contract drift**, 
 
 ---
 
+## C-AGENT-01 through C-AGENT-13: Agent runtime audit contracts
+
+**CONTRACT:** Passes I–VI freeze deterministic agent surfaces in `scripts/agent_contracts.py`. Live behavior is verified by per-pass harnesses and rolled up in `make verify-agent-runtime` / `make verify-agent-runtime-full`.
+
+Key frozen constants:
+
+```bash
+rg 'GREP_RESPONSE_KEYS|MUTATION_RECEIPT_KEYS|TOOL_REGISTRY|PARTIAL_SUCCESS|ERROR_RECOVERY' scripts/agent_contracts.py
+make verify-agent-runtime-full
+```
+
+See [Agent Runtime Audit](agent-runtime-audit.md) for implementation file paths and migration table.
+
+---
+
 ## Related docs
 
+- [Agent Runtime Audit](agent-runtime-audit.md)
+- [Agent Tooling](agent-tooling.md)
+- [Runtime Invariants](runtime-invariants.md)
 - [Queue Contract](queue-contract.md)
 - [Error Codes](error-codes.md)
 - [Task Server Recovery](task-server-recovery.md)

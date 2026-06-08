@@ -14,7 +14,8 @@ Reject these until later phases:
 - AI chat.
 - Background embeddings.
 - Project graph.
-- Full semantic search.
+- Full semantic search (agent `search.semantic` is quarantined — use `search.literal` / `workspace.grep`; see [Agent Runtime Audit](agent-runtime-audit.md)).
+- Probabilistic ranking or opaque relevance scores on agent surfaces.
 - Automatic package manager detection.
 - Complex settings sync.
 - Custom theme marketplace.

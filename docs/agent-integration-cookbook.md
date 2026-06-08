@@ -9,7 +9,9 @@ python3 scripts/dietcode_agent_client.py --wait-ready --compact --error-json
 python3 scripts/control_smoke_test.py --compact
 ```
 
-CLI grep/diff/patch shortcuts and the verification ladder live in [Headless Agent Control](headless-agent-control.md). Stable error codes: [Error Codes](error-codes.md).
+CLI grep/diff/patch shortcuts and the verification ladder live in [Headless Agent Control](headless-agent-control.md). Stable error codes: [Error Codes](error-codes.md). Full audit record: [Agent Runtime Audit](agent-runtime-audit.md).
+
+**Agent-safe surfaces:** prefer `search.literal`, `workspace.grep`, `search.references` — not `search.semantic` or score-ranked results.
 
 ## 🥣 Recipe 1: The "Self-Healing" Loop
 
@@ -27,22 +29,28 @@ with DietCodeAgentClient() as client:
 
 ### Step 2: Find the symbol definition
 ```python
-# Use symbols.references to find where the problematic symbol is defined
-symbol = target["message"].split("'")[1] # Extract symbol name from error msg
-refs = client.call("symbols.references", {"symbol": symbol})
-definition = [r for r in refs if r["score"] > 1.5][0]
+# Deterministic symbol lookup (no score ranking)
+symbol = target["message"].split("'")[1]  # Extract symbol name from error msg
+refs = client.call("search.references", {"symbol": symbol, "maxResults": 20})
+results = refs.get("results", [])
+definition = results[0]  # sorted path_line_column — first row is stable
 ```
 
-### Step 3: Apply a patch
+### Step 3: Validate and apply a patch
 ```python
-# Generate a unified diff and apply it via patch.apply
 patch = f"""--- {definition['path']}
 +++ {definition['path']}
 @@ -10,1 +10,1 @@
 - void problematic_func() {{
 + void corrected_func() {{
 """
-client.call("patch.apply", {"path": definition["path"], "patch": patch})
+validation = client.call("patch.validate", {"path": definition["path"], "patch": patch})
+assert validation["ok"], validation.get("rejectedReason")
+client.call("patch.apply", {
+    "path": definition["path"],
+    "patch": patch,
+    "expectBeforeHash": validation["beforeContentHash"],
+})
 ```
 
 ### Step 4: Verify the fix
@@ -128,8 +136,83 @@ else:
 
 ---
 
+## 🥣 Recipe 5: Find-and-Patch Workflow (smoke test A)
+
+Goal: Locate a symbol with deterministic search, validate, and apply with mutation receipt.
+
+```python
+from dietcode_agent_client import DietCodeAgentClient
+
+with DietCodeAgentClient() as client:
+    hits = client.call("search.literal", {
+        "query": "CONTRACT:",
+        "include": ["scripts/*.py"],
+        "maxResults": 5,
+    })
+    assert hits.get("complete", True), hits.get("warnings", [])
+    path = hits["results"][0]["path"]
+
+    stat = client.call("file.stat", {"path": path})
+    patch = "..."  # unified diff for path
+    validation = client.call("patch.validate", {"path": path, "patch": patch})
+    client.call("patch.apply", {
+        "path": path,
+        "patch": patch,
+        "expectBeforeHash": validation["beforeContentHash"],
+    })
+    rev = client.call("workspace.revision")
+    assert rev["revisionId"] >= 0
+```
+
+---
+
+## 🥣 Recipe 6: Stale-Content Recovery (smoke test B)
+
+Goal: Handle `stale_content` when the file changes between validate and apply.
+
+```python
+validation = client.call("patch.validate", {"path": path, "patch": patch})
+# ... external process mutates file ...
+try:
+    client.call("patch.apply", {
+        "path": path,
+        "patch": patch,
+        "expectBeforeHash": validation["beforeContentHash"],
+    })
+except Exception as e:
+    # envelope: stale_content (4004), nextRecommendedCommand: patch.validate
+    validation = client.call("patch.validate", {"path": path, "patch": corrected_patch})
+    client.call("patch.apply", {
+        "path": path,
+        "patch": corrected_patch,
+        "expectBeforeHash": validation["beforeContentHash"],
+    })
+```
+
+---
+
+## 🥣 Recipe 7: Deprecated Surface Recovery (smoke test D)
+
+Goal: Migrate from quarantined `search.semantic` to agent-safe retrieval.
+
+```python
+try:
+    client.call("search.semantic", {"query": "foo"})
+except Exception:
+    pass  # semantic_disabled (4008)
+
+hits = client.call("search.literal", {"query": "foo", "maxResults": 10})
+caps = client.call("tool.capabilities")
+assert caps.get("semanticSearchDisabled") is True
+```
+
+---
+
 ## 💡 Best Practices for Agent Developers
-- **Prefer CLI for inspection**: Use `--grep`, `--diff-hunks`, and `--raw-response` before writing Python wrappers. Exit codes reflect `ok:false` when `--raw-response` is set.
+- **Prefer CLI for inspection**: Use `--grep`, `--search-literal`, `--diff-hunks`, and `--raw-response` before writing Python wrappers. Exit codes reflect `ok:false` when `--raw-response` is set.
+- **Validate before mutate**: Always `patch.validate` → `expectBeforeHash` → `patch.apply`. Check `mutationReceipt` and `workspace.revision` after success.
+- **Respect partial success**: When `complete: false` or `partial: true`, follow `nextRecommendedCommand` — do not assume full scan coverage.
+- **Avoid quarantined search**: Do not use `search.semantic` or `analysis.searchRanked` in agent loops; use `search.literal` / `workspace.grep`.
 - **Use Paging**: For large workspace scans, always use `resultOffset` and `maxResults`.
 - **Check Dirty Buffers**: Use `buffers.dirty` before applying patches to avoid conflicting with unsaved user changes.
 - **Prefer Structured CLI Failures**: Add `--error-json` when invoking `scripts/dietcode_agent_client.py` from automation. Successful responses stay on stdout; JSON error envelopes are written to stderr.

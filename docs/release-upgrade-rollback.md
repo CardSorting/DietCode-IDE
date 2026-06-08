@@ -11,26 +11,34 @@ rg 'RELEASE:|release-check-agent-runtime' docs/ scripts/ Makefile
 ## Pre-release verification
 
 ```bash
-# Full release-grade ladder
+# Full release-grade ladder (workflow smoke + docs drift + partial-success closure)
+make verify-agent-runtime-full
 make release-check-agent-runtime
 
-# Faster daily ladder
+# Faster daily ladder (passes I–V + core RPC contracts)
 make verify-agent-runtime
 
 # Offline only (no live server)
 python3 scripts/release_check_agent_runtime.py --compact --skip-live
+make test-docs-code-drift
 ```
+
+Audit context: [Agent Runtime Audit](agent-runtime-audit.md).
 
 ---
 
 ## App rebuild and restart
 
 ```bash
-pkill -f "DietCode.app/Contents/MacOS/DietCode" || true
-make app
-build/DietCode.app/Contents/MacOS/DietCode --ensure-socket --ensure-timeout 15
+make restart-agent-server
+# equivalent manual steps:
+# pkill -f "DietCode.app/Contents/MacOS/DietCode" || true
+# make app
+# build/DietCode.app/Contents/MacOS/DietCode --ensure-socket
 python3 scripts/dietcode_agent_client.py --wait-ready --json
 ```
+
+**Required after C++ control-server changes** — stale processes cause false harness failures.
 
 ---
 

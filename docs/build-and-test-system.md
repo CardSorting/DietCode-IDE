@@ -28,25 +28,57 @@ DietCode employs a **Zero-Dependency Testing** approach. Tests are designed to b
 
 ### Integration & Agent Tests
 
-| Target | Socket required? | Output |
-|--------|------------------|--------|
-| `make agent-self-test` | No | Compact JSON self-test report |
-| `make control-smoke` | Yes | NDJSON check lines + summary |
-| `make test-task-health` | Yes | Task/socket survival regression (`test_task_server_health.py`) |
-| `make test-rpc-transaction` | Yes | RPC envelope + failure containment (`test_rpc_transaction_health.py`) |
-| `make test-operator-diagnostics` | Yes | Request correlation + error envelope diagnostics (`test_operator_diagnostics.py`) |
-| `make test-runtime-safety` | Yes | Abuse-resistance limits, socket audit, redaction (`test_runtime_safety.py`) |
-| `make test-agent-offline` | No | Client self-test + contract lockdown (`test_contract_lockdown.py`) |
-| `make agent-integration` | Yes | NDJSON rollup via `run_agent_integration_tests.py` |
-| `make verify-agent-runtime` | Yes | Full verification ladder (`verify_agent_runtime.py`) |
-| `make release-check-agent-runtime` | Yes | Release-grade ladder (`release_check_agent_runtime.py`) |
-| `make test-agent-integration` | Yes | Alias for `agent-integration` |
+Full audit context: [Agent Runtime Audit](agent-runtime-audit.md) (Passes I–VI).
 
-- **`make agent-self-test`**: Runs offline parser/transport checks in `scripts/dietcode_agent_client.py --self-test`. Does **not** connect to a live server.
-- **`make control-smoke`**: Runs `scripts/control_smoke_test.py`, which emits one NDJSON object per check and a final `{"type":"summary",...}` line.
-- **`make test-ergonomics`**: Runs `scripts/test_ergonomics.py` for patch validation and task-runtime contracts (requires an open workspace).
-- **`make agent-integration`**: Runs `scripts/run_agent_integration_tests.py` (smoke + ergonomics NDJSON rollup).
-- **`make test-agent-integration`**: Alias for `agent-integration`.
+#### Socket readiness
+
+| Target | Socket? | Purpose |
+|--------|---------|---------|
+| `make restart-agent-server` | Starts server | Rebuild + kill stale process + `--ensure-socket` (required after C++ changes) |
+| `make agent-ready` | Yes | `--wait-ready` preflight |
+| `make agent-status` | Yes | Socket + RPC readiness JSON |
+| `make agent-ping` | Yes | `rpc.ping` smoke |
+| `make agent-methods` | Yes | List RPC method names |
+| `make agent-capabilities` | Yes | `tool.capabilities` summary |
+
+#### Offline (no socket)
+
+| Target | Script | Pass |
+|--------|--------|------|
+| `make agent-self-test` | `dietcode_agent_client.py --self-test` | — |
+| `make test-agent-offline` | + `test_contract_lockdown.py` | — |
+| `make test-docs-code-drift` | `test_docs_code_drift.py` | VI |
+
+#### Live contract suites (socket required)
+
+| Target | Script | Pass |
+|--------|--------|------|
+| `make control-smoke` | `control_smoke_test.py` | — |
+| `make test-task-health` | `test_task_server_health.py` | — |
+| `make test-rpc-transaction` | `test_rpc_transaction_health.py` | — |
+| `make test-operator-diagnostics` | `test_operator_diagnostics.py` | — |
+| `make test-runtime-safety` | `test_runtime_safety.py` | — |
+| `make test-grep-diff-tooling` | `test_grep_diff_tooling.py` | I |
+| `make test-runtime-determinism` | `test_runtime_determinism.py` | II |
+| `make test-transaction-kernel` | `test_transaction_kernel.py` | III |
+| `make test-harness-realism` | `test_harness_realism.py` | IV |
+| `make test-deterministic-retrieval` | `test_deterministic_retrieval.py` | V |
+| `make test-agent-workflow-smoke` | `test_agent_workflow_smoke.py` | VI |
+| `make test-cli-agent-failures` | `test_cli_agent_failures.py` | VI |
+| `make test-partial-success-closure` | `test_partial_success_closure.py` | VI closure |
+| `make test-ergonomics` | `test_ergonomics.py` | — |
+| `make agent-integration` | `run_agent_integration_tests.py` | — |
+| `make test-agent-integration` | Alias for `agent-integration` | — |
+
+#### Verification ladders
+
+| Target | Contents |
+|--------|----------|
+| `make verify-agent-runtime` | 14 checks: offline + smoke + task + RPC + ergonomics + operator + safety + passes I–V |
+| `make verify-agent-runtime-full` | 9 checks: offline drift + full ladder + workflow + CLI + partial-success + release readiness |
+| `make release-check-agent-runtime` | Release-grade gate (`release_check_agent_runtime.py`) |
+
+**After C++ changes:** targets that depend on `restart-agent-server` (`test-deterministic-retrieval`, workflow smoke, CLI failures, partial-success closure) auto-restart in `verify-agent-runtime`; run `make restart-agent-server` manually when iterating on a single suite.
 
 Environment variables and config precedence: [Agent Environment](agent-environment.md).
 
@@ -55,32 +87,46 @@ Frozen runtime contracts: [Runtime Contracts](runtime-contracts.md). Operator wo
 ```bash
 make test-agent-offline
 make verify-agent-runtime
+make verify-agent-runtime-full
 rg 'CONTRACT:' docs/runtime-contracts.md
 ```
 
 ### Agent verification ladder
 
 ```bash
-# 1. Build
+# 1. Build + fresh server (after C++ edits)
 make app
+make restart-agent-server
 
 # 2. Offline client checks (no socket)
 make agent-self-test
+make test-docs-code-drift
 
 # 3. Ensure socket + RPC readiness
 make agent-ready
 make agent-status    # expect "ok":true
 make agent-ping      # expect {"pong":true,...}
 
-# 4. Live integration (NDJSON smoke + contract suite)
-make test-agent-integration
+# 4. Per-pass suites
+make test-grep-diff-tooling        # Pass I
+make test-runtime-determinism      # Pass II
+make test-transaction-kernel       # Pass III
+make test-harness-realism          # Pass IV
+make test-deterministic-retrieval  # Pass V
+make test-agent-workflow-smoke     # Pass VI
+make test-cli-agent-failures
+make test-partial-success-closure  # Pass VI closure
 
-# 5. Grep/diff CLI shortcuts (literal search, no semantic layer)
+# 5. Full ladders
+make verify-agent-runtime
+make verify-agent-runtime-full
+make release-check-agent-runtime
+
+# 6. Grep/diff CLI shortcuts (literal search, no semantic layer)
 python3 scripts/dietcode_agent_client.py --grep DietCode --max-results 3 --compact
 python3 scripts/dietcode_agent_client.py --grep DietCode --grep-format rg
+python3 scripts/dietcode_agent_client.py --search-literal CONTRACT --max-results 3 --compact
 python3 scripts/dietcode_agent_client.py --diff-source unstaged --diff-hunks --diff-summary --compact
-make test-grep-diff-tooling
-python3 scripts/dietcode_agent_client.py --diff-source unstaged --diff-hunks --include-lines --compact
 ```
 
 Override the workspace used by integration scripts:

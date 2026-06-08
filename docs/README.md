@@ -6,6 +6,7 @@ Welcome to the DietCode documentation. This directory contains detailed specific
 
 - **[First Contribution Tutorial](getting-started-tutorial.md)**: A hands-on guide to building, running, and modifying DietCode.
 - **[Agent Integration Cookbook](agent-integration-cookbook.md)**: Practical recipes and Python examples for building autonomous agents.
+- **[Agent Runtime Audit](agent-runtime-audit.md)**: Canonical record of Passes I–VI (grep reliability, determinism, transaction kernel, harness realism, semantic removal, failure traps).
 - **[Visual Identity](visual-identity.md)**: Brand guidelines and design language.
 - **[FAQ & Troubleshooting](faq-and-troubleshooting.md)**: Solutions to common hurdles in setup and development.
 
@@ -34,6 +35,10 @@ Welcome to the DietCode documentation. This directory contains detailed specific
 - **[Performance Budget](performance-budget.md)**: Constraints on CPU, RAM, and binary size.
 - **[MacOS Implementation Plan](macos-implementation-plan.md)**: Platform-specific details for the primary target.
 - **[Headless Agent Control](headless-agent-control.md)**: Deep dive into the JSON-RPC socket interface for automation.
+- **[Agent Tooling](agent-tooling.md)**: Deterministic grep/diff/patch/retrieval contracts.
+- **[Runtime Invariants](runtime-invariants.md)**: Frozen behavioral rules for the agent transaction kernel.
+- **[Runtime Contracts](runtime-contracts.md)**: Contract IDs, versions, and verification commands.
+- **[Error Codes](error-codes.md)**: Stable `string_code` catalog with recovery hints.
 - **[Deterministic Combo Runtime Spec](deterministic-combo-runtime-spec.md)**: Specification for the command execution runtime.
 
 ## 🎓 Expert-Tier Deep Dives

@@ -1,5 +1,7 @@
 # Testing Checklist
 
+Audit context: [Agent Runtime Audit](agent-runtime-audit.md). Full ladder: `make verify-agent-runtime-full`.
+
 ## Agent / RPC surface
 
 - [ ] `make agent-self-test` passes (offline, no socket)

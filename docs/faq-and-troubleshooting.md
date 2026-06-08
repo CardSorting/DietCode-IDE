@@ -46,6 +46,30 @@ This guide addresses common hurdles encountered when developing, building, or in
 **A:** By default, DietCode protects you from overwriting unsaved user changes in the editor.
 - **Fix:** Either call `editor.saveFile` before patching, or set `allowDirtyBuffer: true` in your RPC params if you are certain you want to patch the editor's memory directly.
 
+### Q: `workspace.grep` returns zero matches in headless mode but ripgrep finds hits.
+**A:** Earlier builds only searched open editor buffers. Current builds fall back to disk via `TextForSearchAtPath`.
+- **Fix:** Rebuild and restart the server: `make app && make restart-agent-server`. Check `filesReadFromDisk` in the grep response. See [Agent Runtime Audit](agent-runtime-audit.md) Pass I.
+
+### Q: `patch.apply` fails with `stale_content` (4004).
+**A:** The file changed between `patch.validate` and `patch.apply`. The server checks `expectBeforeHash` before re-validation.
+- **Fix:** Re-run `patch.validate` on the **current** file content, then apply with the fresh `beforeContentHash`. See [Error Codes](error-codes.md).
+
+### Q: `search.semantic` returns `semantic_disabled` (4008).
+**A:** Semantic search is quarantined on the deterministic agent surface (Pass V).
+- **Fix:** Use `search.literal`, `search.tokens`, or `workspace.grep`. CLI: `--search-literal` instead of `--search-semantic`.
+
+### Q: Live harnesses fail after I changed C++ control code but `make app` succeeded.
+**A:** A stale headless server process may still be listening on the socket.
+- **Fix:** `make restart-agent-server` then re-run the failing target (`make test-deterministic-retrieval`, `make verify-agent-runtime`, etc.).
+
+### Q: Success response has `partial: true` or `complete: false` — did the RPC fail?
+**A:** No — `ok: true` with partial success means the operation succeeded but results may be truncated or used disk fallback.
+- **Fix:** Read `warnings` and call `nextRecommendedCommand` (e.g. paginate with `resultOffset`, or re-validate patch). See [Runtime Invariants](runtime-invariants.md).
+
+### Q: Which RPC methods are safe for autonomous agents?
+**A:** Query `tool.capabilities` for `agentSafeMethods`. `analysis.*` and `language.*` are internal — not in `tool.registry`.
+- **Fix:** `python3 scripts/dietcode_agent_client.py tool.capabilities --compact`
+
 ---
 
 ## 📝 Editor & UI Issues

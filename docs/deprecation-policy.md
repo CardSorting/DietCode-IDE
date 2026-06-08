@@ -48,6 +48,28 @@ rg 'STABILITY:.*deprecated|DEPRECATED:' docs/ scripts/
 
 ---
 
+## Current deprecations (Agent Runtime Audit Pass V–VI)
+
+| Surface | Status | Replacement | Error when blocked |
+|---------|--------|-------------|-------------------|
+| `search.semantic` | Quarantined | `search.literal`, `search.tokens`, `search.references` | `semantic_disabled` (4008) |
+| `analysis.searchRanked` | Quarantined | `workspace.grep`, `search.literal` | `ranked_search_disabled` (4008) |
+| `--search-semantic` CLI | Deprecated | `--search-literal`, `--grep` | stderr warning (still callable) |
+
+Quarantined methods remain callable for diagnostics but return `4008` unless `allowExperimental: true` on `search.semantic`. They are **not** listed as `agentSafe` in `tool.registry`.
+
+Registry entries for deprecated methods include `deprecated: true`, `replacementMethod`, and `failureRecoveryHint`.
+
+```bash
+python3 scripts/dietcode_agent_client.py tool.registry --compact | rg semantic
+make test-deterministic-retrieval
+make test-cli-agent-failures
+```
+
+Full audit context: [Agent Runtime Audit](agent-runtime-audit.md).
+
+---
+
 ## Intentionally not added
 
 - Automatic deprecation telemetry
@@ -58,6 +80,8 @@ rg 'STABILITY:.*deprecated|DEPRECATED:' docs/ scripts/
 
 ## Related docs
 
+- [Agent Runtime Audit](agent-runtime-audit.md)
 - [Maintainer Guide](maintainer-guide.md)
+- [Error Codes](error-codes.md)
 - [Surface classification fixture](../scripts/fixtures/release/surface_classification.json)
 - [Release notes template](templates/runtime-release-notes.md)

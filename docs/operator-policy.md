@@ -20,6 +20,24 @@ rg 'permission.*Destructive|permission.*Execute|READ_METHODS' src/ scripts/ docs
 
 ---
 
+## Agent-safe deterministic surface (Pass V)
+
+Autonomous agents should use methods listed in `tool.capabilities.agentSafeMethods` only. Quarantined or internal surfaces are excluded:
+
+| Class | Examples | Policy |
+|-------|----------|--------|
+| Agent-safe read | `workspace.grep`, `search.literal`, `search.references`, `tool.registry` | Safe read — deterministic, no ranking |
+| Quarantined | `search.semantic`, `analysis.searchRanked` | Returns 4008 — use replacements |
+| Internal | `analysis.*`, `language.*`, `chip.*`, `combo.*` | Not in `tool.registry` |
+
+```bash
+python3 scripts/dietcode_agent_client.py tool.capabilities --compact
+```
+
+See [Agent Runtime Audit](agent-runtime-audit.md).
+
+---
+
 ## Safe read operations
 
 - All methods in client `READ_METHODS` (grep: `READ_METHODS` in `dietcode_agent_client.py`)
@@ -117,6 +135,8 @@ make test-runtime-safety | rg destructive
 
 ## Related docs
 
+- [Agent Runtime Audit](agent-runtime-audit.md)
 - [Runtime Safety](runtime-safety.md)
 - [Error Codes](error-codes.md)
 - [Headless Agent Control](headless-agent-control.md)
+- [Agent Tooling](agent-tooling.md)
