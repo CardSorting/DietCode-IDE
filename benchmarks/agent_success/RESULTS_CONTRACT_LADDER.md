@@ -29,7 +29,7 @@ Six agent profiles were run on nightmare tasks 051–060 (`bridge` mode). Each p
 
 **Best profile this run:** `contract_full` at 9/10 (avg CRI 95). Baseline `grep_only`: 6/10.
 
-Source: `/Users/bozoegg/Desktop/DietCode-IDE/benchmarks/agent_success/results/ladder_final_20260608_combined.jsonl`
+Source: `results/ladder_final_20260608_combined.jsonl`
 
 ---
 

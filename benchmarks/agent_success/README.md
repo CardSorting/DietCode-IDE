@@ -1,24 +1,33 @@
 # Agent Success Benchmark
 
-End-to-end benchmark harness for DietCode agent workflows.
+End-to-end benchmark harness for DietCode agent workflows — **mutation safety, recovery, rollback, and contract observability** around the patching process.
 
-**Whitepaper:** [WHITEPAPER.md](WHITEPAPER.md) · **Results:** [RESULTS.md](RESULTS.md) · **Nightmare:** [NIGHTMARE_RESULTS.md](NIGHTMARE_RESULTS.md) · **Contract ladder:** [RESULTS_CONTRACT_LADDER.md](RESULTS_CONTRACT_LADDER.md)
+**Methodology:** [WHITEPAPER.md](WHITEPAPER.md)
 
-Each task exercises a
-realistic agent pattern (search → inspect → patch, stale recovery, symlink safety,
-large-file avoidance, batch rollback, deprecated search recovery, partial results,
-verify-after-mutation) against an isolated fixture workspace.
+| Report | Scope | Live results (June 2026) |
+|--------|-------|--------------------------|
+| [RESULTS.md](RESULTS.md) | Normal + adversarial (001–030) | Reference **60/60** · Agent **30/30** |
+| [NIGHTMARE_RESULTS.md](NIGHTMARE_RESULTS.md) | Runtime contract tier (051–060) | Reference **20/20** · Agent **6/10** (`grep_only`) |
+| [RESULTS_CONTRACT_LADDER.md](RESULTS_CONTRACT_LADDER.md) | Profile sweep on nightmare tier | Best: **`contract_full` 9/10** (avg CRI 95) |
+
+> Which runtime contract must be visible to the agent before bounded mutation becomes reliable?
+
+**Corpus:** 40 tasks in three tiers (tasks 031–050 reserved). DietCode **1.6.5**, benchmark **v1.1**.
 
 ## Layout
 
 ```text
 benchmarks/agent_success/
-  generate_fixtures.py   # (re)generate task fixture repos
-  run_benchmark.py       # benchmark runner (Mode A / Mode B, reference or agent executor)
-  report_results.py      # comparison report from JSONL results
-  agent_driver.py        # optional README-driven agent executor
-  tasks/task_NNN/        # per-task README, metadata, before/, expected.patch, verify.sh
-  results/               # JSONL run output (gitignored)
+  generate_fixtures.py      # task corpus generator (001–030, 051–060)
+  nightmare_tasks_defs.py   # nightmare-tier definitions
+  run_benchmark.py          # runner: modes × executors × agent profiles
+  agent_driver.py           # README + verify-driven agent (6 contract profiles)
+  contract_ladder.py        # profile caps, CRI, required-contract map
+  run_contract_ladder.py    # nightmare × profile orchestrator
+  render_contract_ladder.py # RESULTS_CONTRACT_LADDER.md generator
+  report_results.py         # summary.md / summary.json from JSONL
+  tasks/task_NNN/           # README, before/, verify.sh, metadata.json, expected.patch
+  results/                  # JSONL + summaries (gitignored)
 ```
 
 ## Modes
@@ -61,18 +70,45 @@ python3 benchmarks/agent_success/run_benchmark.py --executor agent --mode bridge
 ## Quick start
 
 ```bash
-# Regenerate fixture files (optional — committed fixtures ship with the repo)
+# Regenerate fixtures (optional — committed fixtures ship with the repo)
 python3 benchmarks/agent_success/generate_fixtures.py
 
-# Fast iteration — assumes DietCode socket already matches HEAD
+# Base corpus (001–030): reference + report
 make benchmark-agent-success-fast
 
 # Full run — rebuild app and restart agent server first
 make benchmark-agent-success
 
-# Report only (latest JSONL in results/)
+# Nightmare tier reference solvability (051–060)
+python3 benchmarks/agent_success/run_benchmark.py --assume-server-ready \
+  --executor reference --task task_051 … --task task_060
+
+# Runtime Contract Evaluation Ladder (nightmare × all profiles)
+make benchmark-contract-ladder
+
+# Reports
 make benchmark-agent-success-report
+make test-agent-success-report
+make test-contract-ladder
 ```
+
+## Evaluation model
+
+```text
+benchmark corpus (40 tasks)
+  → executors (reference / agent)
+  → agent profiles (grep_only … recovery_aware)   # Phase 2: contract ladder
+  → mutation telemetry (JSONL)
+  → reports (pass, wrong-file, recovery, CRI, attribution matrix)
+  → CI gate (reference solvability + contract metric regression)
+```
+
+| Layer | Question |
+|-------|----------|
+| Reference executor | Is the tool surface mechanically solvable? |
+| Agent + `grep_only` | Can bounded autonomy pass with minimal contract visibility? |
+| Agent + profiles | **Which contract** unlocks each trap? |
+| Nightmare tier | Does mutation stay bounded under adversarial runtime state? |
 
 ## Metrics (JSONL)
 
@@ -129,19 +165,14 @@ Adversarial tasks set `metadata.json` fields: `adversarial`, `trapType`,
 
 ## Reports
 
-`report_results.py` writes `results/summary.md` and `results/summary.json` with:
+| Artifact | Producer | Contents |
+|----------|----------|----------|
+| `results/summary.md` | `report_results.py` | Money table, trap matrix, evaluation claim |
+| `RESULTS.md` | Live run (base corpus) | Reference 60/60, agent 30/30 head-to-head |
+| `NIGHTMARE_RESULTS.md` | Live run (nightmare) | Contract metrics, reference 20/20 |
+| `RESULTS_CONTRACT_LADDER.md` | `run_contract_ladder.py` | Profile ladder + failure attribution matrix |
 
-- **Evaluation Claim** — reference vs agent framing (claim-ready prose)
-- **Money table** — normal vs adversarial pass rates by executor/mode
-- **Adversarial Trap Matrix** — per-`trapType` pass rate, wrong-file, rollback, recovery, retries
-
-```bash
-make benchmark-agent-success-report
-make test-agent-success-report    # smoke test — claim format must not regress
-```
-
-`summary.md` states executor coverage (`reference` / `agent` present or absent).
-Reference-only runs include a warning when agent results are missing.
+`report_results.py` adds **Nightmare Runtime Contract Matrix** when JSONL contains 051–060.
 
 ### Nightmare (051–060)
 
@@ -161,5 +192,10 @@ Reference-only runs include a warning when agent results are missing.
 Nightmare tasks set `metadata.json` fields: `nightmare`, `tier: "nightmare"`, plus
 adversarial trap metadata. Tasks 052+ may ship `verify_invariant.sh` for a second-phase check.
 
-The reference executor proves the tools can solve it. The agent executor reveals
-whether autonomy survives the traps — including the nightmare runtime contract layer.
+**Current findings (live runs, DietCode 1.6.5):**
+
+- Reference passes **100%** on all 40 tasks (80 rows across `raw_rpc` + `bridge`).
+- Agent passes **100%** on base corpus (`grep_only`) but drops to **60%** on nightmare tier.
+- **`invariant_aware`** unlocks task 052 (`hidden_invariant`); **`verify_exec`** unlocks 055/059.
+- Task **057** (`concurrent_agent_conflict`) fails on all profiles — needs organic stale recovery, not grep planning.
+- **`contract_full`** reaches **9/10** nightmare with avg CRI **95** and zero wrong-file edits.

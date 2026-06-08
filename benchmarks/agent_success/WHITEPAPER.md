@@ -2,24 +2,27 @@
 
 **A whitepaper on evaluating bounded agent code mutation as a transactional runtime problem**
 
-Version 1.0 · June 2026  
+Version 1.1 · June 2026  
 Location: `benchmarks/agent_success/`
 
-**Results report (live runtime data):** [RESULTS.md](RESULTS.md)
+**Live results:** [RESULTS.md](RESULTS.md) (001–030) · [NIGHTMARE_RESULTS.md](NIGHTMARE_RESULTS.md) (051–060) · [RESULTS_CONTRACT_LADDER.md](RESULTS_CONTRACT_LADDER.md) (profiles)
 
 ---
 
 ## Abstract
 
-Most “agent IDE” evaluations conflate three distinct questions:
+Most “agent IDE” evaluations conflate four distinct questions:
 
 1. Can the **tool surface** perform safe code mutation end-to-end?
 2. Can an **autonomous agent** use that surface under realistic constraints?
 3. When autonomy fails, are failures **observable, categorized, and bounded**?
+4. **Which runtime contract** must be visible before bounded mutation becomes reliable?
 
-The DietCode Agent Success Benchmark answers these separately. It provides 30 deterministic fixture tasks, two runtime modes (`raw_rpc` and `bridge`), two executors (`reference` and `agent`), and a claim-ready reporting layer that distinguishes mechanical solvability from autonomous survival.
+The DietCode Agent Success Benchmark answers these separately. It provides **40 deterministic fixture tasks** in three tiers (normal, adversarial, nightmare), two runtime modes (`raw_rpc` and `bridge`), two executors (`reference` and `agent`), six **agent contract profiles** (Runtime Contract Evaluation Ladder), and claim-ready reporting with mutation telemetry comparable to observability maturity models.
 
 > **Thesis:** DietCode evaluates bounded agent code mutation as a transactional runtime problem, not an autocomplete problem.
+
+**Live state (June 2026, DietCode 1.6.5):** reference **80/80** (40 tasks × 2 modes); agent **30/30** on base corpus; nightmare **6/10** at `grep_only`, **9/10** at `contract_full`. See result papers linked above.
 
 ---
 
@@ -37,16 +40,20 @@ This benchmark is designed as a **lab instrument**:
 | Reference executor | Can the runtime solve them deterministically? |
 | Agent executor | Can autonomy survive without hidden hints? |
 | Adversarial traps | Do failures emerge predictably under stress? |
-| Report | Are outcomes classified and comparable? |
+| Nightmare tier | Does mutation stay bounded under adversarial runtime state? |
+| Contract ladder | Which contract visibility unlocks each trap? |
+| Report | Are outcomes classified, attributable, and comparable? |
 
-The pipeline is intentionally linear:
+The pipeline mirrors industry eval / safety / observability patterns:
 
 ```text
-fixture generation
-  → reference solvability
-  → agent honesty constraint
-  → adversarial traps
-  → categorized failure/recovery report
+benchmark corpus (40 tasks)
+  → profiles (contract visibility ladder)
+  → metrics (pass, wrong-file, recovery, rollback, invariants, CRI)
+  → telemetry (JSONL event stream)
+  → reports (summary, trap matrix, failure attribution)
+  → CI gate (reference solvability + contract metric regression)
+  → versioned claims (benchmark v1.1, runtime 1.6.5, run IDs)
 ```
 
 ---
@@ -80,18 +87,26 @@ Metrics include wrong-file edits, stale recovery, rollback events, retry counts,
 
 ```text
 benchmarks/agent_success/
-├── generate_fixtures.py    # Single source of truth for all 30 tasks
-├── run_benchmark.py        # Runner: modes × executors
-├── agent_driver.py         # Optional README + verify-driven agent
-├── report_results.py       # Claim-ready aggregation
-├── test_report_results.py  # Smoke tests for report format
-├── tasks/task_001 … 030/   # Per-task fixtures
+├── generate_fixtures.py       # Corpus generator (001–030, 051–060)
+├── nightmare_tasks_defs.py    # Nightmare-tier definitions
+├── run_benchmark.py           # Runner: modes × executors × profiles
+├── agent_driver.py            # Agent executor (6 contract profiles)
+├── contract_ladder.py         # Profile caps, CRI, required-contract map
+├── run_contract_ladder.py     # Nightmare × profile orchestrator
+├── render_contract_ladder.py  # Ladder report generator
+├── report_results.py          # Claim-ready aggregation
+├── test_report_results.py     # Report smoke tests
+├── test_contract_ladder.py    # Ladder smoke tests
+├── tasks/task_NNN/            # Per-task fixtures
 │   ├── README.md
 │   ├── before/
-│   ├── expected.patch      # Reference executor only
-│   ├── verify.sh
+│   ├── expected.patch         # Reference executor only
+│   ├── verify.sh              # (+ verify_invariant.sh on nightmare)
 │   └── metadata.json
-└── results/                # JSONL + summary (gitignored)
+├── RESULTS.md                 # Base corpus live results
+├── NIGHTMARE_RESULTS.md       # Nightmare tier live results
+├── RESULTS_CONTRACT_LADDER.md # Profile sweep live results
+└── results/                   # JSONL + summary (gitignored)
 ```
 
 ### 3.1 Task lifecycle
@@ -137,17 +152,24 @@ A reference pass rate of 100% is the **solvability certificate** for the tool su
 
 ### 5.2 Agent executor
 
-The agent executor (`agent_driver.py`) simulates bounded autonomy:
+The agent executor (`agent_driver.py`) simulates bounded autonomy with **Runtime Contract Evaluation profiles**:
 
-- Reads agent-facing `README.md` (fixture layout sections stripped)
-- Parses acceptance criteria from `verify.sh` (positive/negative grep, shell checks)
-- Uses runtime tools only — no golden patch, no trap metadata
+| Profile | Contract visibility |
+|---------|---------------------|
+| `grep_only` (default) | README + parsed grep checks |
+| `verify_exec` | + run `verify.sh`, inspect failure output |
+| `invariant_aware` | + `verify_invariant.sh` |
+| `trace_aware` | + declared trace scripts |
+| `contract_full` | + all executable checks (no metadata/golden patch) |
+| `recovery_aware` | + validate → apply → verify → rollback/retry loop |
+
+Each run emits `contractCoverage` and `contractReliabilityIndex` (CRI) in JSONL.
 
 External agents can replace the built-in driver:
 
 ```bash
 export AGENT_BENCHMARK_AGENT_SCRIPT=/path/to/your_agent.py
-python3 benchmarks/agent_success/run_benchmark.py --executor agent --mode bridge
+python3 benchmarks/agent_success/run_benchmark.py --executor agent --mode bridge --agent-profile contract_full
 ```
 
 ### 5.3 The comparison that matters
@@ -330,17 +352,31 @@ Reference-only runs include:
 
 ### 8.4 Money table
 
-| executor | mode | normal pass | adversarial pass | wrong file | rollback | recovery |
-|----------|------|------------:|-----------------:|-----------:|---------:|---------:|
+| executor | mode | normal pass | adversarial pass | nightmare pass | wrong file | rollback | recovery |
+|----------|------|------------:|-----------------:|---------------:|-----------:|---------:|---------:|
 
 This is the primary comparison surface for stakeholders.
 
-### 8.5 Adversarial trap matrix
+### 8.5 Trap matrices
+
+**Adversarial (021–030):**
 
 | trapType | passRate | wrongFileEdited | rollbackSucceeded | recoverySucceeded | avgRetries |
 |----------|----------|----------------:|------------------:|------------------:|-----------:|
 
-Per-trap breakdown makes failure modes legible without reading raw JSONL.
+**Nightmare (051–060) — Runtime Contract Matrix:**
+
+| trapType | passRate | destructiveBlocked | sidecarClean | concurrentDetected | searchMismatch | apiPreserved | inv₂ |
+|----------|----------|-------------------:|-------------:|-------------------:|---------------:|-------------:|-----:|
+
+### 8.6 Runtime Contract Evaluation Ladder
+
+From `RESULTS_CONTRACT_LADDER.md`:
+
+| profile | allowed visibility | pass | contractSignals | avgCRI |
+|---------|-------------------|-----:|----------------:|-------:|
+
+**Failure Attribution Matrix** — task × profile → PASS/FAIL with `requiredContract` (e.g. task 052 requires `hidden_invariant`; `grep_only` fails, `invariant_aware` passes).
 
 ---
 
@@ -359,21 +395,31 @@ make benchmark-agent-success-fast
 # Report only (latest JSONL)
 make benchmark-agent-success-report
 
-# Smoke test — report format must not regress
+# Smoke tests
 make test-agent-success-report
+make test-contract-ladder
+
+# Runtime Contract Evaluation Ladder (nightmare × all profiles)
+make benchmark-contract-ladder
 ```
 
 ### 9.1 Selective runs
 
 ```bash
-# Reference baseline, both modes
+# Reference baseline, both modes (base corpus)
 python3 benchmarks/agent_success/run_benchmark.py --executor reference --mode both --assume-server-ready
 
-# Agent executor, bridge only
-python3 benchmarks/agent_success/run_benchmark.py --executor agent --mode bridge --assume-server-ready
+# Agent with contract profile
+python3 benchmarks/agent_success/run_benchmark.py --executor agent --mode bridge \
+  --agent-profile invariant_aware --assume-server-ready
+
+# Nightmare tier only
+python3 benchmarks/agent_success/run_benchmark.py --executor reference \
+  --task task_051 … --task task_060 --assume-server-ready
 
 # Single task
-python3 benchmarks/agent_success/run_benchmark.py --task task_021 --executor agent --mode bridge --assume-server-ready
+python3 benchmarks/agent_success/run_benchmark.py --task task_052 --executor agent \
+  --agent-profile invariant_aware --mode bridge --assume-server-ready
 ```
 
 ---
@@ -382,22 +428,29 @@ python3 benchmarks/agent_success/run_benchmark.py --task task_021 --executor age
 
 ### 10.1 What a healthy reference run looks like
 
-As of benchmark v1.0, the reference executor passes **60/60** tasks (30 tasks × 2 modes):
+As of benchmark v1.1 (June 2026, DietCode 1.6.5), the reference executor passes **100%** on the full corpus:
 
-- Normal pass: 100%
-- Adversarial pass: 100%
-- Wrong-file edits: 0
-- Recovery/rollback events: non-zero on tasks that exercise those paths (expected)
+| Tier | Tasks | Reference pass | Wrong-file edits |
+|------|-------|---------------:|-----------------:|
+| Normal + adversarial | 001–030 | **60/60** (×2 modes) | 0 |
+| Nightmare | 051–060 | **20/20** (×2 modes) | 0 |
+| **Total** | **40** | **80/80** | 0 |
 
-This establishes that fixtures and runtime are aligned. The tool surface is capable.
+Recovery/rollback/contract-metric events are non-zero on stress-path tasks (expected). This is the **solvability certificate** for the tool surface.
 
 ### 10.2 What agent runs reveal
 
-Agent runs are evaluated separately. Lower adversarial pass rate with classified `wrongFileEdited` events is **informative, not embarrassing** — it means traps are working and failures are bounded.
+| Tier | Agent (`grep_only`, bridge) | Notes |
+|------|----------------------------:|-------|
+| Base (001–030) | **30/30** | Verify-driven; no recovery paths exercised |
+| Nightmare (051–060) | **6/10** | First meaningful separation from reference |
+| Nightmare (`contract_full`) | **9/10** | CRI avg 95; task 057 still fails all profiles |
+
+Lower pass rate with **zero wrong-file edits** and a **failure attribution matrix** is informative — it shows which contract visibility unlocks each trap (e.g. 052 needs `invariant_aware`, 055/059 need `verify_exec`, 057 needs organic stale recovery).
 
 The desired property:
 
-> The agent performs worse on adversarial tasks, but failures are observable, recoverable, categorized, and bounded.
+> Failures are attributable to missing contract visibility — not silent corruption.
 
 ### 10.3 What this benchmark does not claim
 
@@ -459,13 +512,14 @@ The script must mutate the workspace using DietCode tools. The runner handles ve
 
 The DietCode Agent Success Benchmark is a coherent evaluation artifact:
 
-1. **The runtime is capable** — reference executor solvability across 30 tasks and 2 modes.
-2. **The agent is constrained** — no metadata cheats in agent mode.
-3. **The traps are explicit** — named adversarial scenarios with typed failure modes.
-4. **Failures are classified** — wrong-file, rollback, recovery, retries, hints.
-5. **Recovery is measurable** — per-trap matrix and money table.
+1. **The runtime is capable** — reference **80/80** across 40 tasks and 2 modes.
+2. **The agent is constrained** — no metadata cheats; contract visibility is profile-controlled.
+3. **The traps are explicit** — adversarial + nightmare tiers with typed failure modes.
+4. **Failures are attributable** — contract ladder + failure attribution matrix.
+5. **Safety is scored** — CRI weights wrong-file, invariant, rollback, and containment over raw pass rate.
+6. **Recovery is measurable** — per-trap matrix, contract signals, mutation telemetry.
 
-This is the difference between claiming “my IDE has agent tools” and demonstrating that **bounded agent code mutation is a transactional runtime problem** — searchable, patchable, verifiable, recoverable, and reportable.
+DietCode does not only measure whether an agent can patch code. It measures **which runtime contracts must be visible** for bounded mutation to remain reliable — searchable, patchable, verifiable, recoverable, and reportable.
 
 ---
 
@@ -474,26 +528,34 @@ This is the difference between claiming “my IDE has agent tools” and demonst
 | File | Purpose |
 |------|---------|
 | `generate_fixtures.py` | Task corpus generator |
-| `run_benchmark.py` | Benchmark runner |
-| `agent_driver.py` | Built-in agent executor |
+| `nightmare_tasks_defs.py` | Nightmare-tier task definitions |
+| `run_benchmark.py` | Benchmark runner (`--agent-profile`) |
+| `agent_driver.py` | Built-in agent executor (6 profiles) |
+| `contract_ladder.py` | Profile caps, CRI, required-contract map |
+| `run_contract_ladder.py` | Nightmare × profile orchestrator |
+| `render_contract_ladder.py` | Ladder report generator |
 | `report_results.py` | Report aggregator |
-| `test_report_results.py` | Report smoke tests |
+| `RESULTS.md` | Base corpus live results |
+| `NIGHTMARE_RESULTS.md` | Nightmare tier live results |
+| `RESULTS_CONTRACT_LADDER.md` | Profile sweep live results |
 | `tasks/task_NNN/` | Fixture repos |
 | `results/*.jsonl` | Raw run output |
 | `results/summary.md` | Claim-ready report |
-| `results/summary.json` | Machine aggregate |
 
 ## Appendix B: Makefile targets
 
 | Target | Action |
 |--------|--------|
-| `benchmark-agent-success` | Rebuild, restart, full run |
-| `benchmark-agent-success-fast` | Fast run + report |
+| `benchmark-agent-success` | Rebuild, restart, full base-corpus run |
+| `benchmark-agent-success-fast` | Fast base-corpus run + report |
 | `benchmark-agent-success-report` | Report from latest JSONL |
+| `benchmark-contract-ladder` | Nightmare × all profiles → ladder report |
 | `test-agent-success-report` | Report format smoke test |
+| `test-contract-ladder` | Ladder smoke test |
 
 ## Appendix C: Version history
 
 | Version | Date | Notes |
 |---------|------|-------|
-| 1.0 | June 2026 | Initial release: 30 tasks, dual modes, dual executors, adversarial traps, claim-ready reporting |
+| 1.0 | June 2026 | 30 tasks: dual modes, dual executors, adversarial traps, claim-ready reporting |
+| 1.1 | June 2026 | +10 nightmare tasks (051–060), contract metrics, Runtime Contract Evaluation Ladder (6 profiles), CRI, failure attribution, three result papers |

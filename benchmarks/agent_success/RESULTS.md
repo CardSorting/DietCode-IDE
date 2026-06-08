@@ -1,18 +1,31 @@
 # DietCode Agent Success Benchmark — Results Report
 
-**Empirical results from live runtime evaluation**  
+**Empirical results from live runtime evaluation — base corpus (tasks 001–030)**  
 Run date: **8 June 2026**  
 DietCode runtime: **1.6.5** (control socket)  
-Benchmark version: **1.0** (30 tasks)
+Benchmark version: **1.0** (this report) · corpus **v1.1** (40 tasks total)
 
-Methodology: [WHITEPAPER.md](WHITEPAPER.md)  
-Nightmare tier (051–060): [NIGHTMARE_RESULTS.md](NIGHTMARE_RESULTS.md)
+Methodology: [WHITEPAPER.md](WHITEPAPER.md)
+
+**Related reports:** [NIGHTMARE_RESULTS.md](NIGHTMARE_RESULTS.md) (051–060) · [RESULTS_CONTRACT_LADDER.md](RESULTS_CONTRACT_LADDER.md) (profiles)
+
+---
+
+## Corpus state at a glance (June 2026)
+
+| Tier | Tasks | Reference | Agent (`grep_only`) | Report |
+|------|-------|-----------|---------------------|--------|
+| Normal + adversarial | 001–030 | **60/60** | **30/30** | **this document** |
+| Nightmare | 051–060 | **20/20** | **6/10** | [NIGHTMARE_RESULTS.md](NIGHTMARE_RESULTS.md) |
+| Nightmare + profiles | 051–060 | — | **9/10** (`contract_full`) | [RESULTS_CONTRACT_LADDER.md](RESULTS_CONTRACT_LADDER.md) |
+
+Full reference solvability: **80/80** (40 tasks × `raw_rpc` + `bridge`). Zero wrong-file edits across all live runs.
 
 ---
 
 ## Executive summary
 
-We ran the Agent Success Benchmark against a live DietCode headless runtime on macOS. Two executors were compared on the same 30-task fixture corpus:
+We ran the Agent Success Benchmark against a live DietCode headless runtime on macOS. Two executors were compared on the 30-task base fixture corpus (normal + adversarial):
 
 | Executor | Mode | Pass rate | Tasks | Wrong-file edits |
 |----------|------|----------:|------:|-----------------:|
@@ -33,6 +46,8 @@ These results support five concrete claims:
 3. **The traps are explicit** — ten named adversarial scenarios, all verifiable post-hoc.
 4. **Failures are classifiable** — metrics captured even when pass rate is 100%.
 5. **Recovery is measurable** — reference runs recorded 6 stale recoveries and 4 rollback successes; agent runs recorded none.
+
+**Subsequent tiers:** nightmare tasks (051–060) break the agent's 100% pass rate (6/10 at `grep_only`). The [Runtime Contract Evaluation Ladder](RESULTS_CONTRACT_LADDER.md) shows which contract visibility unlocks each trap — e.g. task 052 requires `invariant_aware`, tasks 055/059 require `verify_exec`.
 
 ---
 
@@ -332,4 +347,4 @@ python3 benchmarks/agent_success/report_results.py \
 
 ---
 
-*Generated from live JSONL artifacts. See `results/20260608T110053Z.jsonl` and `results/paper_agent_bridge_20260608.jsonl`.*
+*Generated from live JSONL artifacts. See `results/20260608T110053Z.jsonl` and `results/paper_agent_bridge_20260608.jsonl`. Nightmare and ladder results: [NIGHTMARE_RESULTS.md](NIGHTMARE_RESULTS.md), [RESULTS_CONTRACT_LADDER.md](RESULTS_CONTRACT_LADDER.md).*

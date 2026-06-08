@@ -128,7 +128,7 @@ def _executive_summary(summary: dict[str, Any]) -> list[str]:
                 f"(avg CRI {best['avgCri']}). Baseline `grep_only`: {grep['passed']}/{grep['total']}."
             ),
             "",
-            f"Source: `{summary.get('inputFile', 'combined.jsonl')}`",
+            f"Source: `{Path(summary.get('inputFile', 'combined.jsonl')).name}`",
             "",
             "---",
             "",
