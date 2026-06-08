@@ -126,6 +126,12 @@ Kernel RPCs: `approval.list`, `approval.get`, `approval.resolve`. Destructive mu
 
 See [approval-lifecycle.md](./approval-lifecycle.md) for the full safety loop.
 
+## Workspace drift (state validity)
+
+Kernel RPCs: `workspace.status`, `workspace.snapshot`, `workspace.refreshAnchor`. Edit/Destructive mutations are blocked when `driftDetected` until context is refreshed (`contextRefreshId`) or the operator chooses continue-anyway.
+
+Cockpit shows affected files and actions: Refresh context, Re-run verify, Cancel task, Continue anyway. See [workspace-drift.md](./workspace-drift.md).
+
 ## Governed tasks
 
 Cockpit chat submits Hermes **tasks** (not raw chat):

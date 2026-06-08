@@ -113,6 +113,66 @@ body {
   cursor: pointer;
 }
 
+.workspace-drift-panel {
+  border-bottom: 1px solid #30363d;
+  background: #1c1917;
+  padding: 0.75rem 1rem 1rem;
+}
+
+.workspace-drift-header strong {
+  color: #e3b341;
+}
+
+.workspace-drift-files {
+  margin: 0.5rem 0;
+  font-size: 0.85rem;
+}
+
+.workspace-drift-files ul {
+  margin: 0.35rem 0 0;
+  padding-left: 1.25rem;
+}
+
+.workspace-drift-files li {
+  margin-bottom: 0.2rem;
+}
+
+.workspace-drift-label {
+  color: #8b949e;
+  font-size: 0.8rem;
+}
+
+.workspace-drift-verify-meta {
+  margin: 0.35rem 0 0.5rem;
+  font-size: 0.78rem;
+  color: #8b949e;
+}
+
+.workspace-drift-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.workspace-drift-actions button {
+  background: #21262d;
+  border: 1px solid #30363d;
+  border-radius: 6px;
+  color: #e6edf3;
+  padding: 0.35rem 0.7rem;
+  font-size: 0.75rem;
+  cursor: pointer;
+}
+
+.workspace-drift-actions button.muted {
+  color: #8b949e;
+}
+
+.workspace-drift-actions button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
 .status-banner-actions button:disabled {
   opacity: 0.5;
   cursor: not-allowed;

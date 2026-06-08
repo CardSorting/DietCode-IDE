@@ -3,6 +3,7 @@ import { ChatPanel } from './components/ChatPanel';
 import { DiffPanel } from './components/DiffPanel';
 import { LogStream } from './components/LogStream';
 import { StatusBanners } from './components/StatusBanners';
+import { WorkspaceDriftPanel } from './components/WorkspaceDriftPanel';
 import { TaskTimeline } from './components/TaskTimeline';
 import { useEffect, useState } from 'react';
 import { useKernel } from './hooks/useKernel';
@@ -19,6 +20,10 @@ export default function App() {
     refreshApprovals,
     retryTask,
     cancelTask,
+    refreshWorkspaceContext,
+    rerunWorkspaceVerify,
+    continueWorkspaceAnyway,
+    health,
   } = useKernel();
   const [activeTaskId, setActiveTaskId] = useState<string | null>(
     session.activeTaskId ?? null,
@@ -67,7 +72,7 @@ export default function App() {
       </header>
 
       <StatusBanners
-        banners={banners}
+        banners={banners.filter((b) => b.id !== 'workspace_drift')}
         activeTaskId={canCancel ? activeTaskId : null}
         busy={actionBusy}
         onReconnect={() => runAction(async () => reconnect())}
@@ -95,6 +100,27 @@ export default function App() {
         }
         onRefreshApprovals={() => runAction(async () => refreshApprovals())}
       />
+
+      {(health?.workspaceDrift ||
+        (health?.affectedFiles?.length ?? 0) > 0 ||
+        (health?.workspaceStatus?.affectedFiles?.length ?? 0) > 0) && (
+      <WorkspaceDriftPanel
+        affectedFiles={
+          health?.affectedFiles ??
+          health?.workspaceStatus?.affectedFiles ?? [
+            { path: '(workspace)', reason: 'changed outside DietCode' },
+          ]
+        }
+        lastVerifiedCommand={health?.workspaceStatus?.lastVerifiedCommand}
+        lastVerifiedAt={health?.workspaceStatus?.lastVerifiedAt}
+        activeTaskId={canCancel ? activeTaskId : null}
+        busy={actionBusy}
+        onRefreshContext={() => runAction(async () => refreshWorkspaceContext())}
+        onRerunVerify={() => runAction(async () => rerunWorkspaceVerify())}
+        onCancelTask={(taskId) => runAction(async () => cancelTask(taskId))}
+        onContinueAnyway={() => runAction(async () => continueWorkspaceAnyway())}
+      />
+      )}
 
       <div className="layout">
         <section className="panel">

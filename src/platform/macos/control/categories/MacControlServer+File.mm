@@ -66,6 +66,29 @@ static const NSInteger kMaxBatchFilePaths = 100;
         return;
     }
 
+    if ([method isEqualToString:@"workspace.status"]) {
+        *outResult = [_workspaceState statusPayloadWithWorkspace:[self safeWorkspacePath] ?: @""
+                                                      windowBridge:_windowBridge
+                                                           gitInfo:[self safeGitStatusInfo] ?: @{}
+                                                     verifyStatus:[self verificationStatus] ?: @{}
+                                               lastVerifyFinishedAt:_lastVerifyFinishedAt];
+        return;
+    }
+
+    if ([method isEqualToString:@"workspace.refreshAnchor"]) {
+        *outResult = [_workspaceState refreshAnchorWithWorkspace:[self safeWorkspacePath] ?: @""
+                                                    windowBridge:_windowBridge
+                                                         gitInfo:[self safeGitStatusInfo] ?: @{}
+                                                   verifyStatus:[self verificationStatus] ?: @{}
+                                             lastVerifyFinishedAt:_lastVerifyFinishedAt];
+        return;
+    }
+
+    if ([method isEqualToString:@"workspace.continueAnyway"]) {
+        *outResult = [_workspaceState continueAnywayPayload];
+        return;
+    }
+
     if ([method isEqualToString:@"operation.status"]) {
         NSString* key = params[@"idempotencyKey"] ?: params[@"clientOperationId"];
         *outResult = MacControlApplyJournalAuthorityLabels([_workspaceState operationStatusForKey:key]);
@@ -405,6 +428,7 @@ static const NSInteger kMaxBatchFilePaths = 100;
                 *outErrMsg = @"File exceeds read cap; use file.getChunks or file.readRange.";
                 return;
             }
+            [_workspaceState trackHashesForPaths:@[params[@"path"] ?: targetPath] workspace:ws windowBridge:_windowBridge];
             *outResult = @{ @"path": targetPath, @"text": text, @"lineCount": @(lines.count), @"sizeBytes": @(sizeBytes) };
             return;
         }
@@ -422,6 +446,7 @@ static const NSInteger kMaxBatchFilePaths = 100;
                 *outErrMsg = @"Requested range exceeds response size cap.";
                 return;
             }
+            [_workspaceState trackHashesForPaths:@[params[@"path"] ?: targetPath] workspace:ws windowBridge:_windowBridge];
             *outResult = @{ @"path": targetPath, @"startLine": @(startLine), @"endLine": @(endLine), @"text": rangeText };
             return;
         }
@@ -437,6 +462,7 @@ static const NSInteger kMaxBatchFilePaths = 100;
                 *outErrMsg = @"Invalid line.";
                 return;
             }
+            [_workspaceState trackHashesForPaths:@[params[@"path"] ?: targetPath] workspace:ws windowBridge:_windowBridge];
             *outResult = @{ @"path": targetPath, @"startLine": @(startLine), @"endLine": @(endLine), @"text": rangeText };
             return;
         }

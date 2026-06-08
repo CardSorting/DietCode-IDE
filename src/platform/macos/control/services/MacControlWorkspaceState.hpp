@@ -37,6 +37,22 @@
 - (void)clearExternalChangeFlag;
 - (void)trackHashesForPaths:(NSArray<NSString*>*)paths workspace:(NSString*)ws windowBridge:(DietCodeControlWindowBridge*)windowBridge;
 
+- (NSDictionary*)statusPayloadWithWorkspace:(NSString*)workspacePath
+                               windowBridge:(DietCodeControlWindowBridge*)windowBridge
+                                    gitInfo:(NSDictionary*)gitInfo
+                              verifyStatus:(NSDictionary*)verifyStatus
+                        lastVerifyFinishedAt:(NSDate*)lastVerifyFinishedAt;
+
+- (NSDictionary*)refreshAnchorWithWorkspace:(NSString*)workspacePath
+                               windowBridge:(DietCodeControlWindowBridge*)windowBridge
+                                    gitInfo:(NSDictionary*)gitInfo
+                              verifyStatus:(NSDictionary*)verifyStatus
+                        lastVerifyFinishedAt:(NSDate*)lastVerifyFinishedAt;
+
+- (NSInteger)contextRefreshId;
+- (BOOL)validateContextRefreshForParams:(NSDictionary*)params driftDetected:(BOOL)driftDetected;
+- (NSDictionary*)continueAnywayPayload;
+
 - (void)recordRuntimeError:(NSString*)stringCode method:(NSString*)method envelope:(NSDictionary*)envelope;
 
 - (void)persistMutationToMemory:(NSString*)method

@@ -14,6 +14,7 @@ const KNOWN_CODES = new Set([
     'approval_invalid',
     'approval_rejected',
     'approval_timeout',
+    'workspace_drift',
 ]);
 export function bridgeError(code, message, rawError, overrides) {
     return new DietCodeBridgeError(code, message, rawError, overrides);

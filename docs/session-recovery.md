@@ -102,7 +102,7 @@ DietCode never pretends an agent is still safely operating when the control loop
 | Bridge reconnected | Session restored after bridge restart |
 | Task disconnected | Orphaned task after mid-run interruption |
 | Approval expired | Kernel approvals past TTL |
-| Workspace changed externally | `workspace.revision.externalChangeDetected` or path drift |
+| Workspace changed outside DietCode | `workspace.status.driftDetected` — see [workspace-drift.md](./workspace-drift.md) |
 | Live stream stale | SSE silent >20s while kernel online |
 
 ### Recovery actions
@@ -115,6 +115,9 @@ DietCode never pretends an agent is still safely operating when the control loop
 | Refresh approvals | `POST /api/approvals/refresh` |
 | Export snapshot | `POST /api/session/export` |
 | Clear session | `POST /api/session/clear` |
+| Refresh workspace context | `POST /api/workspace/refresh-anchor` |
+| Re-run last verify | `POST /api/workspace/re-verify` |
+| Continue despite drift | `POST /api/workspace/continue-anyway` |
 
 Health probe: `GET /api/health`
 

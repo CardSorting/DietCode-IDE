@@ -1,5 +1,5 @@
 /** Public bridge types — no raw RPC method names in agent-facing surfaces. */
-export type BridgeErrorCode = 'stale_content' | 'semantic_disabled' | 'ranked_search_disabled' | 'symlink_target' | 'patch_failed' | 'nested_call_timeout' | 'runtime_unavailable' | 'unsupported_runtime_capability' | 'transport_error' | 'invalid_params' | 'approval_required' | 'approval_invalid' | 'approval_rejected' | 'approval_timeout' | 'unknown';
+export type BridgeErrorCode = 'stale_content' | 'semantic_disabled' | 'ranked_search_disabled' | 'symlink_target' | 'patch_failed' | 'nested_call_timeout' | 'runtime_unavailable' | 'unsupported_runtime_capability' | 'transport_error' | 'invalid_params' | 'approval_required' | 'approval_invalid' | 'approval_rejected' | 'approval_timeout' | 'workspace_drift' | 'unknown';
 export type RecoverySource = 'runtime' | 'bridge_fallback';
 export type HashAuthority = 'live_validate' | 'live_stat';
 export interface BridgeError {

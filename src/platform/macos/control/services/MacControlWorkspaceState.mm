@@ -3,6 +3,7 @@
 #import "MacControlWindowBridge.hpp"
 #import "MacControlSupport.hpp"
 #import "MacControlPathSecurity.hpp"
+#import "MacControlSerialization.hpp"
 
 @implementation MacControlWorkspaceState {
     NSInteger _revisionCounter;
@@ -14,6 +15,11 @@
     NSMutableDictionary<NSString*, NSString*>* _trackedFileHashes;
     NSMutableSet<NSString*>* _externallyChangedPaths;
     NSString* _agentShellCwd;
+    NSInteger _contextRefreshId;
+    NSString* _anchorGitHead;
+    NSDate* _anchorRefreshedAt;
+    BOOL _continueAnywayActive;
+    NSDate* _continueAnywayExpiresAt;
 }
 
 - (instancetype)init {
@@ -25,8 +31,33 @@
         _completedOperations = [NSMutableDictionary dictionary];
         _trackedFileHashes = [NSMutableDictionary dictionary];
         _externallyChangedPaths = [NSMutableSet set];
+        _contextRefreshId = 1;
     }
     return self;
+}
+
+static NSString* GitHeadHashForWorkspace(NSString* workspacePath) {
+    if (workspacePath.length == 0) return @"";
+    NSTask* task = [[NSTask alloc] init];
+    task.launchPath = @"/usr/bin/git";
+    task.arguments = @[@"-C", workspacePath, @"rev-parse", @"HEAD"];
+    NSPipe* pipe = [NSPipe pipe];
+    task.standardOutput = pipe;
+    task.standardError = [NSPipe pipe];
+    @try {
+        [task launch];
+        [task waitUntilExit];
+        if (task.terminationStatus != 0) return @"";
+        NSData* data = [[pipe fileHandleForReading] readDataToEndOfFile];
+        return [[[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding] stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]] ?: @"";
+    } @catch (...) {
+        return @"";
+    }
+}
+
+static NSString* ISODateFromNSDate(NSDate* date) {
+    if (!date) return @"";
+    return ISODateString(date);
 }
 
 - (NSInteger)revisionId {
@@ -289,6 +320,167 @@ static NSString* ReadHashForPath(NSString* absPath, DietCodeControlWindowBridge*
 - (void)clearExternalChangeFlag {
     _externalChangeDetected = NO;
     [_externallyChangedPaths removeAllObjects];
+}
+
+- (NSInteger)contextRefreshId {
+    return _contextRefreshId;
+}
+
+- (BOOL)validateContextRefreshForParams:(NSDictionary*)params driftDetected:(BOOL)driftDetected {
+    if (!driftDetected) return YES;
+    if ([params[@"continueAnyway"] boolValue]) return YES;
+    if (_continueAnywayActive && _continueAnywayExpiresAt && [_continueAnywayExpiresAt timeIntervalSinceNow] > 0) {
+        _continueAnywayActive = NO;
+        return YES;
+    }
+    NSNumber* refreshId = params[@"contextRefreshId"];
+    if (refreshId && [refreshId integerValue] == _contextRefreshId) return YES;
+    return NO;
+}
+
+- (NSDictionary*)continueAnywayPayload {
+    _continueAnywayActive = YES;
+    _continueAnywayExpiresAt = [NSDate dateWithTimeIntervalSinceNow:300];
+    return @{
+        @"mode": @"workspace_continue_anyway",
+        @"continueAnyway": @YES,
+        @"expiresAt": ISODateFromNSDate(_continueAnywayExpiresAt),
+        @"contextRefreshId": @(_contextRefreshId),
+    };
+}
+
+- (NSDictionary*)statusPayloadWithWorkspace:(NSString*)workspacePath
+                               windowBridge:(DietCodeControlWindowBridge*)windowBridge
+                                    gitInfo:(NSDictionary*)gitInfo
+                              verifyStatus:(NSDictionary*)verifyStatus
+                        lastVerifyFinishedAt:(NSDate*)lastVerifyFinishedAt {
+    NSString* gitHead = GitHeadHashForWorkspace(workspacePath);
+    NSString* branch = gitInfo[@"branch"] ?: @"";
+    NSMutableArray* dirtyFiles = [NSMutableArray array];
+    for (NSString* key in @[@"modified", @"staged", @"untracked"]) {
+        for (NSString* path in gitInfo[key] ?: @[]) {
+            if (path.length > 0) [dirtyFiles addObject:path];
+        }
+    }
+
+    NSMutableArray* affectedFiles = [NSMutableArray array];
+    NSMutableSet* seen = [NSMutableSet set];
+    NSDate* verifyFinished = lastVerifyFinishedAt;
+
+    for (NSString* relPath in _trackedFileHashes.allKeys) {
+        NSString* absPath = AbsolutePathForRPCPath(relPath, workspacePath);
+        if (!absPath) continue;
+        NSString* anchorHash = _trackedFileHashes[relPath];
+        NSString* currentHash = ReadHashForPath(absPath, windowBridge);
+        if (anchorHash.length > 0 && ![anchorHash isEqualToString:currentHash]) {
+            [affectedFiles addObject:@{
+                @"path": relPath,
+                @"reason": @"changed since agent read it",
+                @"anchorHash": anchorHash,
+                @"currentHash": currentHash,
+                @"source": @"tracked_hash",
+            }];
+            [seen addObject:relPath];
+        }
+    }
+
+    for (NSString* relPath in _externallyChangedPaths) {
+        if ([seen containsObject:relPath]) continue;
+        [affectedFiles addObject:@{
+            @"path": relPath,
+            @"reason": @"changed outside DietCode",
+            @"source": @"external_watch",
+        }];
+        [seen addObject:relPath];
+    }
+
+    if (_anchorGitHead.length > 0 && gitHead.length > 0 && ![_anchorGitHead isEqualToString:gitHead]) {
+        [affectedFiles addObject:@{
+            @"path": @"(git HEAD)",
+            @"reason": @"git HEAD moved since context anchor",
+            @"anchorGitHead": _anchorGitHead,
+            @"currentGitHead": gitHead,
+            @"source": @"git_head",
+        }];
+    }
+
+    if (verifyFinished && _lastChangedFiles.count > 0) {
+        for (NSString* relPath in _lastChangedFiles) {
+            if ([seen containsObject:relPath]) continue;
+            NSString* absPath = AbsolutePathForRPCPath(relPath, workspacePath);
+            if (!absPath) continue;
+            NSString* anchorHash = _trackedFileHashes[relPath];
+            NSString* currentHash = ReadHashForPath(absPath, windowBridge);
+            if (anchorHash.length > 0 && ![anchorHash isEqualToString:currentHash]) {
+                [affectedFiles addObject:@{
+                    @"path": relPath,
+                    @"reason": @"changed after verification",
+                    @"source": @"post_verify",
+                }];
+                [seen addObject:relPath];
+            }
+        }
+    }
+
+    BOOL driftDetected = affectedFiles.count > 0 || _externalChangeDetected;
+
+    NSMutableDictionary* anchors = [NSMutableDictionary dictionary];
+    for (NSString* relPath in _trackedFileHashes) {
+        anchors[relPath] = @{
+            @"hash": _trackedFileHashes[relPath] ?: @"",
+            @"algorithm": @"fnv1a_16hex",
+        };
+    }
+
+    return @{
+        @"mode": @"workspace_status",
+        @"root": workspacePath ?: @"",
+        @"revisionId": @(_revisionCounter),
+        @"gitHead": gitHead,
+        @"gitBranch": branch,
+        @"anchorGitHead": _anchorGitHead ?: @"",
+        @"anchorRefreshedAt": ISODateFromNSDate(_anchorRefreshedAt),
+        @"contextRefreshId": @(_contextRefreshId),
+        @"dirtyFiles": dirtyFiles,
+        @"fileAnchors": anchors,
+        @"affectedFiles": affectedFiles,
+        @"driftDetected": @(driftDetected),
+        @"externalChangeDetected": @(_externalChangeDetected),
+        @"lastVerifiedCommand": verifyStatus[@"command"] ?: @"",
+        @"lastVerifiedAt": ISODateFromNSDate(lastVerifyFinishedAt),
+        @"lastVerifyPassed": verifyStatus[@"passed"] ?: @NO,
+        @"lastMutationSource": self.lastMutationSource,
+        @"requiresContextRefresh": @(driftDetected),
+    };
+}
+
+- (NSDictionary*)refreshAnchorWithWorkspace:(NSString*)workspacePath
+                               windowBridge:(DietCodeControlWindowBridge*)windowBridge
+                                    gitInfo:(NSDictionary*)gitInfo
+                              verifyStatus:(NSDictionary*)verifyStatus
+                        lastVerifyFinishedAt:(NSDate*)lastVerifyFinishedAt {
+    NSArray* paths = [_trackedFileHashes.allKeys copy];
+    if (paths.count == 0) {
+        for (NSString* relPath in self.lastChangedFiles) {
+            [self trackHashesForPaths:@[relPath] workspace:workspacePath windowBridge:windowBridge];
+        }
+        paths = [_trackedFileHashes.allKeys copy];
+    }
+    [self trackHashesForPaths:paths workspace:workspacePath windowBridge:windowBridge];
+    [self clearExternalChangeFlag];
+    _contextRefreshId += 1;
+    _anchorGitHead = GitHeadHashForWorkspace(workspacePath);
+    _anchorRefreshedAt = [NSDate date];
+    _lastMutationSource = @"anchor_refresh";
+
+    NSMutableDictionary* status = [[self statusPayloadWithWorkspace:workspacePath
+                                                       windowBridge:windowBridge
+                                                            gitInfo:gitInfo
+                                                      verifyStatus:verifyStatus
+                                                lastVerifyFinishedAt:lastVerifyFinishedAt] mutableCopy];
+    status[@"refreshed"] = @YES;
+    status[@"mode"] = @"workspace_refresh_anchor";
+    return status;
 }
 
 - (void)recordRuntimeError:(NSString*)stringCode method:(NSString*)method envelope:(NSDictionary*)envelope {

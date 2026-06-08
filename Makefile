@@ -130,6 +130,7 @@ CONTROL_MM := \
 	src/platform/macos/control/services/MacControlMemoryService.mm \
 	src/platform/macos/control/services/MacControlApprovalService.mm \
 	src/platform/macos/control/categories/MacControlServer+Approval.mm \
+	src/platform/macos/control/categories/MacControlServer+WorkspaceDrift.mm \
 	src/platform/macos/control/categories/MacControlServer+Memory.mm \
 	src/platform/macos/control/categories/MacControlServer+Runtime.mm \
 	src/platform/macos/control/services/MacControlTaskRuntime.mm \

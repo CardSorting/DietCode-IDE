@@ -35,6 +35,12 @@ import {
   refreshExpiredApprovals,
   setSessionAnchorWorkspace,
 } from './healthMonitor.js';
+import {
+  continueWorkspaceAnyway,
+  fetchWorkspaceStatus,
+  refreshWorkspaceAnchor,
+  rerunLastVerify,
+} from './workspaceDrift.js';
 
 const PORT = Number(process.env.COCKPIT_BRIDGE_PORT ?? 9477);
 const SOCKET_PATH = process.env.DIETCODE_SOCKET_PATH ?? join(homedir(), '.dietcode', 'control.sock');
@@ -142,6 +148,9 @@ async function pollKernelEvents(): Promise<void> {
         }
         void syncPendingApprovalsFromKernel(rpcCall);
         void refreshExpiredApprovals(rpcCall);
+      } else if (event.type === 'workspace.drift.detected') {
+        broadcastEvent(event);
+        void fetchWorkspaceStatus(rpcCall);
       } else {
         broadcastEvent(event);
       }
@@ -253,6 +262,66 @@ const server = createServer(async (req, res) => {
     } catch (err) {
       res.writeHead(503, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ connected: false, error: String(err) }));
+    }
+    return;
+  }
+
+  if (req.url === '/api/workspace/status' && req.method === 'GET') {
+    try {
+      const status = await fetchWorkspaceStatus(rpcCall);
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ status, health: buildHealthSnapshot(listTasks()) }));
+    } catch (err) {
+      res.writeHead(503, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: String(err) }));
+    }
+    return;
+  }
+
+  if (req.url === '/api/workspace/refresh-anchor' && req.method === 'POST') {
+    try {
+      const status = await refreshWorkspaceAnchor(rpcCall);
+      emitBridgeEvent(
+        'workspace.anchor.refreshed',
+        `contextRefreshId=${status.contextRefreshId ?? 'unknown'}`,
+        { contextRefreshId: status.contextRefreshId },
+      );
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ ok: true, status, health: buildHealthSnapshot(listTasks()) }));
+    } catch (err) {
+      res.writeHead(503, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: String(err) }));
+    }
+    return;
+  }
+
+  if (req.url === '/api/workspace/continue-anyway' && req.method === 'POST') {
+    try {
+      const status = await continueWorkspaceAnyway(rpcCall);
+      emitBridgeEvent(
+        'workspace.drift.continued',
+        `contextRefreshId=${status.contextRefreshId ?? 'unknown'}`,
+        { contextRefreshId: status.contextRefreshId },
+      );
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ ok: true, status, health: buildHealthSnapshot(listTasks()) }));
+    } catch (err) {
+      res.writeHead(503, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: String(err) }));
+    }
+    return;
+  }
+
+  if (req.url === '/api/workspace/re-verify' && req.method === 'POST') {
+    try {
+      const verify = await rerunLastVerify(rpcCall);
+      const status = await fetchWorkspaceStatus(rpcCall);
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ ok: true, verify, status, health: buildHealthSnapshot(listTasks()) }));
+    } catch (err) {
+      const code = String(err).includes('no_last_verify_command') ? 400 : 503;
+      res.writeHead(code, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: String(err) }));
     }
     return;
   }

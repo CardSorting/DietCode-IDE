@@ -16,6 +16,7 @@ const KNOWN_CODES = new Set<string>([
   'approval_invalid',
   'approval_rejected',
   'approval_timeout',
+  'workspace_drift',
 ]);
 
 export function bridgeError(

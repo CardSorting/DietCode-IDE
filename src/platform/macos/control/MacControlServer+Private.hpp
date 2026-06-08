@@ -133,3 +133,8 @@
 - (BOOL)queueDestructiveApprovalIfNeeded:(NSString*)method params:(NSDictionary*)params caller:(NSString*)caller rationale:(NSString*)rationale reqId:(NSString*)reqId clientFd:(int)clientFd;
 - (BOOL)validateDestructiveApprovalIfPresent:(NSString*)method params:(NSDictionary*)params outErrCode:(NSString**)outErrCode outErrMsg:(NSString**)outErrMsg;
 @end
+
+@interface DietCodeControlServer (WorkspaceDrift)
+- (NSDictionary*)currentWorkspaceStatusPayload;
+- (BOOL)queueWorkspaceDriftBlockIfNeeded:(NSString*)method params:(NSDictionary*)params reqId:(NSString*)reqId clientFd:(int)clientFd;
+@end

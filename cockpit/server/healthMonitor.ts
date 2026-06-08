@@ -1,5 +1,12 @@
 import type { GovernedTask } from './taskRegistry.js';
 import { getSessionPendingApprovals } from './sessionStore.js';
+import {
+  fetchWorkspaceStatus,
+  formatAffectedFileLine,
+  getCachedWorkspaceStatus,
+  type AffectedFile,
+  type WorkspaceStatus,
+} from './workspaceDrift.js';
 
 export interface HealthBanner {
   id: string;
@@ -16,6 +23,8 @@ export interface HealthSnapshot {
   workspacePath?: string;
   workspaceDrift: boolean;
   externalChangeDetected: boolean;
+  workspaceStatus?: WorkspaceStatus;
+  affectedFiles?: AffectedFile[];
   expiredApprovalCount: number;
   expiredApprovalIds: string[];
   banners: HealthBanner[];
@@ -75,6 +84,11 @@ export async function probeKernel(
       externalChangeDetected?: boolean;
     };
     externalChangeDetected = revision.externalChangeDetected === true;
+    await fetchWorkspaceStatus(rpcCall);
+    const status = getCachedWorkspaceStatus();
+    if (status?.externalChangeDetected) {
+      externalChangeDetected = true;
+    }
     noteKernelSuccess(root.path);
   } catch (err) {
     noteKernelFailure(String(err));
@@ -152,14 +166,23 @@ export function buildHealthSnapshot(tasks: GovernedTask[]): HealthSnapshot {
     });
   }
 
-  if (externalChangeDetected || workspaceDrifted()) {
+  const workspaceStatus = getCachedWorkspaceStatus() ?? undefined;
+  const affectedFiles = workspaceStatus?.affectedFiles ?? [];
+  const kernelDrift = workspaceStatus?.driftDetected === true;
+  const pathDrift = workspaceDrifted();
+
+  if (kernelDrift || externalChangeDetected || pathDrift) {
+    const fileSummary =
+      affectedFiles.length > 0
+        ? affectedFiles.slice(0, 4).map(formatAffectedFileLine).join('; ')
+        : pathDrift
+          ? `Session anchor ${sessionAnchorWorkspace} ≠ kernel root ${workspacePath}`
+          : 'Kernel detected filesystem changes outside DietCode RPC.';
     banners.push({
-      id: 'workspace_changed_externally',
+      id: 'workspace_drift',
       severity: 'warning',
-      message: 'Workspace changed externally',
-      detail: workspaceDrifted()
-        ? `Session anchor ${sessionAnchorWorkspace} ≠ kernel root ${workspacePath}`
-        : 'Kernel detected filesystem changes outside DietCode RPC.',
+      message: 'Workspace changed outside DietCode',
+      detail: fileSummary,
     });
   }
 
@@ -169,8 +192,10 @@ export function buildHealthSnapshot(tasks: GovernedTask[]): HealthSnapshot {
     kernelLastSeenAt,
     bridgeRecovered,
     workspacePath,
-    workspaceDrift: workspaceDrifted(),
+    workspaceDrift: pathDrift || kernelDrift,
     externalChangeDetected,
+    workspaceStatus,
+    affectedFiles,
     expiredApprovalCount: expiredApprovalIds.length,
     expiredApprovalIds,
     banners,

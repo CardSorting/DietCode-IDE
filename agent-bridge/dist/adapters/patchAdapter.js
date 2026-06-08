@@ -1,5 +1,6 @@
 import { mapRpcError } from '../contracts/errors.js';
 import { completeApprovedMutation } from '../workflows/awaitApproval.js';
+import { completeAfterWorkspaceRefresh } from '../workflows/awaitWorkspaceDrift.js';
 import { assertBatchReceipt, assertMutationReceipt, normalizeRpcSuccess, } from '../contracts/schemas.js';
 import { validateBatchMutationReceipt, validateMutationReceipt } from '../contracts/validators.js';
 export async function validatePatch(transport, path, unifiedDiff) {
@@ -30,6 +31,9 @@ export async function applyPatch(transport, path, unifiedDiff, expectBeforeHash,
     if (envelope.ok && envelope.result?.approvalRequired === true) {
         envelope = await completeApprovedMutation(transport, envelope.result, 'patch.apply', patchParams, { timeoutMs: options.requestTimeoutMs ?? 30 * 60 * 1000 });
     }
+    if (envelope.ok && envelope.result?.workspaceDriftRequired === true) {
+        envelope = await completeAfterWorkspaceRefresh(transport, envelope.result, 'patch.apply', patchParams, { timeoutMs: options.requestTimeoutMs ?? 30 * 60 * 1000 });
+    }
     if (!envelope.ok || !envelope.result) {
         throw mapRpcError(envelope, 'applyPatch');
     }
@@ -55,6 +59,9 @@ export async function applyPatchBatch(transport, patches, options = {}) {
     });
     if (envelope.ok && envelope.result?.approvalRequired === true) {
         envelope = await completeApprovedMutation(transport, envelope.result, 'patch.applyBatch', batchParams, { timeoutMs: options.requestTimeoutMs ?? 30 * 60 * 1000 });
+    }
+    if (envelope.ok && envelope.result?.workspaceDriftRequired === true) {
+        envelope = await completeAfterWorkspaceRefresh(transport, envelope.result, 'patch.applyBatch', batchParams, { timeoutMs: options.requestTimeoutMs ?? 30 * 60 * 1000 });
     }
     if (!envelope.ok || !envelope.result) {
         throw mapRpcError(envelope, 'applyPatchBatch');

@@ -692,6 +692,12 @@ static const void* kDietCodeReadQueueKey = &kDietCodeReadQueueKey;
             });
         }
         
+        if ([permission isEqualToString:@"Edit"] || [permission isEqualToString:@"Destructive"]) {
+            if ([self queueWorkspaceDriftBlockIfNeeded:method params:params reqId:reqId clientFd:clientFd]) {
+                return;
+            }
+        }
+
         if ([permission isEqualToString:@"Destructive"]) {
             NSString* approvalErrCode = nil;
             NSString* approvalErrMsg = nil;

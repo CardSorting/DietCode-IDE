@@ -25,12 +25,27 @@ export interface HealthBanner {
   detail?: string;
 }
 
+export interface AffectedFile {
+  path: string;
+  reason: string;
+}
+
+export interface WorkspaceStatus {
+  contextRefreshId?: number;
+  lastVerifiedCommand?: string;
+  lastVerifiedAt?: string;
+  driftDetected?: boolean;
+  affectedFiles?: AffectedFile[];
+}
+
 export interface HealthSnapshot {
   kernelConnected: boolean;
   kernelError?: string;
   bridgeRecovered: boolean;
   workspaceDrift: boolean;
   externalChangeDetected: boolean;
+  workspaceStatus?: WorkspaceStatus;
+  affectedFiles?: AffectedFile[];
   expiredApprovalCount: number;
   banners: HealthBanner[];
   tasks: {
@@ -162,6 +177,21 @@ export function useKernel() {
     [restoreSession],
   );
 
+  const refreshWorkspaceContext = useCallback(async () => {
+    await fetch('/api/workspace/refresh-anchor', { method: 'POST' });
+    await refreshHealth();
+  }, [refreshHealth]);
+
+  const rerunWorkspaceVerify = useCallback(async () => {
+    await fetch('/api/workspace/re-verify', { method: 'POST' });
+    await refreshHealth();
+  }, [refreshHealth]);
+
+  const continueWorkspaceAnyway = useCallback(async () => {
+    await fetch('/api/workspace/continue-anyway', { method: 'POST' });
+    await refreshHealth();
+  }, [refreshHealth]);
+
   useEffect(() => {
     void refreshStatus();
     void refreshHealth();
@@ -235,5 +265,8 @@ export function useKernel() {
     refreshApprovals,
     retryTask,
     cancelTask,
+    refreshWorkspaceContext,
+    rerunWorkspaceVerify,
+    continueWorkspaceAnyway,
   };
 }
