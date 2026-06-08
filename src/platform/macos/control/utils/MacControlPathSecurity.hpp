@@ -16,5 +16,7 @@ BOOL PathIsInsideWorkspace(NSString* path, NSString* workspace);
 BOOL AnyPatternMatches(NSArray<NSString*>* patterns, const std::string& relPath, const std::string& filename);
 BOOL ShouldSkipSearchPath(const std::filesystem::path& path, const std::string& relPath, NSArray<NSString*>* includes, NSArray<NSString*>* excludes);
 BOOL ShouldPruneSearchDirectory(const std::filesystem::path& path, const std::string& relPath, NSArray<NSString*>* excludes);
+NSDictionary* PathSymlinkMetadata(NSString* path, NSString* workspace);
+BOOL PathIsSymlink(NSString* path);
 
 } // namespace dietcode::platform::macos

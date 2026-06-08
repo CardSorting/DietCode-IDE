@@ -69,7 +69,29 @@ Error `stale_content` (4004): content changed between validate and apply. Recove
 ```bash
 make test-runtime-determinism
 make test-grep-diff-tooling
+make test-deterministic-retrieval
 make verify-agent-runtime
+```
+
+---
+
+## Retrieval determinism (pass 5)
+
+| Invariant | Value |
+|-----------|-------|
+| Semantic search | Quarantined — `search.semantic` → `semantic_disabled` (4008) |
+| Ranked search | Quarantined — `analysis.searchRanked` → `ranked_search_disabled` (4008) |
+| Literal search | `search.literal` / `search.text` → `literal_substring`, `rankingPolicy: none` |
+| Token search | `search.tokens` → conjunctive literal match, `matchReason: all_tokens_literal` |
+| Path search | `search.paths` / `search.files` → `deterministic_path_match`, no `score` |
+| Symbol refs | `search.references` → `symbol_exact`, sorted `path_line_column` |
+| Tool registry | `tool.registry` exposes `agentSafe`, `deterministic`, `deprecated`, `replacementMethod` |
+
+Two identical retrieval queries with identical workspace state must return identical result order and accounting. No `score`, `relevance`, or hidden ranking fields.
+
+```bash
+make test-deterministic-retrieval
+python3 scripts/dietcode_agent_client.py tool.capabilities --compact
 ```
 
 ---
@@ -103,6 +125,41 @@ make test-transaction-kernel
 ## Search parity
 
 `search.text` and `search.todo` share the same accounting model as `workspace.grep` (`SEARCH_ACCOUNTING_KEYS` in `agent_contracts.py`).
+
+`search.files` uses **deterministic path matching only** — no scores, no fuzzy ranking:
+
+| Field | Value |
+|-------|-------|
+| `searchMode` | `deterministic_path_match` |
+| `sortOrder` | `match_reason_path` (basename_exact → path_substring, then lexical path) |
+| `matchReason` | `basename_exact` \| `path_substring` per result row |
+
+---
+
+## Symlink policy examples
+
+| Path type | Grep/search | patch.apply | file.stat |
+|-----------|-------------|-------------|-----------|
+| Regular file | scanned | allowed | `isSymlink: false` |
+| Symlink inside workspace | `filesSkippedSymlink++` | `symlink_target` error | `isSymlink: true` |
+| Symlink escaping workspace | skipped in traversal | rejected | `pathEscapesWorkspace: true` |
+| Broken symlink | skipped | rejected | `isSymlink: true`, empty contentHash ok |
+
+```bash
+make test-harness-realism
+```
+
+---
+
+## Workspace snapshot modes
+
+| `snapshotMode` | Scope |
+|----------------|-------|
+| `mutated_only` | Last changed + tracked + explicit paths (default) |
+| `tracked_files` | All paths in mutation hash cache |
+| `explicit_paths` | Only `paths` param |
+
+Response includes `complete`, `truncated`, `filesHashed`, `filesSkipped`, `hashAlgorithm: fnv1a_16hex`.
 
 ---
 

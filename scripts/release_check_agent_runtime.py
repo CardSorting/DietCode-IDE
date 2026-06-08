@@ -28,6 +28,7 @@ LADDER: list[tuple[str, list[str], bool]] = [
     ("live_grep_diff_tooling", [sys.executable, "scripts/test_grep_diff_tooling.py", "--compact"], True),
     ("live_runtime_determinism", [sys.executable, "scripts/test_runtime_determinism.py", "--compact"], True),
     ("live_transaction_kernel", [sys.executable, "scripts/test_transaction_kernel.py", "--compact"], True),
+    ("live_harness_realism", [sys.executable, "scripts/test_harness_realism.py", "--compact"], True),
     ("live_operator_diagnostics", [sys.executable, "scripts/test_operator_diagnostics.py", "--compact"], True),
     ("live_ergonomics", [sys.executable, "scripts/test_ergonomics.py", "--compact"], True),
     ("live_agent_integration", [sys.executable, "scripts/run_agent_integration_tests.py", "--compact"], True),

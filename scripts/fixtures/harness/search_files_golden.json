@@ -1,0 +1,11 @@
+{
+  "searchMode": "deterministic_path_match",
+  "sortOrder": "match_reason_path",
+  "symlinkPolicy": "skip_never_follow",
+  "results": [
+    {
+      "path": "agent_contracts.py",
+      "matchReason": "basename_exact"
+    }
+  ]
+}

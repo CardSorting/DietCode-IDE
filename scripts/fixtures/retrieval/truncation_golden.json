@@ -1,0 +1,15 @@
+{
+  "description": "CONTRACT: Deterministic retrieval truncation reporting fields",
+  "requiredKeys": [
+    "truncated",
+    "maxResults",
+    "hasMore",
+    "nextResultOffset"
+  ],
+  "forbiddenKeys": [
+    "score",
+    "relevance",
+    "rank",
+    "confidence"
+  ]
+}

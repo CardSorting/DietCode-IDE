@@ -1,0 +1,10 @@
+{
+  "description": "CONTRACT: Frozen search.tokens response shape (offline golden)",
+  "searchMode": "literal_token_conjunctive",
+  "rankingPolicy": "none",
+  "scoringDisabled": true,
+  "agentSafe": true,
+  "matchReason": "all_tokens_literal",
+  "sortOrder": "path_line_column",
+  "symlinkPolicy": "skip_never_follow"
+}

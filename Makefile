@@ -75,6 +75,7 @@ MACOS_MM := \
 	src/platform/macos/control/services/MacControlComboRuntime.mm \
 	src/platform/macos/control/services/MacControlRoutingPolicy.mm \
 	src/platform/macos/control/services/MacControlMethodCatalog.mm \
+	src/platform/macos/control/services/MacControlToolRegistry.mm \
 	src/platform/macos/control/services/MacControlWindowBridge.mm \
 	src/platform/macos/services/SymbolIndexService.mm \
 	src/platform/macos/services/DiffAnalysisService.mm \
@@ -85,7 +86,7 @@ MACOS_MM := \
 	src/filesystem/FileWatcher.mm \
 	src/core/LSPClient.mm
 
-.PHONY: all app run headless ensure-socket agent-ready agent-status agent-ping agent-methods agent-capabilities agent-self-test test-agent-offline control-smoke test-task-health test-rpc-transaction test-ergonomics test-grep-diff-tooling test-runtime-determinism test-transaction-kernel test-agent-integration agent-integration verify-agent-runtime test clean
+.PHONY: all app run headless ensure-socket restart-agent-server agent-ready agent-status agent-ping agent-methods agent-capabilities agent-self-test test-agent-offline control-smoke test-task-health test-rpc-transaction test-ergonomics test-grep-diff-tooling test-runtime-determinism test-transaction-kernel test-harness-realism test-deterministic-retrieval test-agent-integration agent-integration verify-agent-runtime test clean
 
 all: app test
 
@@ -110,6 +111,11 @@ headless: app
 	$(APP_MACOS)/$(APP_NAME) --headless
 
 ensure-socket: app
+	$(APP_MACOS)/$(APP_NAME) --ensure-socket
+
+restart-agent-server: app
+	-pkill -f "$(APP_MACOS)/$(APP_NAME)" 2>/dev/null || true
+	sleep 0.5
 	$(APP_MACOS)/$(APP_NAME) --ensure-socket
 
 agent-ready: app
@@ -164,6 +170,14 @@ test-runtime-determinism: app
 test-transaction-kernel: app
 	python3 scripts/dietcode_agent_client.py --wait-ready --compact --error-json --quiet
 	python3 scripts/test_transaction_kernel.py --compact
+
+test-harness-realism: app
+	python3 scripts/dietcode_agent_client.py --wait-ready --compact --error-json --quiet
+	python3 scripts/test_harness_realism.py --compact
+
+test-deterministic-retrieval: restart-agent-server
+	python3 scripts/dietcode_agent_client.py --wait-ready --compact --error-json --quiet
+	python3 scripts/test_deterministic_retrieval.py --compact
 
 test-ergonomics: app
 	python3 scripts/dietcode_agent_client.py --wait-ready --compact --error-json --quiet

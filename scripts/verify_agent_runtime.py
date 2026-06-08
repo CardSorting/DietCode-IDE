@@ -27,6 +27,8 @@ LADDER: list[tuple[str, list[str], bool]] = [
     ("live_grep_diff_tooling", [sys.executable, "scripts/test_grep_diff_tooling.py", "--compact"], True),
     ("live_runtime_determinism", [sys.executable, "scripts/test_runtime_determinism.py", "--compact"], True),
     ("live_transaction_kernel", [sys.executable, "scripts/test_transaction_kernel.py", "--compact"], True),
+    ("live_harness_realism", [sys.executable, "scripts/test_harness_realism.py", "--compact"], True),
+    ("live_deterministic_retrieval", [sys.executable, "scripts/test_deterministic_retrieval.py", "--compact"], True),
 ]
 
 
@@ -40,7 +42,7 @@ def main() -> int:
 
     if not args.skip_live:
         prep = subprocess.run(
-            ["make", "app"],
+            ["make", "restart-agent-server"],
             cwd=str(REPO_ROOT),
             capture_output=True,
             text=True,
@@ -48,7 +50,7 @@ def main() -> int:
         if prep.returncode != 0:
             payload = {
                 "type": "check",
-                "name": "prep.make_app",
+                "name": "prep.restart_agent_server",
                 "ok": False,
                 "detail": {"exitCode": prep.returncode, "stderrTail": prep.stderr[-500:]},
             }

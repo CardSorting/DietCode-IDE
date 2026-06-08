@@ -24,6 +24,22 @@
                  outErrCode:(NSString**)outErrCode 
                   outErrMsg:(NSString**)outErrMsg;
 
+- (NSDictionary*)searchLiteral:(NSDictionary*)params
+                     outErrCode:(NSString**)outErrCode
+                      outErrMsg:(NSString**)outErrMsg;
+
+- (NSDictionary*)searchTokens:(NSDictionary*)params
+                   outErrCode:(NSString**)outErrCode
+                    outErrMsg:(NSString**)outErrMsg;
+
+- (NSDictionary*)searchPaths:(NSDictionary*)params
+                    outErrCode:(NSString**)outErrCode
+                     outErrMsg:(NSString**)outErrMsg;
+
+- (NSDictionary*)searchReferences:(NSDictionary*)params
+                         outErrCode:(NSString**)outErrCode
+                          outErrMsg:(NSString**)outErrMsg;
+
 - (NSDictionary*)searchSemantic:(NSDictionary*)params 
                      outErrCode:(NSString**)outErrCode 
                       outErrMsg:(NSString**)outErrMsg;

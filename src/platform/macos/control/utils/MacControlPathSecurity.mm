@@ -81,6 +81,45 @@ BOOL ShouldSkipSearchPath(const std::filesystem::path& path, const std::string& 
     return NO;
 }
 
+BOOL PathIsSymlink(NSString* path) {
+    if (path.length == 0) return NO;
+    std::error_code ec;
+    return std::filesystem::is_symlink(std::filesystem::path(StdStringFromNSString(path)), ec);
+}
+
+NSDictionary* PathSymlinkMetadata(NSString* path, NSString* workspace) {
+    if (path.length == 0) {
+        return @{ @"isSymlink": @NO, @"symlinkTarget": @"", @"insideWorkspace": @NO, @"pathEscapesWorkspace": @NO };
+    }
+    std::error_code ec;
+    std::filesystem::path p(StdStringFromNSString(path));
+    BOOL isSymlink = std::filesystem::is_symlink(p, ec);
+    NSString* target = @"";
+    BOOL escapes = NO;
+    BOOL inside = PathIsInsideWorkspace(path, workspace);
+    if (isSymlink && !ec) {
+        std::filesystem::path linkTarget = std::filesystem::read_symlink(p, ec);
+        if (!ec) {
+            target = NSStringFromStdString(linkTarget.string());
+            std::filesystem::path resolved = linkTarget.is_absolute() ? linkTarget : (p.parent_path() / linkTarget);
+            std::filesystem::path canonical = std::filesystem::weakly_canonical(resolved, ec);
+            if (!ec && workspace.length > 0) {
+                std::filesystem::path ws = std::filesystem::canonical(std::filesystem::path(StdStringFromNSString(workspace)), ec);
+                if (!ec) {
+                    auto rel = std::filesystem::relative(canonical, ws, ec);
+                    escapes = ec || rel.string().rfind("..", 0) == 0 || rel.is_absolute();
+                }
+            }
+        }
+    }
+    return @{
+        @"isSymlink": @(isSymlink),
+        @"symlinkTarget": target ?: @"",
+        @"insideWorkspace": @(inside),
+        @"pathEscapesWorkspace": @(escapes)
+    };
+}
+
 BOOL ShouldPruneSearchDirectory(const std::filesystem::path& path, const std::string& relPath, NSArray<NSString*>* excludes) {
     std::string filename = path.filename().string();
     NSArray* defaultExcludes = @[@".git", @"build", @"dist", @"node_modules", @"DerivedData", @".next", @"__pycache__"];

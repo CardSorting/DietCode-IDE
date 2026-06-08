@@ -115,6 +115,10 @@ static BOOL ApplyUnifiedPatchToDisk(NSString* absPath, NSString* beforeText, NSS
         result[@"rejectedReason"] = @"Target file is outside workspace.";
         return result;
     }
+    if (PathIsSymlink(targetPath)) {
+        result[@"rejectedReason"] = @"Cannot validate patch for symlink target path.";
+        return result;
+    }
     if (!targetExists) {
         result[@"rejectedReason"] = @"Target file does not exist.";
         return result;
@@ -203,6 +207,11 @@ static BOOL ApplyUnifiedPatchToDisk(NSString* absPath, NSString* beforeText, NSS
                 @"idempotentReplay": @YES
             };
         }
+    }
+    if (PathIsSymlink(absPath)) {
+        if (errorCodeOut) *errorCodeOut = @"symlink_target";
+        if (errorOut) *errorOut = @"Cannot apply patch through symlink path.";
+        return nil;
     }
     NSString* expectBeforeHash = params[@"expectBeforeHash"];
     NSString* readSourceBefore = nil;

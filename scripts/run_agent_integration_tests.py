@@ -22,6 +22,7 @@ SUITES: list[tuple[str, list[str]]] = [
     ("grep_diff_tooling", [sys.executable, "scripts/test_grep_diff_tooling.py", "--compact"]),
     ("runtime_determinism", [sys.executable, "scripts/test_runtime_determinism.py", "--compact"]),
     ("transaction_kernel", [sys.executable, "scripts/test_transaction_kernel.py", "--compact"]),
+    ("harness_realism", [sys.executable, "scripts/test_harness_realism.py", "--compact"]),
 ]
 
 

@@ -17,6 +17,8 @@
 - (NSDictionary*)snapshotPayloadWithWorkspace:(NSString*)workspacePath
                                  sinceRevision:(NSNumber*)sinceRevision
                                          paths:(NSArray<NSString*>*)paths
+                                  snapshotMode:(NSString*)snapshotMode
+                                      maxFiles:(NSNumber*)maxFiles
                                   windowBridge:(DietCodeControlWindowBridge*)windowBridge;
 - (NSDictionary*)operationStatusForKey:(NSString*)idempotencyKey;
 

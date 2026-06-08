@@ -1,0 +1,6 @@
+{
+  "symlinkPolicy": "skip_never_follow",
+  "grepMustNotFollowSymlinks": true,
+  "patchRejectsSymlinkTargets": true,
+  "fileStatExposesSymlinkMetadata": true
+}

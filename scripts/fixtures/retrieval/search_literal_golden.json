@@ -1,0 +1,10 @@
+{
+  "description": "CONTRACT: Frozen search.literal response shape (offline golden)",
+  "searchMode": "literal_substring",
+  "rankingPolicy": "none",
+  "scoringDisabled": true,
+  "agentSafe": true,
+  "mode": "literal_substring",
+  "sortOrder": "path_line_column",
+  "symlinkPolicy": "skip_never_follow"
+}

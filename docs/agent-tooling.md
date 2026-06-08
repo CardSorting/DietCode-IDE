@@ -111,11 +111,42 @@ Disk read: patch validation already falls back to disk when file is not open (`M
 ```bash
 make test-agent-offline
 make test-grep-diff-tooling
+make test-deterministic-retrieval
 make control-smoke
 make verify-agent-runtime
 ```
 
 Grep anchor fixture: `scripts/fixtures/tooling/grep_anchor.json`
+
+---
+
+## Deterministic retrieval (pass 5)
+
+Agent-safe search surfaces (no semantic/fuzzy/ranking):
+
+| Method | Mode | Agent-safe |
+|--------|------|------------|
+| `search.literal` | `literal_substring` | yes |
+| `search.tokens` | `literal_token_conjunctive` | yes |
+| `search.paths` | alias of `search.files` (`deterministic_path_match`) | yes |
+| `search.references` | `symbol_exact`, `sortOrder: path_line_column` | yes |
+| `tool.registry` | per-method `agentSafe` / `deprecated` / `replacementMethod` | yes |
+| `tool.capabilities` | `agentSafeMethods`, `semanticSearchDisabled: true` | yes |
+
+Quarantined (returns `4008` unless `allowExperimental: true`):
+
+| Method | Replacement |
+|--------|-------------|
+| `search.semantic` | `search.literal`, `search.tokens`, `search.references` |
+| `analysis.searchRanked` | `workspace.grep`, `search.literal` |
+
+```bash
+make test-deterministic-retrieval
+python3 scripts/dietcode_agent_client.py tool.capabilities --compact
+python3 scripts/dietcode_agent_client.py search.literal '{"query":"CONTRACT:","include":["scripts/*.py"],"maxResults":5}' --compact
+```
+
+Golden fixtures: `scripts/fixtures/retrieval/`
 
 ---
 
@@ -127,6 +158,16 @@ Grep anchor fixture: `scripts/fixtures/tooling/grep_anchor.json`
 - ML-based patch suggestion or error recovery
 
 Regressions surface via **grep misses**, **schema validation**, **anchor fixture drift**, or **nonzero harness exit**.
+
+---
+
+## Harness realism (pass 4)
+
+```bash
+make test-harness-realism
+```
+
+Covers deterministic `search.files`, live symlink escape fixture, transport idempotency recovery, and concurrent stale-write fuzz.
 
 ---
 

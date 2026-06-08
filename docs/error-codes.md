@@ -15,7 +15,7 @@ Stable `string_code` values returned in JSON-RPC error envelopes (`ok: false`). 
 | Transport | -32600..-32603, client-local | Sometimes | `invalid_request`, `transport_error`, `internal_error` |
 | Validation | -32602, 413 | No — fix params | `invalid_params`, `request_too_large`, `too_many_results` |
 | Resource | 404, 409 | No | `not_found`, `already_exists`, `method_not_found` |
-| Domain | 4001–4007 | Case-by-case | `outside_workspace`, `task_not_active`, `patch_failed` |
+| Domain | 4001–4008 | Case-by-case | `outside_workspace`, `task_not_active`, `patch_failed`, `semantic_disabled` |
 | Serialization | -32603 | No — inspect payload | `response_serialization_failed`, `response_too_large` |
 | Recovery | -32603, 404 | Manual | `rollback_failed`, `backup_corrupt` |
 
@@ -117,10 +117,20 @@ See [Runtime Safety](runtime-safety.md).
 | `verify_failed` | 4004 | Alias of verification failure |
 | `patch_failed` | 4004 | Patch could not be applied |
 | `stale_content` | 4004 | Target file changed since validation (`expectBeforeHash` mismatch) |
+| `symlink_target` | 4004 | Patch attempted through symlink path |
 | `rollback_conflict` | 4005 | Rollback state mismatch |
 | `rollback_failed` | 4005 | Rollback operation failed |
 | `permission_denied` | 4006 | Socket or sandbox permission denied |
 | `task_not_active` | 4007 | Task already completed or cancelled |
+| `semantic_disabled` | 4008 | `search.semantic` quarantined in deterministic agent mode |
+| `ranked_search_disabled` | 4008 | `analysis.searchRanked` quarantined (probabilistic scoring removed) |
+
+**Recovery:** use `search.literal`, `search.tokens`, `workspace.grep`, or `search.references`. Recovery hints: `use_search_literal_or_search_tokens`, `use_workspace_grep_or_search_literal`.
+
+```bash
+python3 scripts/dietcode_agent_client.py --raw-response --compact search.semantic '{"query":"foo"}'
+python3 scripts/dietcode_agent_client.py tool.capabilities
+```
 
 ## Recovery and backup codes
 

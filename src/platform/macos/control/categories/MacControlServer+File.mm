@@ -53,6 +53,8 @@ static const NSInteger kMaxBatchFilePaths = 100;
         *outResult = [_workspaceState snapshotPayloadWithWorkspace:[self safeWorkspacePath] ?: @""
                                                       sinceRevision:params[@"sinceRevision"]
                                                               paths:params[@"paths"]
+                                                       snapshotMode:params[@"snapshotMode"]
+                                                           maxFiles:params[@"maxFiles"]
                                                        windowBridge:_windowBridge];
         return;
     }
@@ -214,6 +216,26 @@ static const NSInteger kMaxBatchFilePaths = 100;
         return;
     }
 
+    if ([method isEqualToString:@"search.literal"]) {
+        *outResult = [_searchService searchLiteral:params outErrCode:outErrCode outErrMsg:outErrMsg];
+        return;
+    }
+
+    if ([method isEqualToString:@"search.tokens"]) {
+        *outResult = [_searchService searchTokens:params outErrCode:outErrCode outErrMsg:outErrMsg];
+        return;
+    }
+
+    if ([method isEqualToString:@"search.paths"]) {
+        *outResult = [_searchService searchPaths:params outErrCode:outErrCode outErrMsg:outErrMsg];
+        return;
+    }
+
+    if ([method isEqualToString:@"search.references"]) {
+        *outResult = [_searchService searchReferences:params outErrCode:outErrCode outErrMsg:outErrMsg];
+        return;
+    }
+
     if ([method isEqualToString:@"search.todo"]) {
         *outResult = [_searchService searchTodo:params outErrCode:outErrCode outErrMsg:outErrMsg];
         return;
@@ -324,13 +346,22 @@ static const NSInteger kMaxBatchFilePaths = 100;
                 return;
             }
         }
+        if (ws && !PathIsInsideWorkspace(targetPath, ws)) {
+            *outErrCode = @"outside_workspace";
+            *outErrMsg = @"Target path is outside workspace.";
+            return;
+        }
         NSString* readSource = nil;
         NSString* text = TextForSearchAtPath([self.windowController textForFileAtPath:targetPath], targetPath, &readSource);
         if (!text) text = [self safeTextForFileAtPath:targetPath];
-        if (!text) {
+        if (!text && ![method isEqualToString:@"file.stat"]) {
             *outErrCode = @"invalid_request";
             *outErrMsg = @"File is not readable.";
             return;
+        }
+        if ([method isEqualToString:@"file.stat"] && !text) {
+            text = @"";
+            readSource = @"disk";
         }
         if (!readSource) readSource = @"disk";
         NSArray<NSString*>* lines = LinesFromText(text);
@@ -339,6 +370,7 @@ static const NSInteger kMaxBatchFilePaths = 100;
         BOOL open = [[self safeOpenFilePaths] containsObject:targetPath];
         BOOL dirty = [DirtyFilePathsFromTabs([self safeOpenTabs] ?: @[]) containsObject:targetPath];
         if ([method isEqualToString:@"file.stat"]) {
+            NSDictionary* symlinkMeta = PathSymlinkMetadata(targetPath, ws);
             NSMutableDictionary* stat = [@{
                 @"path": targetPath,
                 @"sizeBytes": @(attrs.fileSize ?: sizeBytes),
@@ -347,7 +379,11 @@ static const NSInteger kMaxBatchFilePaths = 100;
                 @"open": @(open),
                 @"dirty": @(dirty),
                 @"contentHash": StableHashForString(text),
-                @"readSource": readSource
+                @"readSource": readSource,
+                @"isSymlink": symlinkMeta[@"isSymlink"] ?: @NO,
+                @"symlinkTarget": symlinkMeta[@"symlinkTarget"] ?: @"",
+                @"insideWorkspace": symlinkMeta[@"insideWorkspace"] ?: @YES,
+                @"pathEscapesWorkspace": symlinkMeta[@"pathEscapesWorkspace"] ?: @NO
             } mutableCopy];
             if (attrs.fileModificationDate) {
                 stat[@"modifiedAt"] = ISODateString(attrs.fileModificationDate);

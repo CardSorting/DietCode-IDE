@@ -135,6 +135,21 @@ def check_source_invariants() -> None:
     assert (REPO_ROOT / "scripts/test_transaction_kernel.py").is_file(), "test_transaction_kernel.py required"
     assert (REPO_ROOT / "src/platform/macos/control/services/MacControlWorkspaceState.mm").is_file(), "workspace state required"
     assert "skip_never_follow" in _read(REPO_ROOT / "src/platform/macos/control/services/MacControlSearchService.mm"), "symlink policy required"
+    assert (REPO_ROOT / "scripts/test_harness_realism.py").is_file(), "test_harness_realism.py required"
+    assert (REPO_ROOT / "scripts/harness_support.py").is_file(), "harness_support.py required"
+    assert "deterministic_path_match" in _read(REPO_ROOT / "src/platform/macos/control/services/MacControlSearchService.mm"), "search.files deterministic mode required"
+    assert "semantic_disabled" in _read(REPO_ROOT / "src/platform/macos/control/services/MacControlSearchService.mm"), "semantic quarantine required"
+    assert (REPO_ROOT / "src/platform/macos/control/services/MacControlToolRegistry.mm").is_file(), "tool registry required"
+    assert (REPO_ROOT / "scripts/test_deterministic_retrieval.py").is_file(), "test_deterministic_retrieval.py required"
+    retrieval_fixtures = REPO_ROOT / "scripts" / "fixtures" / "retrieval"
+    for name in (
+        "search_literal_golden.json",
+        "search_tokens_golden.json",
+        "semantic_disabled_golden.json",
+        "tool_registry_golden.json",
+        "truncation_golden.json",
+    ):
+        assert (retrieval_fixtures / name).is_file(), f"missing retrieval fixture: {name}"
     assert (REPO_ROOT / "scripts/release_versions.py").is_file(), "release_versions.py required"
     assert (REPO_ROOT / "docs/maintainer-guide.md").is_file(), "maintainer-guide.md required"
     assert "release-check-agent-runtime" in _read(MAKEFILE), "release-check target required"

@@ -359,6 +359,11 @@ static NSArray* BuildSymbolHierarchy(NSArray* flatSymbols) {
     }
 
     if ([method isEqualToString:@"analysis.searchRanked"]) {
+        if (![params[@"allowExperimental"] boolValue]) {
+            *outErrCode = @"ranked_search_disabled";
+            *outErrMsg = @"analysis.searchRanked is quarantined in deterministic agent mode. Use search.literal, workspace.grep, or search.tokens.";
+            return;
+        }
         NSString* ws = [self safeWorkspacePath];
         NSString* query = params[@"query"];
         if (!ws || query.length == 0) {

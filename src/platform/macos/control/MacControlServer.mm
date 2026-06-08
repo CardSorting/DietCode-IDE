@@ -37,6 +37,7 @@
 #import "MacControlWindowBridge.hpp"
 #import "MacControlRoutingPolicy.hpp"
 #import "MacControlMethodCatalog.hpp"
+#import "MacControlToolRegistry.hpp"
 #import "MacControlSearchService.hpp"
 #import "MacControlRecoveryStore.hpp"
 #import "MacControlPatchService.hpp"
@@ -1276,6 +1277,16 @@ static const void* kDietCodeReadQueueKey = &kDietCodeReadQueueKey;
         return;
     }
 
+    if ([method isEqualToString:@"tool.registry"]) {
+        *outResult = MacControlToolRegistryPayload();
+        return;
+    }
+
+    if ([method isEqualToString:@"tool.capabilities"]) {
+        *outResult = MacControlToolCapabilitiesSummary();
+        return;
+    }
+
     // Route based on namespace prefixes to respective categories
     if ([method hasPrefix:@"workspace."] || [method hasPrefix:@"file."] || [method hasPrefix:@"search."] || [method hasPrefix:@"operation."]) {
         [self executeFileMethod:method params:params outResult:outResult outErrCode:outErrCode outErrMsg:outErrMsg outPaths:outPaths];
@@ -1395,7 +1406,8 @@ static const void* kDietCodeReadQueueKey = &kDietCodeReadQueueKey;
         else if ([stringCode isEqualToString:@"outside_workspace"] || [stringCode isEqualToString:@"outside_scope"]) numericCode = @(4001);
         else if ([stringCode isEqualToString:@"lock_conflict"] || [stringCode isEqualToString:@"dirty_buffer_conflict"]) numericCode = @(4002);
         else if ([stringCode isEqualToString:@"budget_exceeded"]) numericCode = @(4003);
-        else if ([stringCode isEqualToString:@"verification_failed"] || [stringCode isEqualToString:@"verify_failed"] || [stringCode isEqualToString:@"patch_failed"] || [stringCode isEqualToString:@"stale_content"]) numericCode = @(4004);
+        else if ([stringCode isEqualToString:@"semantic_disabled"] || [stringCode isEqualToString:@"ranked_search_disabled"]) numericCode = @(4008);
+        else if ([stringCode isEqualToString:@"verification_failed"] || [stringCode isEqualToString:@"verify_failed"] || [stringCode isEqualToString:@"patch_failed"] || [stringCode isEqualToString:@"stale_content"] || [stringCode isEqualToString:@"symlink_target"]) numericCode = @(4004);
         else if ([stringCode isEqualToString:@"rollback_conflict"] || [stringCode isEqualToString:@"rollback_failed"]) numericCode = @(4005);
         else if ([stringCode isEqualToString:@"permission_denied"]) numericCode = @(4006);
         else if ([stringCode isEqualToString:@"task_not_active"]) numericCode = @(4007);

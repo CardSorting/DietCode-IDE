@@ -47,7 +47,9 @@ READ_METHODS = {
     "combo.status", "combo.result", "combo.list", "recovery.scan", "recovery.schemaInfo", "recovery.list",
     "workspace.getRoot", "workspace.findFiles", "workspace.listFiles", "workspace.grep",
     "workspace.searchStart", "workspace.searchNext", "workspace.searchCancel", "workspace.getRecentFiles",
-    "search.files", "search.text", "search.todo", "search.semantic", "search.diagnostics",
+    "search.files", "search.text", "search.literal", "search.tokens", "search.paths",
+    "search.references", "search.todo", "search.semantic", "search.diagnostics",
+    "tool.registry", "tool.capabilities",
     "file.read", "file.readBatch", "file.readRange", "file.readAround", "file.getChunks", "file.stat", "file.statBatch",
     "editor.getActiveFile", "editor.getOpenFiles", "editor.getText", "editor.getSelection",
     "analysis.workspaceSummary", "analysis.searchRanked", "analysis.fileSummary", "analysis.relatedFiles",
@@ -1455,7 +1457,10 @@ def main() -> int:
         help="With --grep: json prints RPC result; rg prints path:line:column:preview lines.",
     )
     parser.add_argument("--search-text", help="Call search.text with a literal query.")
-    parser.add_argument("--search-semantic", help="Call search.semantic with a symbol or conceptual query.")
+    parser.add_argument(
+        "--search-semantic",
+        help="DEPRECATED: calls search.semantic (quarantined; use --search-text or search.literal).",
+    )
     parser.add_argument("--result-offset", type=int, help="Zero-based result cursor for workspace.grep or search.text.")
     parser.add_argument("--max-results", type=int, help="Maximum results for workspace.grep or search.text.")
     parser.add_argument("--before", type=int, help="Context lines before each search.text result.")
@@ -1607,6 +1612,12 @@ def main() -> int:
             if args.max_lines_per_hunk is not None:
                 shortcut_params["maxLinesPerHunk"] = args.max_lines_per_hunk
         elif args.grep or args.search_text or args.search_semantic:
+            if args.search_semantic:
+                print(
+                    "warning: --search-semantic is deprecated; search.semantic is quarantined. "
+                    "Use search.literal, search.tokens, or workspace.grep instead.",
+                    file=sys.stderr,
+                )
             shortcut_method = "workspace.grep" if args.grep else ("search.text" if args.search_text else "search.semantic")
             shortcut_params = {"query": args.grep or args.search_text or args.search_semantic}
             if args.max_results is not None:

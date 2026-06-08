@@ -1,0 +1,11 @@
+{
+  "description": "CONTRACT: search.semantic quarantine error (deterministic agent mode)",
+  "string_code": "semantic_disabled",
+  "numeric_code": 4008,
+  "recovery_hint": "use_search_literal_or_search_tokens",
+  "replacementMethods": [
+    "search.literal",
+    "search.tokens",
+    "search.references"
+  ]
+}

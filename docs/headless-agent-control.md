@@ -50,7 +50,9 @@ DietCode features a deterministic execution runtime where individual operations 
 - `search.text`: Advanced text search with context and offsets.
 - `search.files`: Find files by name/glob.
 - `search.todo`: Scan for TODO/FIXME comments.
-- `search.semantic`: In-memory semantic search (when indexed).
+- `search.literal` / `search.tokens` / `search.references`: Deterministic agent-safe retrieval (Pass V).
+- `search.semantic`: **Deprecated** — returns `semantic_disabled` (4008) unless `allowExperimental: true`. Use `search.literal` or `search.tokens`.
+- `tool.registry` / `tool.capabilities`: Agent-safe method catalog with `agentSafe`, `deprecated`, `replacementMethod`.
 
 ### File & Editor Operations
 - `file.read`: Read entire file content.

@@ -202,7 +202,8 @@ def test_read_search_invalid_params(sock: socket.socket, token: str, workspace_r
             ("search.files zero maxResults", "search.files", {"query": "test", "maxResults": 0}, "invalid_params"),
             ("search.text excessive context", "search.text", {"query": "alpha", "before": 21}, "response_too_large"),
             ("search.todo negative maxResults", "search.todo", {"maxResults": -1}, "invalid_params"),
-            ("analysis.searchRanked negative maxResults", "analysis.searchRanked", {"query": "alpha", "maxResults": -1}, "invalid_params"),
+            ("search.semantic quarantined", "search.semantic", {"query": "alpha"}, "semantic_disabled"),
+            ("analysis.searchRanked quarantined", "analysis.searchRanked", {"query": "alpha", "maxResults": -1}, "ranked_search_disabled"),
         ]
         for label, method, params, expected_code in cases:
             _assert_invalid_params(sock, token, label, method, params, expected_code)

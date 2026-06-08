@@ -122,6 +122,29 @@ SEARCH_TEXT_RESPONSE_KEYS = frozenset({
     "hasMore",
 }) | SEARCH_ACCOUNTING_KEYS
 
+# CONTRACT: search.files top-level result keys (deterministic path match).
+SEARCH_FILES_RESPONSE_KEYS = frozenset({
+    "results",
+    "query",
+    "searchMode",
+    "sortOrder",
+    "maxResults",
+    "truncated",
+    "scanLimitReached",
+    "filesConsidered",
+    "filesMatched",
+    "filesSkippedExcluded",
+    "filesSkippedSymlink",
+    "filesSkippedOversize",
+    "symlinkPolicy",
+    "scanDurationMs",
+})
+
+SEARCH_FILES_RESULT_KEYS = frozenset({
+    "path",
+    "matchReason",
+})
+
 # CONTRACT: search.todo top-level result keys.
 SEARCH_TODO_RESPONSE_KEYS = frozenset({
     "results",
@@ -129,6 +152,102 @@ SEARCH_TODO_RESPONSE_KEYS = frozenset({
     "markers",
     "maxResults",
 }) | SEARCH_ACCOUNTING_KEYS
+
+# CONTRACT: search.literal top-level result keys (agent-safe literal substring).
+SEARCH_LITERAL_RESPONSE_KEYS = frozenset({
+    "results",
+    "query",
+    "searchMode",
+    "rankingPolicy",
+    "scoringDisabled",
+    "agentSafe",
+    "mode",
+    "caseSensitive",
+    "maxResults",
+    "resultOffset",
+    "nextResultOffset",
+    "hasMore",
+}) | SEARCH_ACCOUNTING_KEYS
+
+# CONTRACT: search.tokens top-level result keys (conjunctive literal tokens).
+SEARCH_TOKENS_RESPONSE_KEYS = frozenset({
+    "results",
+    "query",
+    "tokens",
+    "searchMode",
+    "rankingPolicy",
+    "scoringDisabled",
+    "agentSafe",
+    "caseSensitive",
+    "maxResults",
+    "resultOffset",
+    "nextResultOffset",
+    "hasMore",
+}) | SEARCH_ACCOUNTING_KEYS
+
+# CONTRACT: search.references top-level result keys (deterministic symbol refs).
+SEARCH_REFERENCES_RESPONSE_KEYS = frozenset({
+    "symbol",
+    "results",
+    "searchMode",
+    "rankingPolicy",
+    "scoringDisabled",
+    "agentSafe",
+    "sortOrder",
+    "maxResults",
+    "truncated",
+    "totalReferences",
+})
+
+SEARCH_REFERENCES_RESULT_KEYS = frozenset({
+    "resultIndex",
+    "path",
+    "line",
+    "column",
+    "preview",
+    "matchReason",
+    "lineSha256",
+})
+
+# CONTRACT: tool.registry response keys.
+TOOL_REGISTRY_RESPONSE_KEYS = frozenset({
+    "mode",
+    "contractVersion",
+    "rankingPolicy",
+    "scoringDisabled",
+    "tools",
+})
+
+TOOL_REGISTRY_ENTRY_KEYS = frozenset({
+    "method",
+    "stability",
+    "deterministic",
+    "agentSafe",
+    "mutatesWorkspace",
+    "supportsIdempotencyKey",
+    "supportsDryRun",
+    "requiresConfirmation",
+    "deprecated",
+    "contractVersion",
+})
+
+# CONTRACT: tool.capabilities response keys.
+TOOL_CAPABILITIES_RESPONSE_KEYS = frozenset({
+    "mode",
+    "contractVersion",
+    "agentSafeMethods",
+    "deprecatedMethods",
+    "deterministicSearchMethods",
+    "semanticSearchDisabled",
+    "rankingPolicy",
+    "scoringDisabled",
+})
+
+# CONTRACT: Quarantined semantic/ranked search error codes (numeric 4008).
+SEMANTIC_QUARANTINE_ERROR_CODES = frozenset({
+    "semantic_disabled",
+    "ranked_search_disabled",
+})
 
 # CONTRACT: workspace.revision response keys.
 WORKSPACE_REVISION_KEYS = frozenset({
@@ -148,8 +267,14 @@ WORKSPACE_SNAPSHOT_KEYS = frozenset({
     "snapshotId",
     "sinceRevision",
     "revisionDelta",
+    "snapshotMode",
     "fileHashes",
     "changedFiles",
+    "filesHashed",
+    "filesSkipped",
+    "complete",
+    "truncated",
+    "hashAlgorithm",
     "externalChangeDetected",
     "mode",
 })
@@ -209,6 +334,10 @@ FILE_STAT_KEYS = frozenset({
     "dirty",
     "contentHash",
     "readSource",
+    "isSymlink",
+    "symlinkTarget",
+    "insideWorkspace",
+    "pathEscapesWorkspace",
 })
 
 # CONTRACT: workspace.grep match row keys.
@@ -255,6 +384,8 @@ REQUIRED_MAKE_TARGETS = frozenset({
     "test-grep-diff-tooling",
     "test-runtime-determinism",
     "test-transaction-kernel",
+    "test-harness-realism",
+    "test-deterministic-retrieval",
     "agent-integration",
     "verify-agent-runtime",
     "release-check-agent-runtime",
@@ -273,7 +404,33 @@ INTEGRATION_SUITES = {
     "grep_diff_tooling": "scripts/test_grep_diff_tooling.py",
     "runtime_determinism": "scripts/test_runtime_determinism.py",
     "transaction_kernel": "scripts/test_transaction_kernel.py",
+    "harness_realism": "scripts/test_harness_realism.py",
+    "deterministic_retrieval": "scripts/test_deterministic_retrieval.py",
 }
+
+
+def validate_search_files_response(result: dict[str, Any]) -> list[str]:
+    errors: list[str] = []
+    missing = SEARCH_FILES_RESPONSE_KEYS - set(result.keys())
+    if missing:
+        errors.append(f"search.files missing keys: {sorted(missing)}")
+    if result.get("searchMode") != "deterministic_path_match":
+        errors.append("searchMode must be deterministic_path_match")
+    if result.get("sortOrder") != "match_reason_path":
+        errors.append("sortOrder must be match_reason_path")
+    if result.get("symlinkPolicy") != "skip_never_follow":
+        errors.append("symlinkPolicy must be skip_never_follow")
+    results = result.get("results")
+    if not isinstance(results, list):
+        errors.append("results must be list")
+    elif results:
+        row = results[0]
+        missing_row = SEARCH_FILES_RESULT_KEYS - set(row.keys())
+        if missing_row:
+            errors.append(f"search.files result missing keys: {sorted(missing_row)}")
+        if "score" in row:
+            errors.append("results must not include score")
+    return errors
 
 # CONTRACT: Offline lockdown suites.
 OFFLINE_SUITES = {
@@ -403,6 +560,8 @@ def validate_file_stat(result: dict[str, Any]) -> list[str]:
         errors.append("contentHash must be 16-char stable hash")
     if result.get("readSource") not in ("editor", "disk"):
         errors.append("readSource must be editor or disk")
+    if not isinstance(result.get("isSymlink"), bool):
+        errors.append("isSymlink must be boolean")
     return errors
 
 
@@ -458,6 +617,133 @@ def validate_search_todo_response(result: dict[str, Any]) -> list[str]:
     return errors
 
 
+def validate_search_literal_response(result: dict[str, Any]) -> list[str]:
+    errors: list[str] = []
+    missing = SEARCH_LITERAL_RESPONSE_KEYS - set(result.keys())
+    if missing:
+        errors.append(f"search.literal missing keys: {sorted(missing)}")
+    if result.get("searchMode") != "literal_substring":
+        errors.append("searchMode must be literal_substring")
+    if result.get("rankingPolicy") != "none":
+        errors.append("rankingPolicy must be none")
+    if result.get("scoringDisabled") is not True:
+        errors.append("scoringDisabled must be true")
+    if result.get("agentSafe") is not True:
+        errors.append("agentSafe must be true")
+    if result.get("mode") != "literal_substring":
+        errors.append("mode must be literal_substring")
+    errors.extend(validate_search_accounting(result))
+    for row in result.get("results") or []:
+        if isinstance(row, dict) and "score" in row:
+            errors.append("results must not include score")
+            break
+    return errors
+
+
+def validate_search_tokens_response(result: dict[str, Any]) -> list[str]:
+    errors: list[str] = []
+    missing = SEARCH_TOKENS_RESPONSE_KEYS - set(result.keys())
+    if missing:
+        errors.append(f"search.tokens missing keys: {sorted(missing)}")
+    if result.get("searchMode") != "literal_token_conjunctive":
+        errors.append("searchMode must be literal_token_conjunctive")
+    if result.get("rankingPolicy") != "none":
+        errors.append("rankingPolicy must be none")
+    if result.get("scoringDisabled") is not True:
+        errors.append("scoringDisabled must be true")
+    if result.get("agentSafe") is not True:
+        errors.append("agentSafe must be true")
+    errors.extend(validate_search_accounting(result))
+    results = result.get("results")
+    if isinstance(results, list) and results:
+        row = results[0]
+        if row.get("matchReason") != "all_tokens_literal":
+            errors.append("matchReason must be all_tokens_literal")
+        if "score" in row:
+            errors.append("results must not include score")
+    return errors
+
+
+def validate_search_references_response(result: dict[str, Any]) -> list[str]:
+    errors: list[str] = []
+    missing = SEARCH_REFERENCES_RESPONSE_KEYS - set(result.keys())
+    if missing:
+        errors.append(f"search.references missing keys: {sorted(missing)}")
+    if result.get("searchMode") != "symbol_exact":
+        errors.append("searchMode must be symbol_exact")
+    if result.get("rankingPolicy") != "none":
+        errors.append("rankingPolicy must be none")
+    if result.get("scoringDisabled") is not True:
+        errors.append("scoringDisabled must be true")
+    if result.get("agentSafe") is not True:
+        errors.append("agentSafe must be true")
+    if result.get("sortOrder") != "path_line_column":
+        errors.append("sortOrder must be path_line_column")
+    results = result.get("results")
+    if not isinstance(results, list):
+        errors.append("results must be list")
+    elif results:
+        row = results[0]
+        missing_row = SEARCH_REFERENCES_RESULT_KEYS - set(row.keys())
+        if missing_row:
+            errors.append(f"search.references result missing keys: {sorted(missing_row)}")
+        if "score" in row:
+            errors.append("results must not include score")
+        errors.extend(validate_grep_sort_order(results))
+    return errors
+
+
+def validate_tool_registry_response(result: dict[str, Any]) -> list[str]:
+    errors: list[str] = []
+    missing = TOOL_REGISTRY_RESPONSE_KEYS - set(result.keys())
+    if missing:
+        errors.append(f"tool.registry missing keys: {sorted(missing)}")
+    if result.get("mode") != "tool_registry":
+        errors.append("mode must be tool_registry")
+    if result.get("rankingPolicy") != "none":
+        errors.append("rankingPolicy must be none")
+    if result.get("scoringDisabled") is not True:
+        errors.append("scoringDisabled must be true")
+    tools = result.get("tools")
+    if not isinstance(tools, list) or not tools:
+        errors.append("tools must be a non-empty list")
+    else:
+        entry = tools[0]
+        missing_entry = TOOL_REGISTRY_ENTRY_KEYS - set(entry.keys())
+        if missing_entry:
+            errors.append(f"tool.registry entry missing keys: {sorted(missing_entry)}")
+    return errors
+
+
+def validate_tool_capabilities_response(result: dict[str, Any]) -> list[str]:
+    errors: list[str] = []
+    missing = TOOL_CAPABILITIES_RESPONSE_KEYS - set(result.keys())
+    if missing:
+        errors.append(f"tool.capabilities missing keys: {sorted(missing)}")
+    if result.get("mode") != "tool_capabilities":
+        errors.append("mode must be tool_capabilities")
+    if result.get("semanticSearchDisabled") is not True:
+        errors.append("semanticSearchDisabled must be true")
+    if result.get("rankingPolicy") != "none":
+        errors.append("rankingPolicy must be none")
+    if result.get("scoringDisabled") is not True:
+        errors.append("scoringDisabled must be true")
+    for key in ("agentSafeMethods", "deprecatedMethods", "deterministicSearchMethods"):
+        value = result.get(key)
+        if not isinstance(value, list):
+            errors.append(f"{key} must be list")
+        elif value != sorted(value):
+            errors.append(f"{key} must be lexicographically sorted")
+    deprecated = result.get("deprecatedMethods", [])
+    if "search.semantic" not in deprecated:
+        errors.append("search.semantic must be in deprecatedMethods")
+    deterministic = result.get("deterministicSearchMethods", [])
+    for method in ("search.literal", "search.tokens", "search.paths"):
+        if method not in deterministic:
+            errors.append(f"{method} must be in deterministicSearchMethods")
+    return errors
+
+
 def validate_workspace_revision(result: dict[str, Any]) -> list[str]:
     errors: list[str] = []
     missing = WORKSPACE_REVISION_KEYS - set(result.keys())
@@ -477,6 +763,10 @@ def validate_workspace_snapshot(result: dict[str, Any]) -> list[str]:
         errors.append(f"workspace.snapshot missing keys: {sorted(missing)}")
     if result.get("mode") != "workspace_snapshot":
         errors.append("mode must be workspace_snapshot")
+    if result.get("hashAlgorithm") != "fnv1a_16hex":
+        errors.append("hashAlgorithm must be fnv1a_16hex")
+    if result.get("snapshotMode") not in ("mutated_only", "tracked_files", "explicit_paths"):
+        errors.append("snapshotMode must be mutated_only, tracked_files, or explicit_paths")
     return errors
 
 

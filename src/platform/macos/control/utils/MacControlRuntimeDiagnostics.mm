@@ -96,6 +96,12 @@ NSDictionary* MacControlRpcErrorDiagnosticMetadata(NSString* stringCode) {
     } else if ([code isEqualToString:@"stale_content"]) {
         category = @"validation";
         recoveryHint = @"revalidate_patch_with_patch.validate";
+    } else if ([code isEqualToString:@"semantic_disabled"]) {
+        category = @"validation";
+        recoveryHint = @"use_search_literal_or_search_tokens";
+    } else if ([code isEqualToString:@"ranked_search_disabled"]) {
+        category = @"validation";
+        recoveryHint = @"use_workspace_grep_or_search_literal";
     } else if ([code isEqualToString:@"verification_failed"] || [code isEqualToString:@"verify_failed"] ||
                [code isEqualToString:@"patch_failed"]) {
         category = @"domain";

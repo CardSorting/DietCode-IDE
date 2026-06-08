@@ -426,6 +426,37 @@ static std::vector<std::filesystem::path> CollectSortedSearchFilePaths(
     };
 }
 
+static BOOL PathMatchesExtensionFilter(const std::string& filename, NSString* extensionFilter) {
+    if (extensionFilter.length == 0) return YES;
+    std::string ext = StdStringFromNSString(extensionFilter);
+    if (!ext.empty() && ext[0] == '.') ext = ext.substr(1);
+    std::transform(ext.begin(), ext.end(), ext.begin(), ::tolower);
+    std::string lowerName = filename;
+    std::transform(lowerName.begin(), lowerName.end(), lowerName.begin(), ::tolower);
+    return lowerName.size() > ext.size() + 1 && lowerName.substr(lowerName.size() - ext.size() - 1) == std::string(".") + ext;
+}
+
+static NSString* DeterministicFileMatchReason(const std::string& relPath, const std::string& filename, const std::string& needleLower, NSString* extensionFilter) {
+    if (!PathMatchesExtensionFilter(filename, extensionFilter)) return nil;
+    std::string lowerName = filename;
+    std::transform(lowerName.begin(), lowerName.end(), lowerName.begin(), ::tolower);
+    if (lowerName == needleLower) {
+        return @"basename_exact";
+    }
+    std::string lowerRel = relPath;
+    std::transform(lowerRel.begin(), lowerRel.end(), lowerRel.begin(), ::tolower);
+    if (lowerRel.find(needleLower) != std::string::npos) {
+        return @"path_substring";
+    }
+    return nil;
+}
+
+static NSInteger MatchReasonRank(NSString* reason) {
+    if ([reason isEqualToString:@"basename_exact"]) return 0;
+    if ([reason isEqualToString:@"path_substring"]) return 1;
+    return 99;
+}
+
 - (NSDictionary*)searchFiles:(NSDictionary*)params 
                   outErrCode:(NSString**)outErrCode 
                    outErrMsg:(NSString**)outErrMsg {
@@ -447,38 +478,76 @@ static std::vector<std::filesystem::path> CollectSortedSearchFilePaths(
         *outErrMsg = [NSString stringWithFormat:@"maxResults exceeds limit of %ld.", (long)kMaxGrepResults];
         return nil;
     }
-    std::string folder = StdStringFromNSString(ws);
-    std::string needle = StdStringFromNSString([query lowercaseString]);
+    NSString* directoryPrefix = params[@"directory"];
+    NSString* extensionFilter = params[@"extension"];
     NSArray* includes = params[@"include"] ?: @[];
     NSArray* excludes = params[@"exclude"] ?: @[];
-    NSMutableArray* results = [NSMutableArray array];
-    std::error_code ec;
-    NSInteger scannedFiles = 0;
-    std::filesystem::recursive_directory_iterator it(folder, ec);
-    std::filesystem::recursive_directory_iterator end;
-    for (; it != end && !ec; it.increment(ec)) {
-        const auto& entry = *it;
-        if (results.count >= (NSUInteger)maxResults) break;
-        std::filesystem::path p = entry.path();
-        std::string relPath = std::filesystem::relative(p, folder, ec).string();
-        if (entry.is_directory(ec)) {
-            if (it.depth() >= kMaxSearchDepth || ShouldPruneSearchDirectory(p, relPath, excludes)) {
-                it.disable_recursion_pending();
-            }
-            continue;
-        }
-        if (!entry.is_regular_file()) continue;
-        if (++scannedFiles > kMaxSearchScanFiles) break;
-        if (ShouldSkipSearchPath(p, relPath, includes, excludes)) continue;
-        std::string lowerRel = relPath;
-        std::transform(lowerRel.begin(), lowerRel.end(), lowerRel.begin(), ::tolower);
-        size_t pos = lowerRel.find(needle);
-        if (pos == std::string::npos) continue;
-        double score = pos == 0 ? 1.0 : 0.75;
-        if (p.filename().string().find(StdStringFromNSString(query)) != std::string::npos) score += 0.2;
-        [results addObject:@{ @"path": NSStringFromStdString(relPath), @"score": @(MIN(score, 1.0)) }];
+    std::string folder = StdStringFromNSString(ws);
+    std::string needleLower = StdStringFromNSString([query lowercaseString]);
+    std::string dirPrefixLower;
+    if (directoryPrefix.length > 0) {
+        dirPrefixLower = StdStringFromNSString([directoryPrefix lowercaseString]);
+        if (!dirPrefixLower.empty() && dirPrefixLower.back() != '/') dirPrefixLower.push_back('/');
     }
-    return @{ @"results": results };
+    CFAbsoluteTime scanStarted = CFAbsoluteTimeGetCurrent();
+    NSInteger filesSkippedOversize = 0;
+    NSInteger filesSkippedExcluded = 0;
+    NSInteger filesSkippedSymlink = 0;
+    NSInteger scannedFiles = 0;
+    std::vector<std::filesystem::path> sortedPaths = CollectSortedSearchFilePaths(
+        folder, includes, excludes, &scannedFiles, &filesSkippedOversize, &filesSkippedExcluded, &filesSkippedSymlink);
+    BOOL scanLimitReached = scannedFiles > kMaxSearchScanFiles;
+    struct Candidate {
+        std::string relPath;
+        NSString* matchReason;
+    };
+    std::vector<Candidate> candidates;
+    std::error_code ec;
+    for (const auto& p : sortedPaths) {
+        std::string relPath = std::filesystem::relative(p, folder, ec).string();
+        if (ec) continue;
+        if (!dirPrefixLower.empty()) {
+            std::string lowerRel = relPath;
+            std::transform(lowerRel.begin(), lowerRel.end(), lowerRel.begin(), ::tolower);
+            if (lowerRel.rfind(dirPrefixLower, 0) != 0) continue;
+        }
+        NSString* reason = DeterministicFileMatchReason(relPath, p.filename().string(), needleLower, extensionFilter);
+        if (!reason) continue;
+        candidates.push_back({relPath, reason});
+    }
+    std::sort(candidates.begin(), candidates.end(), [](const Candidate& a, const Candidate& b) {
+        NSInteger ra = MatchReasonRank(a.matchReason);
+        NSInteger rb = MatchReasonRank(b.matchReason);
+        if (ra != rb) return ra < rb;
+        return a.relPath < b.relPath;
+    });
+    BOOL truncated = candidates.size() > (size_t)maxResults || scanLimitReached;
+    NSMutableArray* results = [NSMutableArray array];
+    NSInteger filesMatched = 0;
+    for (const auto& candidate : candidates) {
+        if (results.count >= (NSUInteger)maxResults) break;
+        filesMatched++;
+        [results addObject:@{
+            @"path": NSStringFromStdString(candidate.relPath),
+            @"matchReason": candidate.matchReason
+        }];
+    }
+    return @{
+        @"results": results,
+        @"query": query,
+        @"searchMode": @"deterministic_path_match",
+        @"sortOrder": @"match_reason_path",
+        @"maxResults": @(maxResults),
+        @"truncated": @(truncated),
+        @"scanLimitReached": @(scanLimitReached),
+        @"filesConsidered": @(sortedPaths.size()),
+        @"filesMatched": @(filesMatched),
+        @"filesSkippedExcluded": @(filesSkippedExcluded),
+        @"filesSkippedSymlink": @(filesSkippedSymlink),
+        @"filesSkippedOversize": @(filesSkippedOversize),
+        @"symlinkPolicy": @"skip_never_follow",
+        @"scanDurationMs": @((NSInteger)round((CFAbsoluteTimeGetCurrent() - scanStarted) * 1000.0))
+    };
 }
 
 - (NSDictionary*)searchText:(NSDictionary*)params 
@@ -720,9 +789,233 @@ static std::vector<std::filesystem::path> CollectSortedSearchFilePaths(
     };
 }
 
+- (NSDictionary*)searchLiteral:(NSDictionary*)params
+                     outErrCode:(NSString**)outErrCode
+                      outErrMsg:(NSString**)outErrMsg {
+    NSMutableDictionary* literalParams = [params mutableCopy] ?: [NSMutableDictionary dictionary];
+    NSDictionary* result = [self searchText:literalParams outErrCode:outErrCode outErrMsg:outErrMsg];
+    if (!result) return nil;
+    NSMutableDictionary* response = [result mutableCopy];
+    response[@"searchMode"] = @"literal_substring";
+    response[@"rankingPolicy"] = @"none";
+    response[@"scoringDisabled"] = @YES;
+    response[@"agentSafe"] = @YES;
+    return response;
+}
+
+- (NSDictionary*)searchPaths:(NSDictionary*)params
+                    outErrCode:(NSString**)outErrCode
+                     outErrMsg:(NSString**)outErrMsg {
+    NSDictionary* result = [self searchFiles:params outErrCode:outErrCode outErrMsg:outErrMsg];
+    if (!result) return nil;
+    NSMutableDictionary* response = [result mutableCopy];
+    response[@"agentSafe"] = @YES;
+    return response;
+}
+
+static BOOL LineContainsAllTokens(const std::string& line, const std::vector<std::string>& tokens, BOOL caseSensitive) {
+    for (const auto& token : tokens) {
+        if (token.empty()) continue;
+        NSArray* spans = LiteralMatchSpans(line, token, caseSensitive);
+        if (spans.count == 0) return NO;
+    }
+    return !tokens.empty();
+}
+
+- (NSDictionary*)searchTokens:(NSDictionary*)params
+                   outErrCode:(NSString**)outErrCode
+                    outErrMsg:(NSString**)outErrMsg {
+    NSString* ws = [_windowBridge workspacePath];
+    NSString* query = params[@"query"] ?: @"";
+    if (!ws || query.length == 0) {
+        *outErrCode = @"invalid_params";
+        *outErrMsg = @"query and workspace required.";
+        return nil;
+    }
+    NSMutableArray* tokenParts = [NSMutableArray array];
+    for (NSString* part in [query componentsSeparatedByCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]]) {
+        if (part.length > 0) [tokenParts addObject:part];
+    }
+    if (tokenParts.count == 0) {
+        *outErrCode = @"invalid_params";
+        *outErrMsg = @"query must contain at least one token.";
+        return nil;
+    }
+    std::vector<std::string> tokens;
+    for (NSString* part in tokenParts) tokens.push_back(StdStringFromNSString(part));
+
+    NSInteger maxResults = params[@"maxResults"] ? [params[@"maxResults"] integerValue] : 200;
+    if (maxResults <= 0 || maxResults > kMaxGrepResults) {
+        *outErrCode = @"invalid_params";
+        *outErrMsg = @"maxResults must be between 1 and grep limit.";
+        return nil;
+    }
+    NSInteger resultOffset = params[@"resultOffset"] ? MAX([params[@"resultOffset"] integerValue], 0) : 0;
+    BOOL caseSensitive = [params[@"caseSensitive"] boolValue];
+    NSArray* includes = params[@"include"] ?: @[];
+    NSArray* excludes = params[@"exclude"] ?: @[];
+    std::string folder = StdStringFromNSString(ws);
+    NSMutableArray* results = [NSMutableArray array];
+    BOOL truncated = NO;
+    BOOL scanLimitReached = NO;
+    NSInteger totalMatchesSeen = 0;
+    BOOL hasMore = NO;
+    NSInteger filesRead = 0;
+    NSInteger filesSkippedUnreadable = 0;
+    NSInteger filesSkippedBinary = 0;
+    NSInteger filesReadFromDisk = 0;
+    NSInteger filesReadFromEditor = 0;
+    NSInteger filesSkippedOversize = 0;
+    NSInteger filesSkippedExcluded = 0;
+    NSInteger filesSkippedSymlink = 0;
+    CFAbsoluteTime scanStarted = CFAbsoluteTimeGetCurrent();
+    NSInteger scannedFiles = 0;
+    std::vector<std::filesystem::path> sortedPaths = CollectSortedSearchFilePaths(
+        folder, includes, excludes, &scannedFiles, &filesSkippedOversize, &filesSkippedExcluded, &filesSkippedSymlink);
+    if (scannedFiles > kMaxSearchScanFiles) scanLimitReached = YES;
+    std::error_code ec;
+    for (const auto& p : sortedPaths) {
+        if (hasMore) break;
+        std::string relPath = std::filesystem::relative(p, folder, ec).string();
+        if (ec) continue;
+        NSString* absPath = NSStringFromStdString(p.string());
+        NSString* readSource = nil;
+        NSString* text = TextForSearchAtPath([_windowBridge textForFileAtPath:absPath], absPath, &readSource);
+        if (!text) {
+            NSString* editorProbe = [_windowBridge textForFileAtPath:absPath];
+            if (editorProbe.length > 0 && IsTextBinary(editorProbe)) filesSkippedBinary++;
+            else filesSkippedUnreadable++;
+            continue;
+        }
+        filesRead++;
+        if ([readSource isEqualToString:@"disk"]) filesReadFromDisk++;
+        else if ([readSource isEqualToString:@"editor"]) filesReadFromEditor++;
+        std::vector<std::string> lines;
+        std::istringstream stream(StdStringFromNSString(text));
+        std::string line;
+        while (std::getline(stream, line)) lines.push_back(line);
+        for (size_t i = 0; i < lines.size(); i++) {
+            if (!LineContainsAllTokens(lines[i], tokens, caseSensitive)) continue;
+            NSInteger resultIndex = totalMatchesSeen++;
+            if (resultIndex < resultOffset) continue;
+            if (results.count >= (NSUInteger)maxResults) {
+                truncated = YES;
+                hasMore = YES;
+                break;
+            }
+            NSString* preview = NSStringFromStdString(lines[i]);
+            [results addObject:@{
+                @"resultIndex": @(resultIndex),
+                @"path": NSStringFromStdString(relPath),
+                @"line": @(i + 1),
+                @"column": @1,
+                @"matchReason": @"all_tokens_literal",
+                @"tokens": tokenParts,
+                @"preview": preview,
+                @"lineSha256": StableHashForString(preview),
+            }];
+        }
+    }
+    id nextOffset = hasMore ? @(resultOffset + (NSInteger)results.count) : [NSNull null];
+    return @{
+        @"results": results,
+        @"query": query,
+        @"tokens": tokenParts,
+        @"searchMode": @"literal_token_conjunctive",
+        @"rankingPolicy": @"none",
+        @"scoringDisabled": @YES,
+        @"agentSafe": @YES,
+        @"caseSensitive": @(caseSensitive),
+        @"maxResults": @(maxResults),
+        @"resultOffset": @(resultOffset),
+        @"nextResultOffset": nextOffset,
+        @"hasMore": @(hasMore),
+        @"truncated": @(truncated || scanLimitReached),
+        @"scanLimitReached": @(scanLimitReached),
+        @"scannedFiles": @(MIN(scannedFiles, kMaxSearchScanFiles)),
+        @"filesRead": @(filesRead),
+        @"filesSkippedUnreadable": @(filesSkippedUnreadable),
+        @"filesSkippedBinary": @(filesSkippedBinary),
+        @"filesReadFromDisk": @(filesReadFromDisk),
+        @"filesReadFromEditor": @(filesReadFromEditor),
+        @"filesSkippedOversize": @(filesSkippedOversize),
+        @"filesSkippedExcluded": @(filesSkippedExcluded),
+        @"filesSkippedSymlink": @(filesSkippedSymlink),
+        @"symlinkPolicy": @"skip_never_follow",
+        @"sortOrder": @"path_line_column",
+        @"scanDurationMs": @((NSInteger)round((CFAbsoluteTimeGetCurrent() - scanStarted) * 1000.0))
+    };
+}
+
+- (NSDictionary*)searchReferences:(NSDictionary*)params
+                         outErrCode:(NSString**)outErrCode
+                          outErrMsg:(NSString**)outErrMsg {
+    NSString* ws = [_windowBridge workspacePath];
+    NSString* symbol = params[@"symbol"] ?: params[@"query"];
+    if (!ws || symbol.length == 0) {
+        *outErrCode = @"invalid_params";
+        *outErrMsg = @"symbol (or query) and workspace required.";
+        return nil;
+    }
+    NSInteger maxResults = params[@"maxResults"] ? [params[@"maxResults"] integerValue] : 200;
+    maxResults = MIN(MAX(1, maxResults), kMaxGrepResults);
+    NSArray* rawRefs = [DietCodeSymbolIndexService referencesForSymbol:symbol
+                                                            inWorkspace:ws
+                                                              openFiles:[_windowBridge openTabs]
+                                                       diagnosticsFiles:@[]];
+    NSMutableArray* normalized = [NSMutableArray array];
+    for (NSDictionary* ref in rawRefs) {
+        [normalized addObject:@{
+            @"path": ref[@"path"] ?: @"",
+            @"line": ref[@"line"] ?: @1,
+            @"column": ref[@"column"] ?: @1,
+            @"preview": ref[@"preview"] ?: @"",
+            @"matchReason": @"symbol_exact",
+            @"lineSha256": StableHashForString(ref[@"preview"] ?: @""),
+        }];
+    }
+    [normalized sortUsingComparator:^NSComparisonResult(NSDictionary* a, NSDictionary* b) {
+        NSComparisonResult pathCmp = [a[@"path"] compare:b[@"path"]];
+        if (pathCmp != NSOrderedSame) return pathCmp;
+        NSInteger lineA = [a[@"line"] integerValue];
+        NSInteger lineB = [b[@"line"] integerValue];
+        if (lineA != lineB) return lineA < lineB ? NSOrderedAscending : NSOrderedDescending;
+        NSInteger colA = [a[@"column"] integerValue];
+        NSInteger colB = [b[@"column"] integerValue];
+        if (colA != colB) return colA < colB ? NSOrderedAscending : NSOrderedDescending;
+        return NSOrderedSame;
+    }];
+    BOOL truncated = normalized.count > (NSUInteger)maxResults;
+    NSArray* slice = truncated ? [normalized subarrayWithRange:NSMakeRange(0, (NSUInteger)maxResults)] : normalized;
+    NSMutableArray* results = [NSMutableArray array];
+    NSInteger idx = 0;
+    for (NSDictionary* row in slice) {
+        NSMutableDictionary* item = [row mutableCopy];
+        item[@"resultIndex"] = @(idx++);
+        [results addObject:item];
+    }
+    return @{
+        @"symbol": symbol,
+        @"results": results,
+        @"searchMode": @"symbol_exact",
+        @"rankingPolicy": @"none",
+        @"scoringDisabled": @YES,
+        @"agentSafe": @YES,
+        @"sortOrder": @"path_line_column",
+        @"maxResults": @(maxResults),
+        @"truncated": @(truncated),
+        @"totalReferences": @(normalized.count),
+    };
+}
+
 - (NSDictionary*)searchSemantic:(NSDictionary*)params 
                      outErrCode:(NSString**)outErrCode 
                       outErrMsg:(NSString**)outErrMsg {
+    if (![params[@"allowExperimental"] boolValue]) {
+        *outErrCode = @"semantic_disabled";
+        *outErrMsg = @"search.semantic is quarantined in deterministic agent mode. Use search.literal, search.tokens, or search.references.";
+        return nil;
+    }
     NSString* ws = [_windowBridge workspacePath];
     NSString* query = params[@"query"];
     if (!ws || !query || query.length == 0) {
@@ -730,68 +1023,21 @@ static std::vector<std::filesystem::path> CollectSortedSearchFilePaths(
         *outErrMsg = @"query and workspace required.";
         return nil;
     }
-    
-    NSInteger maxResults = params[@"maxResults"] ? [params[@"maxResults"] integerValue] : 50;
-    maxResults = MIN(MAX(1, maxResults), 100);
-    
-    // 1. Get ranked literal matches
-    NSArray* ranked = [DietCodeWorkspaceAnalysisService searchRankedForQuery:query 
-                                                                   workspace:ws 
-                                                                   openFiles:[_windowBridge openTabs] 
-                                                                 recentFiles:@[] 
-                                                                     include:@[] 
-                                                                     exclude:@[] 
-                                                               caseSensitive:NO];
-    
-    // 2. Get symbol references
-    NSArray* references = [DietCodeSymbolIndexService referencesForSymbol:query 
-                                                              inWorkspace:ws 
-                                                                openFiles:[_windowBridge openTabs] 
-                                                         diagnosticsFiles:@[]];
-    
-    NSMutableArray* combined = [NSMutableArray array];
-    NSMutableSet* seen = [NSMutableSet set];
-    
-    for (NSDictionary* ref in references) {
-        if (combined.count >= (NSUInteger)maxResults) break;
-        NSString* key = [NSString stringWithFormat:@"%@:%@", ref[@"path"], ref[@"line"]];
-        if (![seen containsObject:key]) {
-            [combined addObject:@{
-                @"path": ref[@"path"],
-                @"line": ref[@"line"],
-                @"column": ref[@"column"],
-                @"preview": ref[@"preview"] ?: @"",
-                @"score": @([ref[@"score"] doubleValue] + 2.0), // Boost symbol matches
-                @"type": @"symbol_reference"
-            }];
-            [seen addObject:key];
-        }
-    }
-    
-    for (NSDictionary* item in ranked) {
-        if (combined.count >= (NSUInteger)maxResults) break;
-        for (NSDictionary* match in item[@"matches"] ?: @[]) {
-            if (combined.count >= (NSUInteger)maxResults) break;
-            NSString* key = [NSString stringWithFormat:@"%@:%@", item[@"path"], match[@"line"]];
-            if (![seen containsObject:key]) {
-                [combined addObject:@{
-                    @"path": item[@"path"],
-                    @"line": match[@"line"],
-                    @"column": match[@"column"],
-                    @"preview": match[@"preview"] ?: @"",
-                    @"score": item[@"score"],
-                    @"type": @"ranked_literal"
-                }];
-                [seen addObject:key];
-            }
-        }
-    }
-    
-    [combined sortUsingComparator:^NSComparisonResult(NSDictionary* a, NSDictionary* b) {
-        return [b[@"score"] compare:a[@"score"]];
-    }];
-    
-    return @{ @"results": combined, @"query": query };
+    NSDictionary* refs = [self searchReferences:@{ @"query": query, @"maxResults": params[@"maxResults"] ?: @50 }
+                                    outErrCode:outErrCode
+                                     outErrMsg:outErrMsg];
+    if (!refs) return nil;
+    return @{
+        @"results": refs[@"results"] ?: @[],
+        @"query": query,
+        @"deterministicMode": @YES,
+        @"searchMode": @"symbol_exact_fallback",
+        @"rankingPolicy": @"none",
+        @"scoringDisabled": @YES,
+        @"agentSafe": @NO,
+        @"warning": @"allowExperimental=true; results are deterministic symbol references only.",
+        @"replacementMethods": @[@"search.literal", @"search.tokens", @"search.references"],
+    };
 }
 
 - (NSDictionary*)searchDiagnostics:(NSDictionary*)params 

@@ -18,6 +18,10 @@
 - [ ] Grep/diff/patch contracts documented in [Agent Tooling](agent-tooling.md)
 - [ ] `make test-runtime-determinism` passes (state hashes, stale-write rejection)
 - [ ] `make test-transaction-kernel` passes (revision, batch atomicity, search parity)
+- [ ] `make test-harness-realism` passes (symlink escape, transport, concurrency)
+- [ ] `make test-deterministic-retrieval` passes (semantic quarantine, tool registry, literal/token search)
+- [ ] `search.semantic` returns `semantic_disabled` (4008) without `allowExperimental`
+- [ ] `tool.registry` / `tool.capabilities` list agent-safe deterministic methods
 - [ ] Runtime invariants documented in [Runtime Invariants](runtime-invariants.md)
 - [ ] Runtime limits documented in [Runtime Safety](runtime-safety.md)
 - [ ] `make release-check-agent-runtime` passes before release

@@ -1,0 +1,23 @@
+{
+  "description": "CONTRACT: Frozen tool.registry top-level shape (offline golden)",
+  "mode": "tool_registry",
+  "contractVersion": "1.0.0",
+  "rankingPolicy": "none",
+  "scoringDisabled": true,
+  "requiredEntryKeys": [
+    "method",
+    "stability",
+    "deterministic",
+    "agentSafe",
+    "mutatesWorkspace",
+    "supportsIdempotencyKey",
+    "supportsDryRun",
+    "requiresConfirmation",
+    "deprecated",
+    "contractVersion"
+  ],
+  "deprecatedMethods": [
+    "analysis.searchRanked",
+    "search.semantic"
+  ]
+}

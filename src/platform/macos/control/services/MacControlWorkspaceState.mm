@@ -77,33 +77,58 @@ static NSString* ReadHashForPath(NSString* absPath, DietCodeControlWindowBridge*
 - (NSDictionary*)snapshotPayloadWithWorkspace:(NSString*)workspacePath
                                  sinceRevision:(NSNumber*)sinceRevision
                                          paths:(NSArray<NSString*>*)paths
-                                  windowBridge:(id)windowBridge {
+                                  snapshotMode:(NSString*)snapshotMode
+                                      maxFiles:(NSNumber*)maxFiles
+                                  windowBridge:(DietCodeControlWindowBridge*)windowBridge {
     NSInteger since = sinceRevision ? [sinceRevision integerValue] : 0;
+    NSInteger limit = maxFiles ? MAX([maxFiles integerValue], 1) : 100;
+    if (limit > 500) limit = 500;
+    NSString* mode = snapshotMode.length > 0 ? snapshotMode : @"mutated_only";
     NSMutableArray* changedFiles = [NSMutableArray array];
     NSMutableDictionary* fileHashes = [NSMutableDictionary dictionary];
     BOOL externalDetected = NO;
+    NSInteger filesSkipped = 0;
+    NSInteger filesHashed = 0;
+    BOOL truncated = NO;
 
-    NSMutableSet<NSString*>* inspectPaths = [NSMutableSet set];
-    for (NSString* p in paths ?: @[]) {
-        if (p.length > 0) [inspectPaths addObject:p];
-    }
-    for (NSString* p in self.lastChangedFiles) {
-        [inspectPaths addObject:p];
-    }
-    for (NSString* p in _externallyChangedPaths) {
-        [inspectPaths addObject:p];
-    }
-    if (inspectPaths.count == 0 && workspacePath.length > 0) {
+    NSMutableArray<NSString*>* inspectPaths = [NSMutableArray array];
+    if ([mode isEqualToString:@"explicit_paths"]) {
+        for (NSString* p in paths ?: @[]) {
+            if (p.length > 0) [inspectPaths addObject:p];
+        }
+    } else if ([mode isEqualToString:@"tracked_files"]) {
         for (NSString* tracked in _trackedFileHashes.allKeys) {
             [inspectPaths addObject:tracked];
         }
+    } else {
+        NSMutableSet<NSString*>* mutated = [NSMutableSet set];
+        for (NSString* p in paths ?: @[]) {
+            if (p.length > 0) [mutated addObject:p];
+        }
+        for (NSString* p in self.lastChangedFiles) [mutated addObject:p];
+        for (NSString* p in _externallyChangedPaths) [mutated addObject:p];
+        for (NSString* tracked in _trackedFileHashes.allKeys) [mutated addObject:tracked];
+        inspectPaths = [NSMutableArray arrayWithArray:[[mutated allObjects] sortedArrayUsingSelector:@selector(compare:)]];
     }
 
     for (NSString* relPath in inspectPaths) {
+        if (filesHashed >= limit) {
+            truncated = YES;
+            filesSkipped++;
+            continue;
+        }
         NSString* absPath = AbsolutePathForRPCPath(relPath, workspacePath);
-        if (!absPath || !PathIsInsideWorkspace(absPath, workspacePath)) continue;
+        if (!absPath || !PathIsInsideWorkspace(absPath, workspacePath)) {
+            filesSkipped++;
+            continue;
+        }
+        if (PathIsSymlink(absPath)) {
+            filesSkipped++;
+            continue;
+        }
         NSString* currentHash = ReadHashForPath(absPath, windowBridge);
         fileHashes[relPath] = currentHash;
+        filesHashed++;
         NSString* priorHash = _trackedFileHashes[relPath];
         if (since > 0 && since < _revisionCounter && priorHash.length > 0 && ![priorHash isEqualToString:currentHash]) {
             [changedFiles addObject:@{
@@ -116,13 +141,20 @@ static NSString* ReadHashForPath(NSString* absPath, DietCodeControlWindowBridge*
         }
     }
 
+    BOOL complete = !truncated && filesSkipped == 0;
     return @{
         @"revisionId": @(_revisionCounter),
         @"snapshotId": [NSString stringWithFormat:@"snap-%ld", (long)_revisionCounter],
         @"sinceRevision": @(since),
         @"revisionDelta": @(MAX(0, _revisionCounter - since)),
+        @"snapshotMode": mode,
         @"fileHashes": fileHashes,
         @"changedFiles": changedFiles,
+        @"filesHashed": @(filesHashed),
+        @"filesSkipped": @(filesSkipped),
+        @"complete": @(complete),
+        @"truncated": @(truncated),
+        @"hashAlgorithm": @"fnv1a_16hex",
         @"externalChangeDetected": @(externalDetected || _externalChangeDetected),
         @"mode": @"workspace_snapshot"
     };
