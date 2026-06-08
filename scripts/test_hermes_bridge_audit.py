@@ -26,8 +26,13 @@ IDE_MARKER = PLUGIN_ROOT / ".dietcode-ide-connected"
 INTEGRATIONS_PLUGIN = REPO_ROOT / "integrations" / "hermes-dietcode-plugin"
 BUNDLED_PLUGIN = REPO_ROOT / "build" / "DietCode.app" / "Contents" / "Resources" / "integrations" / "hermes" / "dietcode"
 ENABLE_AGENT_SCRIPT = REPO_ROOT / "scripts" / "enable-hermes-agent.sh"
+ENABLE_AGENT_PY = REPO_ROOT / "scripts" / "dietcode_enable_agent.py"
+TRUST_AUDIT = REPO_ROOT / "scripts" / "test_dietcode_enable_agent.py"
 SYNC_SCRIPT = REPO_ROOT / "scripts" / "sync-hermes-plugin.sh"
 BUNDLED_ENABLE_AGENT = REPO_ROOT / "build" / "DietCode.app" / "Contents" / "Resources" / "bin" / "dietcode-enable-agent"
+BUNDLED_ENABLE_AGENT_PY = REPO_ROOT / "build" / "DietCode.app" / "Contents" / "Resources" / "bin" / "dietcode-enable-agent.py"
+BUNDLE_MANIFEST = REPO_ROOT / "resources" / "dietcode-agent-bundle.manifest.json"
+BUNDLED_MANIFEST = REPO_ROOT / "build" / "DietCode.app" / "Contents" / "Resources" / "dietcode-agent-bundle.manifest.json"
 
 REQUIRED_PLUGIN_FILES = (
     "lib/agent/ide_bridge_client.py",
@@ -87,6 +92,9 @@ def _run_bridge(args: list[str]) -> tuple[bool, str]:
 def test_setup_script_exists(rec: Recorder) -> None:
     rec.record("audit.setup_script", SETUP_SCRIPT.is_file())
     rec.record("audit.enable_agent_script", ENABLE_AGENT_SCRIPT.is_file())
+    rec.record("audit.enable_agent_py", ENABLE_AGENT_PY.is_file())
+    rec.record("audit.trust_audit_script", TRUST_AUDIT.is_file())
+    rec.record("audit.bundle_manifest", BUNDLE_MANIFEST.is_file())
     rec.record("audit.sync_plugin_script", SYNC_SCRIPT.is_file())
     rec.record("audit.watchdog_script", WATCHDOG_SCRIPT.is_file())
     rec.record("audit.workflow_script", WORKFLOW_SCRIPT.is_file())
@@ -103,6 +111,9 @@ def test_makefile_targets(rec: Recorder) -> None:
         "test-hermes-bridge-workflows:",
         "PACKAGED_HERMES_PLUGIN",
         "dietcode-enable-agent",
+        "dietcode-enable-agent.py",
+        "dietcode-agent-bundle.manifest.json",
+        "test-dietcode-enable-agent",
     ):
         rec.record(f"audit.makefile.{target.rstrip(':')}", target in text)
 
@@ -114,6 +125,37 @@ def test_integrations_plugin(rec: Recorder) -> None:
 def test_bundled_plugin_in_app(rec: Recorder) -> None:
     rec.record("audit.bundled_plugin_in_app", BUNDLED_PLUGIN.is_dir() and (BUNDLED_PLUGIN / "plugin.yaml").is_file(), str(BUNDLED_PLUGIN))
     rec.record("audit.bundled_enable_agent", BUNDLED_ENABLE_AGENT.is_file(), str(BUNDLED_ENABLE_AGENT))
+    rec.record("audit.bundled_enable_agent_py", BUNDLED_ENABLE_AGENT_PY.is_file(), str(BUNDLED_ENABLE_AGENT_PY))
+    rec.record("audit.bundled_manifest", BUNDLED_MANIFEST.is_file(), str(BUNDLED_MANIFEST))
+    if BUNDLED_MANIFEST.is_file():
+        manifest = json.loads(BUNDLED_MANIFEST.read_text(encoding="utf-8"))
+        rec.record(
+            "audit.manifest_integration_artifact",
+            manifest.get("bundleKind") == "agent-integration-artifact",
+            str(manifest.get("summary")),
+        )
+
+
+def test_trust_audit_live(rec: Recorder) -> None:
+    if not TRUST_AUDIT.is_file():
+        rec.record("audit.trust_live", False, "trust audit missing")
+        return
+    completed = subprocess.run(
+        [sys.executable, str(TRUST_AUDIT)],
+        cwd=str(REPO_ROOT),
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    ok = completed.returncode == 0
+    detail = completed.stdout.strip() or completed.stderr.strip()
+    if detail:
+        try:
+            payload = json.loads(detail.splitlines()[-1])
+            ok = bool(payload.get("ok"))
+        except json.JSONDecodeError:
+            ok = False
+    rec.record("audit.trust_live", ok, detail[:500])
 
 
 def test_plugin_files_installed(rec: Recorder) -> None:
@@ -337,6 +379,7 @@ def main() -> int:
     test_makefile_targets(rec)
     test_integrations_plugin(rec)
     test_bundled_plugin_in_app(rec)
+    test_trust_audit_live(rec)
     test_plugin_files_installed(rec)
     test_source_plugin_has_retry(rec)
     test_tools_loader_contract(rec)

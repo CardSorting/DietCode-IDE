@@ -316,5 +316,18 @@ def run_install_wizard(*, auto_npm: bool = True, auto_build: bool = True) -> dic
 if __name__ == "__main__":
     import json
 
-    result = run_install_wizard(auto_npm="--skip-npm" not in __import__("sys").argv)
+    argv = __import__("sys").argv
+    dry_run = "--dry-run" in argv
+    skip_npm = "--skip-npm" in argv
+    if dry_run:
+        cfg = apply_seamless_defaults(save=False)
+        result = {
+            "ok": True,
+            "dry_run": True,
+            "config": cfg,
+            "broccolidb": {"ok": True, "action": "skipped"},
+            "ide_bridge": {"ok": True, "action": "skipped"},
+        }
+    else:
+        result = run_install_wizard(auto_npm=not skip_npm)
     print(json.dumps(result, indent=2))

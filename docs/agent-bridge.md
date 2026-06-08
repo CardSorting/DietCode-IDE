@@ -49,11 +49,22 @@ Hermes is **not** vendored into the IDE. `make app` also bundles the DietCode He
 | `DietCode.app/Contents/Resources/integrations/hermes/dietcode/` | Plugin deployed to `~/.hermes/plugins/dietcode/` |
 | `DietCode.app/Contents/Resources/bin/dietcode-enable-agent` | One-shot enable (lazy Hermes install + plugin deploy) |
 
+DietCode now ships a **bundled agent integration artifact**, not merely a benchmark bridge.
+
 ```bash
-./scripts/sync-hermes-plugin.sh    # maintainers: refresh integrations/
-./scripts/enable-hermes-agent.sh   # users: enable without a Hermes checkout
+./scripts/sync-hermes-plugin.sh              # maintainers: refresh integrations/
+build/DietCode.app/Contents/Resources/bin/dietcode-enable-agent --doctor
+build/DietCode.app/Contents/Resources/bin/dietcode-enable-agent --dry-run
 build/DietCode.app/Contents/Resources/bin/dietcode-enable-agent
+build/DietCode.app/Contents/Resources/bin/dietcode-enable-agent --uninstall
 ```
+
+Trust + update safety:
+
+- Resolves `/Applications/DietCode.app`, `~/Applications/DietCode.app`, and local `build/DietCode.app`
+- Backs up `config.yaml`, `.env`, and the installed plugin before any write
+- Prints an exact change log (env keys, plugin version, config merge results)
+- Bundle manifest: `dietcode-agent-bundle.manifest.json` (runtime, bridge, plugin, min Hermes versions)
 
 ---
 
