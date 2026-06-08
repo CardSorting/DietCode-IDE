@@ -113,7 +113,11 @@ Adversarial tasks set `metadata.json` fields: `adversarial`, `trapType`,
 
 ```bash
 make benchmark-agent-success-report
+make test-agent-success-report    # smoke test — claim format must not regress
 ```
+
+`summary.md` states executor coverage (`reference` / `agent` present or absent).
+Reference-only runs include a warning when agent results are missing.
 
 The reference executor proves the tools can solve it. The agent executor reveals
 whether autonomy survives the traps.

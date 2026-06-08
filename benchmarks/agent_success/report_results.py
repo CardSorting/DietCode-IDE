@@ -7,6 +7,7 @@ import argparse
 import json
 import sys
 from collections import Counter, defaultdict
+from datetime import datetime, timezone
 from pathlib import Path
 from statistics import mean
 from typing import Any
@@ -181,16 +182,23 @@ def aggregate(rows: list[dict[str, Any]], task_meta: dict[str, dict[str, Any]], 
 
     reference_rows = [row for row in rows if str(row.get("executor", "reference")) == "reference"]
     agent_rows = [row for row in rows if str(row.get("executor")) == "agent"]
+    has_reference = bool(reference_rows)
+    has_agent = bool(agent_rows)
     evaluation_claim = {
         "referencePassed": sum(1 for row in reference_rows if passed(row)),
         "referenceTotal": len(reference_rows),
         "agentPassed": sum(1 for row in agent_rows if passed(row)),
         "agentTotal": len(agent_rows),
-        "hasAgentResults": bool(agent_rows),
+        "hasReferenceResults": has_reference,
+        "hasAgentResults": has_agent,
         "frame": (
             "DietCode evaluates bounded agent code mutation as a transactional runtime "
             "problem, not an autocomplete problem."
         ),
+    }
+    executor_coverage = {
+        "reference": "present" if has_reference else "absent",
+        "agent": "present" if has_agent else "absent",
     }
 
     money_table: list[dict[str, Any]] = []
@@ -208,7 +216,9 @@ def aggregate(rows: list[dict[str, Any]], task_meta: dict[str, dict[str, Any]], 
         )
 
     return {
-        "sourceFiles": [str(p) for p in paths],
+        "inputFiles": [str(p) for p in paths],
+        "resultRowCount": len(rows),
+        "executorCoverage": executor_coverage,
         "taskResultCount": len(rows),
         "normalTaskCount": len(normal_rows),
         "adversarialTaskCount": len(adversarial_rows),
@@ -270,8 +280,24 @@ def _render_evaluation_claim(claim: dict[str, Any]) -> list[str]:
                 ),
             ]
         )
+    else:
+        lines.extend(
+            [
+                "",
+                "> Agent executor results are not present in this summary.",
+            ]
+        )
     lines.extend(["", f"> {claim['frame']}", ""])
     return lines
+
+
+def _render_executor_coverage(coverage: dict[str, str]) -> list[str]:
+    ref = coverage.get("reference", "absent")
+    agent = coverage.get("agent", "absent")
+    return [
+        f"Executor coverage: reference **{ref}** | agent **{agent}**",
+        "",
+    ]
 
 
 def render_markdown(summary: dict[str, Any]) -> str:
@@ -282,6 +308,7 @@ def render_markdown(summary: dict[str, Any]) -> str:
         f"(normal: {summary['normalTaskCount']}, adversarial: {summary['adversarialTaskCount']})",
         "",
     ]
+    lines.extend(_render_executor_coverage(summary.get("executorCoverage", {})))
     lines.extend(_render_evaluation_claim(summary["evaluationClaim"]))
     lines.extend(
         [
@@ -391,6 +418,16 @@ def print_console_table(summary: dict[str, Any]) -> None:
     print(render_markdown(summary), end="")
 
 
+def build_summary(
+    rows: list[dict[str, Any]],
+    task_meta: dict[str, dict[str, Any]],
+    paths: list[Path],
+) -> dict[str, Any]:
+    summary = aggregate(rows, task_meta, paths)
+    summary["generatedAt"] = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    return summary
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Report agent-success benchmark results.")
     parser.add_argument("--input", type=Path, help="Specific JSONL file (default: latest in results/).")
@@ -406,7 +443,7 @@ def main() -> int:
             return 1
 
         task_meta = load_task_meta()
-        summary = aggregate(rows, task_meta, paths)
+        summary = build_summary(rows, task_meta, paths)
 
         print_console_table(summary)
 
