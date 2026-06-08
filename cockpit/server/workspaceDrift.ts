@@ -1,3 +1,5 @@
+import { resolveVerifyCommand } from './verifyCommandResolver.js';
+
 export interface AffectedFile {
   path: string;
   reason: string;
@@ -60,9 +62,12 @@ export async function continueWorkspaceAnyway(
 
 export async function rerunLastVerify(
   rpcCall: (method: string, params?: Record<string, unknown>) => Promise<unknown>,
+  workspace?: string,
 ): Promise<Record<string, unknown>> {
   const status = cachedStatus ?? (await fetchWorkspaceStatus(rpcCall));
-  const command = status.lastVerifiedCommand?.trim();
+  const command =
+    status.lastVerifiedCommand?.trim() ||
+    (workspace ? resolveVerifyCommand(workspace) : undefined);
   if (!command) {
     throw new Error('no_last_verify_command');
   }

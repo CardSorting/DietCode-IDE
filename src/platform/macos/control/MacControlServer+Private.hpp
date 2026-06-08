@@ -138,3 +138,8 @@
 - (NSDictionary*)currentWorkspaceStatusPayload;
 - (BOOL)queueWorkspaceDriftBlockIfNeeded:(NSString*)method params:(NSDictionary*)params reqId:(NSString*)reqId clientFd:(int)clientFd;
 @end
+
+@interface DietCodeControlServer (VerifyGate)
+- (void)notifyWorkspaceMutatedIfNeededForMethod:(NSString*)method params:(NSDictionary*)params result:(NSDictionary*)result;
+- (void)notifyVerifyResult:(NSDictionary*)status taskId:(NSString*)taskId;
+@end

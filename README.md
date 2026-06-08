@@ -5,7 +5,7 @@
 <h1 align="center">DietCode</h1>
 
 <p align="center">
-  <strong>A local agent-control runtime for deterministic workspace mutation.</strong><br>
+  <strong>DietCode gives agents bounded autonomy through visible checkpoints.</strong><br>
   <em>C++20 kernel · web cockpit · Agent Bridge · runtime journal · adversarial reliability evaluation</em>
 </p>
 
@@ -39,11 +39,27 @@ The legacy native AppKit editor remains in `legacy_ui/` as optional later integr
 
 ---
 
+## Checkpoint model
+
+Six visible gates between agent intent and “done”:
+
+```text
+1. Context      — Did the agent read valid state?
+2. Drift        — Did the workspace change underneath it?
+3. Approval     — Is this mutation allowed?
+4. Mutation     — Did the patch apply cleanly?
+5. Verification — Did the result pass?
+6. Completion   — Can this task be called done?
+```
+
+Full feature map and noise audit: [docs/checkpoint-model.md](docs/checkpoint-model.md).  
+Agent-facing checkpoint API: [docs/agent-ergonomics.md](docs/agent-ergonomics.md).
+
 ## Core idea
 
 Most “AI IDEs” optimize for generation throughput.
 
-DietCode optimizes for **bounded mutation reliability**.
+DietCode optimizes for **bounded mutation reliability** through checkpoints you can see and steer.
 
 The project is built around a different assumption:
 
@@ -156,7 +172,7 @@ workspace
 
 | Layer | Responsibility |
 |-------|----------------|
-| Cockpit | Chat, task timeline, streamed activity, diffs, approvals, logs |
+| Cockpit | Six checkpoints surfaced: drift, approval, mutation diffs, verification, completion |
 | Bridge API | HTTP proxy + SSE event fan-out to kernel socket |
 | Agent Bridge | Stable deterministic workflows for agents |
 | `dietcode-kernel` | JSON-RPC dispatch, mutation authority, event stream |

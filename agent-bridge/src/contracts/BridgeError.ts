@@ -56,6 +56,31 @@ const ERROR_RECOVERY: Record<
     nextRecommendedCommand: 'runtime.diagnostics',
     retrySafe: false,
   },
+  workspace_drift: {
+    recoveryHint: 'refresh_workspace_context_via_workspace.refreshAnchor',
+    nextRecommendedCommand: 'workspace.status',
+    retrySafe: true,
+  },
+  approval_required: {
+    recoveryHint: 'await_cockpit_approval_resolution',
+    nextRecommendedCommand: 'approval.get',
+    retrySafe: true,
+  },
+  approval_invalid: {
+    recoveryHint: 'refresh_approval_state',
+    nextRecommendedCommand: 'approval.list',
+    retrySafe: false,
+  },
+  approval_rejected: {
+    recoveryHint: 'revise_mutation_plan',
+    nextRecommendedCommand: 'workspace.revision',
+    retrySafe: false,
+  },
+  approval_timeout: {
+    recoveryHint: 'retry_or_cancel_governed_task',
+    nextRecommendedCommand: 'approval.list',
+    retrySafe: false,
+  },
 };
 
 const PROTECTED_RUNTIME_RECOVERY_CODES = new Set([

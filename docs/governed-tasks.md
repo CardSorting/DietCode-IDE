@@ -1,5 +1,7 @@
 # Governed task execution
 
+**Checkpoint 6 · Completion** orchestrates checkpoints 1–5. See [checkpoint-model.md](./checkpoint-model.md).
+
 Cockpit chat submits **tasks**, not raw chat messages. Each task is a bounded Hermes run where every workspace mutation flows through the kernel.
 
 ## Architecture
@@ -86,11 +88,25 @@ Canonical task events (SSE `/events`):
 | `approval.required` | Kernel + bridge tool layer |
 | `approval.resolved` | Kernel |
 | `file.diff` | Successful patch receipt |
-| `verify.completed` | Kernel verify events |
-| `task.completed` | Runner |
+| `workspace.mutated` | Kernel after `patch.apply` |
+| `verify.completed` / `verify.failed` | Kernel `verify.run` |
+| `task.verification_required` | Bridge — agent stopped with pending verify |
+| `task.verified` / `task.verification_waived` | Bridge — verify gate cleared |
+| `task.completed` | Runner (no mutations) or after verify/waive |
 | `task.failed` | Runner |
 
 Task timeline in cockpit filters to these types and optionally scopes to `activeTaskId`.
+
+## Verify gate (post-mutation)
+
+After a successful patch, the kernel emits `workspace.mutated`. The bridge sets `verification_required` on the task. When the agent process exits, status stays `verification_required` (not `completed`) until:
+
+- `verify.run` passes → `verified` + `completed`, or
+- Operator waives → `verification_waived` + `completed`
+
+Cockpit: **Run verify**, **Retry task**, **Show failing output**, **Waive verification**, **Cancel task**.
+
+See [verify-gate.md](./verify-gate.md).
 
 ## Approval pause / resume
 
@@ -113,4 +129,4 @@ Open cockpit, submit a task from Chat, watch Task Timeline and Approvals.
 
 Session state is ephemeral with bounded recovery snapshots — not a full run ledger. See [session-recovery.md](./session-recovery.md).
 
-See also: [approval-lifecycle.md](./approval-lifecycle.md), [kernel-cockpit-architecture.md](./kernel-cockpit-architecture.md).
+See also: [approval-lifecycle.md](./approval-lifecycle.md), [workspace-drift.md](./workspace-drift.md), [verify-gate.md](./verify-gate.md), [kernel-cockpit-architecture.md](./kernel-cockpit-architecture.md).

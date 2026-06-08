@@ -821,6 +821,7 @@ static const void* kDietCodeReadQueueKey = &kDietCodeReadQueueKey;
             [self logAuditMethod:method caller:caller permission:permission duration:duration result:[NSString stringWithFormat:@"error: %@", errCode] paths:affectedPaths];
             [self appendLogLine:[NSString stringWithFormat:@"[%@] %@ -> Error (%@) in %lldms", caller, method, errMsg, duration]];
         } else {
+            [self notifyWorkspaceMutatedIfNeededForMethod:method params:params result:result];
             [self sendSuccess:reqId result:result method:method phase:@"response_success" queue:execQueue durationMs:duration clientFd:clientFd];
             [self logAuditMethod:method caller:caller permission:permission duration:duration result:@"success" paths:affectedPaths];
             [self appendLogLine:[NSString stringWithFormat:@"[%@] %@ -> Success in %lldms", caller, method, duration]];
@@ -998,9 +999,6 @@ static const void* kDietCodeReadQueueKey = &kDietCodeReadQueueKey;
         [self appendLogLine:[NSString stringWithFormat:@"[Stderr] %@", stderrText]];
     }
 
-    [self notifyStructuredEvent:@"verify.complete"
-                         detail:[NSString stringWithFormat:@"exit=%@", status[@"exitCode"]]
-                        payload:status];
     return _lastVerifyStatus;
 }
 

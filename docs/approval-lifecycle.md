@@ -1,5 +1,9 @@
 # Approval lifecycle
 
+**Checkpoint 3 · Approval** — *Is this mutation allowed?*
+
+Canonical loop: [checkpoint-model.md](./checkpoint-model.md).
+
 DietCode kernel supervises destructive workspace mutations through a pending-approval registry. The cockpit is the human control plane; agents never mutate the workspace without kernel authority.
 
 ## Flow

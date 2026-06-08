@@ -642,6 +642,8 @@ _RETRYABLE_CODES = frozenset({
     "runtime_unavailable",
     "bridge_cli_missing",
     "nested_call_timeout",
+    "workspace_drift",
+    "approval_required",
 })
 
 
@@ -747,6 +749,21 @@ def _execute_bridge_call(
                 approvalId=approval.get("approvalId"),
                 action=action_label,
                 preview=approval.get("preview"),
+            )
+        elif data.get("workspaceDriftRequired"):
+            workspace_status = data.get("workspace") if isinstance(data.get("workspace"), dict) else {}
+            affected = workspace_status.get("affectedFiles") or []
+            _emit_task_event(
+                "workspace.drift.detected",
+                action=action_label,
+                affectedCount=len(affected) if isinstance(affected, list) else 0,
+            )
+            raise IdeBridgeError(
+                "Workspace drift blocked mutation — refresh context in cockpit or call workspace.refreshAnchor",
+                code="workspace_drift",
+                recovery_hint="workspace.refreshAnchor",
+                retry_safe=True,
+                raw_error=data,
             )
         elif data.get("applied") or data.get("mutationReceipt"):
             receipt = data.get("mutationReceipt") if isinstance(data.get("mutationReceipt"), dict) else {}

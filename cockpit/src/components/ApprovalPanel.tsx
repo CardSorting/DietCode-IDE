@@ -134,6 +134,12 @@ export function ApprovalPanel({ events }: Props) {
 
   return (
     <div className="approval-panel">
+      <div className="approval-panel-toolbar">
+        <span className="checkpoint-label">Checkpoint 3 · Approval</span>
+        <button type="button" className="approval-refresh" onClick={() => void refresh()}>
+          Refresh
+        </button>
+      </div>
       {error ? <p className="approval-error">{error}</p> : null}
 
       <div className="approval-section">

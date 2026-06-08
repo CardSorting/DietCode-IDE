@@ -13,6 +13,9 @@ rg 'CONTRACT:|INVARIANT:' docs/
 
 | Doc | When to read |
 |-----|--------------|
+| [Checkpoint Model](checkpoint-model.md) | **Canonical control plane** — six gates, feature map, noise audit |
+| [Agent Ergonomics](agent-ergonomics.md) | Checkpoint query API, verify resolution, agent loop |
+| [Kernel + Cockpit Architecture](kernel-cockpit-architecture.md) | Wiring diagram for kernel, bridge, cockpit |
 | [Getting Started Tutorial](getting-started-tutorial.md) | First build, run, and UI change |
 | [Build Instructions](build-instructions.md) | Compile and launch from source |
 | [FAQ & Troubleshooting](faq-and-troubleshooting.md) | Build failures, socket issues, agent errors |

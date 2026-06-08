@@ -1,8 +1,12 @@
 # DietCode Kernel + Cockpit Architecture
 
+> **DietCode gives agents bounded autonomy through visible checkpoints.**
+
 DietCode is a **local agent-control runtime for deterministic workspace mutation**.
 
 It is not an IDE, not a Cursor competitor, and not a VS Code replacement. It is the local control plane for agentic software work.
+
+**Canonical model:** [checkpoint-model.md](./checkpoint-model.md) — six checkpoints, one feature map, explicit noise bucket.
 
 ## Components
 
@@ -124,13 +128,11 @@ Bridge endpoints:
 
 Kernel RPCs: `approval.list`, `approval.get`, `approval.resolve`. Destructive mutations in supervised mode (autonomy 3, kernel default) emit `approval.required` and return `approvalRequired: true` until resolved.
 
-See [approval-lifecycle.md](./approval-lifecycle.md) for the full safety loop.
-
-## Workspace drift (state validity)
-
-Kernel RPCs: `workspace.status`, `workspace.snapshot`, `workspace.refreshAnchor`. Edit/Destructive mutations are blocked when `driftDetected` until context is refreshed (`contextRefreshId`) or the operator chooses continue-anyway.
-
-Cockpit shows affected files and actions: Refresh context, Re-run verify, Cancel task, Continue anyway. See [workspace-drift.md](./workspace-drift.md).
+| Checkpoint | Doc |
+|------------|-----|
+| 2 Drift | [workspace-drift.md](./workspace-drift.md) |
+| 3 Approval | [approval-lifecycle.md](./approval-lifecycle.md) |
+| 5–6 Verification & completion | [verify-gate.md](./verify-gate.md) |
 
 ## Governed tasks
 

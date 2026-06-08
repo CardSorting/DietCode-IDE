@@ -49,8 +49,8 @@ export function ChatPanel({ workspace, kernelConnected = true, onTaskSubmitted }
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
       <div className="panel-body" style={{ flex: 1 }}>
         <p className="empty" style={{ marginTop: 0 }}>
-          Submit a governed Hermes task. Mutations route through the kernel; destructive changes
-          queue in Approvals when mode is supervised.
+          Submit a governed task. The agent runs through six checkpoints — context, drift, approval,
+          mutation, verification, completion — before work is called done.
         </p>
         {lastTaskId ? (
           <div className="timeline-item">

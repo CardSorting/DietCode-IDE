@@ -29,7 +29,8 @@ export function StatusBanners({
   if (banners.length === 0) return null;
 
   return (
-    <div className="status-banners">
+    <div className="status-banners" aria-label="Control plane hygiene — not checkpoints">
+      <span className="checkpoint-label">Infrastructure</span>
       {banners.map((banner) => (
         <div key={banner.id} className={`status-banner severity-${banner.severity}`}>
           <div className="status-banner-text">

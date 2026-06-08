@@ -41,6 +41,123 @@ body {
   color: #8b949e;
 }
 
+.checkpoint-label {
+  display: block;
+  font-size: 0.7rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: #8b949e;
+  margin-bottom: 0.2rem;
+}
+
+.checkpoint-rail {
+  border-bottom: 1px solid #30363d;
+  background: #0d1117;
+  padding: 0.6rem 1rem 0.75rem;
+}
+
+.checkpoint-rail-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  margin-bottom: 0.45rem;
+}
+
+.checkpoint-task-meta {
+  font-size: 0.72rem;
+  color: #8b949e;
+}
+
+.checkpoint-steps {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.checkpoint-step {
+  display: flex;
+  flex-direction: column;
+  min-width: 7.5rem;
+  padding: 0.35rem 0.5rem;
+  border-radius: 6px;
+  border: 1px solid #30363d;
+  background: #161b22;
+  font-size: 0.72rem;
+}
+
+.checkpoint-step-id {
+  font-weight: 700;
+  color: #8b949e;
+}
+
+.checkpoint-step-name {
+  font-weight: 600;
+}
+
+.checkpoint-step-status {
+  text-transform: capitalize;
+  color: #8b949e;
+}
+
+.checkpoint-step-detail {
+  margin-top: 0.15rem;
+  color: #8b949e;
+  font-size: 0.68rem;
+  word-break: break-word;
+}
+
+.checkpoint-passed {
+  border-color: #23863655;
+}
+
+.checkpoint-passed .checkpoint-step-status {
+  color: #3fb950;
+}
+
+.checkpoint-failed,
+.checkpoint-blocking {
+  border-color: #da363655;
+}
+
+.checkpoint-failed .checkpoint-step-status,
+.checkpoint-blocking .checkpoint-step-status {
+  color: #f85149;
+}
+
+.checkpoint-active {
+  border-color: #d2992255;
+}
+
+.checkpoint-active .checkpoint-step-status {
+  color: #e3b341;
+}
+
+.checkpoint-waived .checkpoint-step-status {
+  color: #58a6ff;
+}
+
+.checkpoint-skipped {
+  opacity: 0.55;
+}
+
+.checkpoint-verify-hint {
+  margin: 0.45rem 0 0;
+  font-size: 0.72rem;
+  color: #8b949e;
+}
+
+.panel-subheader {
+  margin: 0;
+  padding: 0 1rem 0.5rem;
+  font-size: 0.72rem;
+  color: #8b949e;
+  border-bottom: 1px solid #30363d;
+}
+
 .status-pill {
   padding: 0.25rem 0.75rem;
   border-radius: 999px;
@@ -169,6 +286,79 @@ body {
 }
 
 .workspace-drift-actions button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.verify-gate-panel {
+  border-bottom: 1px solid #30363d;
+  background: #161b22;
+  padding: 0.75rem 1rem 1rem;
+}
+
+.verify-gate-panel.severity-error {
+  background: #1a1214;
+}
+
+.verify-gate-header strong {
+  color: #e3b341;
+}
+
+.verify-gate-panel.severity-error .verify-gate-header strong {
+  color: #f85149;
+}
+
+.verify-gate-files ul {
+  margin: 0.35rem 0 0;
+  padding-left: 1.25rem;
+  font-size: 0.85rem;
+}
+
+.verify-gate-label {
+  color: #8b949e;
+  font-size: 0.8rem;
+}
+
+.verify-gate-meta {
+  margin: 0.35rem 0;
+  font-size: 0.78rem;
+  color: #8b949e;
+}
+
+.verify-gate-output {
+  margin: 0.5rem 0;
+  padding: 0.5rem 0.75rem;
+  background: #0d1117;
+  border: 1px solid #30363d;
+  border-radius: 6px;
+  font-size: 0.72rem;
+  max-height: 200px;
+  overflow: auto;
+  white-space: pre-wrap;
+}
+
+.verify-gate-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-top: 0.5rem;
+}
+
+.verify-gate-actions button {
+  background: #21262d;
+  border: 1px solid #30363d;
+  border-radius: 6px;
+  color: #e6edf3;
+  padding: 0.35rem 0.7rem;
+  font-size: 0.75rem;
+  cursor: pointer;
+}
+
+.verify-gate-actions button.muted {
+  color: #8b949e;
+}
+
+.verify-gate-actions button:disabled {
   opacity: 0.5;
   cursor: not-allowed;
 }
@@ -340,6 +530,23 @@ body {
 .approval-item button.reject {
   background: #da3633;
   border-color: #da3633;
+}
+
+.approval-panel-toolbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 0.5rem;
+}
+
+.approval-refresh {
+  background: #21262d;
+  border: 1px solid #30363d;
+  border-radius: 6px;
+  color: #e6edf3;
+  padding: 0.25rem 0.55rem;
+  font-size: 0.72rem;
+  cursor: pointer;
 }
 
 .approval-panel {

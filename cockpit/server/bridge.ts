@@ -38,9 +38,20 @@ import {
 import {
   continueWorkspaceAnyway,
   fetchWorkspaceStatus,
+  getCachedWorkspaceStatus,
   refreshWorkspaceAnchor,
   rerunLastVerify,
 } from './workspaceDrift.js';
+import {
+  handleVerifyCompleted,
+  noteWorkspaceMutated,
+  waiveTaskVerification,
+} from './verifyGate.js';
+import {
+  buildActiveCheckpointSnapshot,
+  buildTaskCheckpoints,
+} from './checkpoints.js';
+import { resolveVerifyCommand } from './verifyCommandResolver.js';
 
 const PORT = Number(process.env.COCKPIT_BRIDGE_PORT ?? 9477);
 const SOCKET_PATH = process.env.DIETCODE_SOCKET_PATH ?? join(homedir(), '.dietcode', 'control.sock');
@@ -123,11 +134,16 @@ async function pollKernelEvents(): Promise<void> {
       setLastKernelEventSequence(sequence);
       const event = normalizeKernelEvent(raw);
 
-      if (event.type === 'verify.complete' || event.type.startsWith('verify.')) {
-        broadcastEvent({
-          ...event,
-          type: event.type === 'verify.complete' ? 'verify.completed' : event.type,
-        });
+      if (event.type === 'verify.complete') {
+        const normalized = { ...event, type: 'verify.completed' as const };
+        broadcastEvent(normalized);
+        handleVerifyCompleted(event.taskId, event.payload ?? {});
+      } else if (event.type === 'verify.completed' || event.type === 'verify.failed') {
+        broadcastEvent(event);
+        handleVerifyCompleted(event.taskId, event.payload ?? {});
+      } else if (event.type === 'workspace.mutated') {
+        broadcastEvent(event);
+        noteWorkspaceMutated(event.taskId, event.payload ?? {});
       } else if (event.type === 'approval.required') {
         broadcastEvent(event);
         const approvalId =
@@ -314,7 +330,9 @@ const server = createServer(async (req, res) => {
 
   if (req.url === '/api/workspace/re-verify' && req.method === 'POST') {
     try {
-      const verify = await rerunLastVerify(rpcCall);
+      const tasks = listTasks();
+      const wsPath = tasks.find((t) => t.workspace)?.workspace;
+      const verify = await rerunLastVerify(rpcCall, wsPath);
       const status = await fetchWorkspaceStatus(rpcCall);
       res.writeHead(200, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ ok: true, verify, status, health: buildHealthSnapshot(listTasks()) }));
@@ -345,6 +363,109 @@ const server = createServer(async (req, res) => {
   if (req.url === '/api/tasks' && req.method === 'GET') {
     res.writeHead(200, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify({ tasks: listTasks() }));
+    return;
+  }
+
+  if (req.url === '/api/checkpoints' && req.method === 'GET') {
+    try {
+      await probeKernel(rpcCall);
+      const ws = getCachedWorkspaceStatus();
+      const health = buildHealthSnapshot(listTasks());
+      const snapshot = buildActiveCheckpointSnapshot(listTasks(), ws, {
+        driftDetected: health.workspaceDrift,
+        expiredApprovalCount: health.expiredApprovalCount,
+      });
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ snapshot, health }));
+    } catch (err) {
+      res.writeHead(503, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: String(err) }));
+    }
+    return;
+  }
+
+  const taskCheckpointMatch = req.url?.match(/^\/api\/tasks\/([^/]+)\/checkpoints$/);
+  if (taskCheckpointMatch && req.method === 'GET') {
+    const task = getTask(taskCheckpointMatch[1]);
+    if (!task) {
+      res.writeHead(404, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'not_found' }));
+      return;
+    }
+    const ws = getCachedWorkspaceStatus();
+    const health = buildHealthSnapshot(listTasks());
+    const snapshot = buildTaskCheckpoints(task, ws, {
+      driftDetected: health.workspaceDrift,
+      expiredApprovalCount: health.expiredApprovalCount,
+    });
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ snapshot }));
+    return;
+  }
+
+  const taskVerifyMatch = req.url?.match(/^\/api\/tasks\/([^/]+)\/(run-verify|waive-verification)$/);
+  if (taskVerifyMatch && req.method === 'POST') {
+    const taskId = taskVerifyMatch[1];
+    const action = taskVerifyMatch[2];
+    const task = getTask(taskId);
+    if (!task) {
+      res.writeHead(404, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'not_found' }));
+      return;
+    }
+    try {
+      if (action === 'waive-verification') {
+        const body = await readBody(req);
+        const parsed = JSON.parse(body || '{}') as { reason?: string };
+        const updated = waiveTaskVerification(taskId, parsed.reason);
+        if (!updated) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'waive_not_allowed' }));
+          return;
+        }
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(
+          JSON.stringify({ ok: true, task: updated, health: buildHealthSnapshot(listTasks()) }),
+        );
+        return;
+      }
+      if (action === 'run-verify') {
+        const body = await readBody(req);
+        const parsed = JSON.parse(body || '{}') as { command?: string };
+        const status = await fetchWorkspaceStatus(rpcCall);
+        const command =
+          parsed.command?.trim() ||
+          task.lastVerifyCommand?.trim() ||
+          status.lastVerifiedCommand?.trim() ||
+          resolveVerifyCommand(task.workspace);
+        if (!command) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(
+            JSON.stringify({
+              error: 'verify_command_required',
+              hint: 'Add verify.sh, npm test script, or make test to the workspace',
+            }),
+          );
+          return;
+        }
+        const verify = (await rpcCall('verify.run', { command, taskId })) as Record<string, unknown>;
+        handleVerifyCompleted(taskId, verify);
+        const updated = getTask(taskId);
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(
+          JSON.stringify({
+            ok: true,
+            verify,
+            task: updated,
+            health: buildHealthSnapshot(listTasks()),
+          }),
+        );
+        return;
+      }
+    } catch (err) {
+      res.writeHead(503, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: String(err) }));
+    }
     return;
   }
 

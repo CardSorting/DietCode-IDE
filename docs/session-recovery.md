@@ -1,5 +1,7 @@
 # Session recovery (ephemeral state)
 
+**Not a checkpoint** — control-plane hygiene for bridge/kernel reload. See the noise bucket in [checkpoint-model.md](./checkpoint-model.md).
+
 DietCode is a **live control surface**, not an observability warehouse. Session state is in-memory first, with bounded on-disk snapshots for cockpit reload and bridge restart recovery.
 
 ## What we keep vs. what we drop
@@ -93,6 +95,10 @@ DietCode never pretends an agent is still safely operating when the control loop
 | `failed` | Agent process died or exited with error |
 | `completed` | Finished successfully |
 | `cancelled` | User cancelled from cockpit |
+| `verification_required` | Agent stopped after mutations; verify pending |
+| `verification_failed` | Verify command failed |
+
+Task `verificationState`: `none`, `verification_required`, `verified`, `verification_failed`, `verification_waived`. See [verify-gate.md](./verify-gate.md).
 
 ### Cockpit banners
 

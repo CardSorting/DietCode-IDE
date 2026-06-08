@@ -5,24 +5,18 @@ export interface AffectedFile {
 
 interface Props {
   affectedFiles: AffectedFile[];
-  lastVerifiedCommand?: string;
-  lastVerifiedAt?: string;
   activeTaskId?: string | null;
   busy?: boolean;
   onRefreshContext: () => void;
-  onRerunVerify: () => void;
   onCancelTask?: (taskId: string) => void;
   onContinueAnyway: () => void;
 }
 
 export function WorkspaceDriftPanel({
   affectedFiles,
-  lastVerifiedCommand,
-  lastVerifiedAt,
   activeTaskId,
   busy,
   onRefreshContext,
-  onRerunVerify,
   onCancelTask,
   onContinueAnyway,
 }: Props) {
@@ -31,8 +25,9 @@ export function WorkspaceDriftPanel({
   return (
     <div className="workspace-drift-panel severity-warning">
       <div className="workspace-drift-header">
+        <span className="checkpoint-label">Checkpoint 2 · Drift</span>
         <strong>Workspace changed outside DietCode</strong>
-        <p className="tagline">State validity check — refresh context before the agent mutates.</p>
+        <p className="tagline">Did the workspace change underneath the agent? Refresh context before mutation.</p>
       </div>
 
       <div className="workspace-drift-files">
@@ -46,19 +41,9 @@ export function WorkspaceDriftPanel({
         </ul>
       </div>
 
-      {lastVerifiedCommand ? (
-        <p className="workspace-drift-verify-meta">
-          Last verified: <code>{lastVerifiedCommand}</code>
-          {lastVerifiedAt ? ` at ${lastVerifiedAt}` : null}
-        </p>
-      ) : null}
-
       <div className="workspace-drift-actions">
         <button type="button" disabled={busy} onClick={() => void onRefreshContext()}>
           Refresh context
-        </button>
-        <button type="button" disabled={busy || !lastVerifiedCommand} onClick={() => void onRerunVerify()}>
-          Re-run verify
         </button>
         {activeTaskId && onCancelTask ? (
           <button type="button" disabled={busy} onClick={() => void onCancelTask(activeTaskId)}>

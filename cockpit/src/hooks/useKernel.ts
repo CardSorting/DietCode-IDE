@@ -53,6 +53,8 @@ export interface HealthSnapshot {
     awaitingApproval: string[];
     running: string[];
     queued: string[];
+    verificationRequired: string[];
+    verificationFailed: string[];
   };
 }
 
@@ -60,7 +62,15 @@ export interface SessionState {
   activeTaskId?: string;
   recentDiffs?: Array<{ path: string; preview?: string; taskId?: string; timestamp: string }>;
   health?: HealthSnapshot;
-  tasks?: Array<{ taskId: string; status: string; error?: string }>;
+  tasks?: Array<{
+    taskId: string;
+    status: string;
+    verificationState?: string;
+    error?: string;
+    lastVerifyCommand?: string;
+    lastVerifyOutput?: string;
+    mutatedPaths?: string[];
+  }>;
 }
 
 const SSE_STALE_MS = 20_000;
@@ -192,6 +202,30 @@ export function useKernel() {
     await refreshHealth();
   }, [refreshHealth]);
 
+  const runTaskVerify = useCallback(
+    async (taskId: string) => {
+      await fetch(`/api/tasks/${encodeURIComponent(taskId)}/run-verify`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: '{}',
+      });
+      await Promise.all([refreshHealth(), restoreSession()]);
+    },
+    [refreshHealth, restoreSession],
+  );
+
+  const waiveTaskVerification = useCallback(
+    async (taskId: string) => {
+      await fetch(`/api/tasks/${encodeURIComponent(taskId)}/waive-verification`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: '{}',
+      });
+      await Promise.all([refreshHealth(), restoreSession()]);
+    },
+    [refreshHealth, restoreSession],
+  );
+
   useEffect(() => {
     void refreshStatus();
     void refreshHealth();
@@ -268,5 +302,7 @@ export function useKernel() {
     refreshWorkspaceContext,
     rerunWorkspaceVerify,
     continueWorkspaceAnyway,
+    runTaskVerify,
+    waiveTaskVerification,
   };
 }

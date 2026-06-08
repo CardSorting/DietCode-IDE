@@ -2,7 +2,6 @@ import type { GovernedTask } from './taskRegistry.js';
 import { getSessionPendingApprovals } from './sessionStore.js';
 import {
   fetchWorkspaceStatus,
-  formatAffectedFileLine,
   getCachedWorkspaceStatus,
   type AffectedFile,
   type WorkspaceStatus,
@@ -33,6 +32,8 @@ export interface HealthSnapshot {
     awaitingApproval: string[];
     running: string[];
     queued: string[];
+    verificationRequired: string[];
+    verificationFailed: string[];
   };
 }
 
@@ -126,6 +127,12 @@ export function buildHealthSnapshot(tasks: GovernedTask[]): HealthSnapshot {
     .map((t) => t.taskId);
   const running = tasks.filter((t) => t.status === 'running').map((t) => t.taskId);
   const queued = tasks.filter((t) => t.status === 'queued').map((t) => t.taskId);
+  const verificationRequired = tasks
+    .filter((t) => t.status === 'verification_required')
+    .map((t) => t.taskId);
+  const verificationFailed = tasks
+    .filter((t) => t.status === 'verification_failed')
+    .map((t) => t.taskId);
 
   const banners: HealthBanner[] = [];
 
@@ -171,20 +178,7 @@ export function buildHealthSnapshot(tasks: GovernedTask[]): HealthSnapshot {
   const kernelDrift = workspaceStatus?.driftDetected === true;
   const pathDrift = workspaceDrifted();
 
-  if (kernelDrift || externalChangeDetected || pathDrift) {
-    const fileSummary =
-      affectedFiles.length > 0
-        ? affectedFiles.slice(0, 4).map(formatAffectedFileLine).join('; ')
-        : pathDrift
-          ? `Session anchor ${sessionAnchorWorkspace} ≠ kernel root ${workspacePath}`
-          : 'Kernel detected filesystem changes outside DietCode RPC.';
-    banners.push({
-      id: 'workspace_drift',
-      severity: 'warning',
-      message: 'Workspace changed outside DietCode',
-      detail: fileSummary,
-    });
-  }
+  // Checkpoints 2 (drift) and 5 (verification) use dedicated cockpit panels — not duplicate banners.
 
   return {
     kernelConnected,
@@ -199,6 +193,13 @@ export function buildHealthSnapshot(tasks: GovernedTask[]): HealthSnapshot {
     expiredApprovalCount: expiredApprovalIds.length,
     expiredApprovalIds,
     banners,
-    tasks: { disconnected, awaitingApproval, running, queued },
+    tasks: {
+      disconnected,
+      awaitingApproval,
+      running,
+      queued,
+      verificationRequired,
+      verificationFailed,
+    },
   };
 }

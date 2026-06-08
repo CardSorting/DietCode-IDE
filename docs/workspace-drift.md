@@ -1,5 +1,9 @@
 # Workspace drift guardrails
 
+**Checkpoint 2 · Drift** — *Did the workspace change underneath the agent?*
+
+Canonical loop: [checkpoint-model.md](./checkpoint-model.md).
+
 DietCode tracks workspace **state validity** so the agent cannot mutate files after the world changed underneath it.
 
 ## Kernel RPCs
@@ -56,7 +60,7 @@ Affected files:
 - src/foo.ts — changed since agent read it
 - package.json — changed after verification
 
-Actions: Refresh context | Re-run verify | Cancel task | Continue anyway
+Actions: Refresh context | Cancel task | Continue anyway
 ```
 
 Bridge endpoints:
@@ -65,7 +69,7 @@ Bridge endpoints:
 |----------|--------|
 | `GET /api/workspace/status` | Proxy `workspace.status` |
 | `POST /api/workspace/refresh-anchor` | `workspace.refreshAnchor` |
-| `POST /api/workspace/re-verify` | Re-run `verify.run` with last command |
+| `POST /api/workspace/re-verify` | Re-run `verify.run` with last command (checkpoint 5 — prefer task verify panel) |
 | `POST /api/workspace/continue-anyway` | `workspace.continueAnyway` |
 
 Health snapshot (`GET /api/health`) includes `workspaceStatus` and `affectedFiles`.

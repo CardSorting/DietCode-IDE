@@ -150,6 +150,23 @@ export function recordSessionEvent(event: StreamEvent): void {
     setSessionKernelSequence(event.sequence);
   }
 
+  if (event.type === 'workspace.mutated') {
+    const paths = Array.isArray(event.payload?.changedPaths)
+      ? (event.payload?.changedPaths as string[])
+      : [];
+    for (const path of paths.slice(0, 5)) {
+      recentDiffs.unshift({
+        path,
+        preview: typeof event.payload?.method === 'string' ? `via ${event.payload.method}` : undefined,
+        taskId: event.taskId,
+        timestamp: event.timestamp,
+      });
+    }
+    if (recentDiffs.length > MAX_DIFFS) {
+      recentDiffs = recentDiffs.slice(0, MAX_DIFFS);
+    }
+  }
+
   if (event.type === 'file.diff') {
     const path = String(event.payload?.path ?? event.detail ?? 'unknown');
     const preview =
@@ -315,6 +332,8 @@ export async function clearSessionFiles(): Promise<void> {
 
 export function buildSessionSnapshot(tasks: GovernedTask[]): SessionSnapshot {
   const active =
+    tasks.find((t) => t.status === 'verification_required') ??
+    tasks.find((t) => t.status === 'verification_failed') ??
     tasks.find((t) => t.status === 'running') ??
     tasks.find((t) => t.status === 'awaiting_approval') ??
     tasks.find((t) => t.status === 'disconnected') ??

@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url';
 import { emitBridgeEvent, normalizeTaskRunnerRecord, broadcastEvent } from './events.js';
 import { createTask, getTask, updateTask } from './taskRegistry.js';
 import type { GovernedTask } from './taskRegistry.js';
+import { finalizeTaskAfterAgentStop } from './verifyGate.js';
 
 const BRIDGE_DIR = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = resolve(BRIDGE_DIR, '../..');
@@ -65,12 +66,7 @@ function attachRunner(task: GovernedTask, child: ChildProcess): void {
         if (record.type === 'task.completed') {
           runningTasks.delete(task.taskId);
           taskProcesses.delete(task.taskId);
-          updateTask(task.taskId, {
-            status: 'completed',
-            finishedAt: new Date().toISOString(),
-            exitCode: Number(record.exitCode ?? 0),
-            error: undefined,
-          });
+          finalizeTaskAfterAgentStop(task.taskId, Number(record.exitCode ?? 0));
         }
         if (record.type === 'task.failed') {
           runningTasks.delete(task.taskId);
@@ -119,12 +115,10 @@ function attachRunner(task: GovernedTask, child: ChildProcess): void {
       }
 
       if ((code ?? 1) === 0) {
-        updateTask(task.taskId, {
-          status: 'completed',
-          finishedAt: new Date().toISOString(),
-          exitCode: 0,
-        });
-        emitBridgeEvent('task.completed', 'Task completed', { taskId: task.taskId });
+        const finalized = finalizeTaskAfterAgentStop(task.taskId, 0);
+        if (finalized?.status === 'completed') {
+          emitBridgeEvent('task.completed', 'Task completed', { taskId: task.taskId });
+        }
       } else {
         const message =
           stderr.trim() ||
@@ -200,7 +194,13 @@ export function clearTaskAwaitingApproval(taskId: string): void {
 export function cancelTask(taskId: string): GovernedTask | undefined {
   const task = getTask(taskId);
   if (!task) return undefined;
-  if (task.status !== 'running' && task.status !== 'queued' && task.status !== 'awaiting_approval') {
+  if (
+    task.status !== 'running' &&
+    task.status !== 'queued' &&
+    task.status !== 'awaiting_approval' &&
+    task.status !== 'verification_required' &&
+    task.status !== 'verification_failed'
+  ) {
     return undefined;
   }
 
@@ -221,7 +221,16 @@ export function cancelTask(taskId: string): GovernedTask | undefined {
 export function retryTask(taskId: string): GovernedTask | undefined {
   const source = getTask(taskId);
   if (!source) return undefined;
-  if (!['disconnected', 'failed', 'cancelled', 'completed'].includes(source.status)) {
+  if (
+    ![
+      'disconnected',
+      'failed',
+      'cancelled',
+      'completed',
+      'verification_required',
+      'verification_failed',
+    ].includes(source.status)
+  ) {
     return undefined;
   }
 

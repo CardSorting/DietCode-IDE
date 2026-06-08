@@ -15,6 +15,12 @@ const TASK_EVENT_TYPES = new Set([
   'verify.started',
   'verify.completed',
   'verify.complete',
+  'verify.failed',
+  'workspace.mutated',
+  'task.verification_required',
+  'task.verification_failed',
+  'task.verified',
+  'task.verification_waived',
 ]);
 
 interface Props {
@@ -39,6 +45,13 @@ function formatDetail(event: KernelEvent): string {
   }
   if (event.type === 'file.diff') {
     return String(payload.path ?? event.detail);
+  }
+  if (event.type === 'workspace.mutated') {
+    const paths = Array.isArray(payload.changedPaths) ? (payload.changedPaths as string[]) : [];
+    return paths.length > 0 ? paths.join(', ') : event.detail;
+  }
+  if (event.type === 'verify.failed' || event.type === 'task.verification_failed') {
+    return String(payload.command ?? event.detail);
   }
   return event.detail || JSON.stringify(payload).slice(0, 160);
 }
