@@ -138,6 +138,7 @@ def test_live_search_semantic_quarantined(sock: socket.socket, token: str) -> No
     assert error.get("code") == 4008
     assert_rpc_error_diagnostics(error)
     assert error.get("recovery_hint") == "use_search_literal_or_search_tokens"
+    assert error.get("nextRecommendedCommand") == "search.literal"
     assert error["string_code"] in SEMANTIC_QUARANTINE_ERROR_CODES
 
 

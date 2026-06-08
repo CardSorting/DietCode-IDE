@@ -75,6 +75,28 @@ make verify-agent-runtime
 
 ---
 
+## Partial success signals (pass 6)
+
+Read and mutation success payloads may include:
+
+| Key | Meaning |
+|-----|---------|
+| `complete` | `false` when truncated, paginated, or scan-limited |
+| `partial` | `true` when warnings/skips/fallback reads occurred |
+| `warnings` | Stable tokens (`results_truncated`, `requires_confirmation`, etc.) |
+| `fallbackUsed` | Disk read fallback was used |
+| `recoveryHint` | Next safe action token when incomplete |
+| `nextRecommendedCommand` | RPC method to call next |
+
+Errors include `nextRecommendedCommand` alongside `recovery_hint`.
+
+```bash
+make test-agent-workflow-smoke
+make test-cli-agent-failures
+```
+
+---
+
 ## Retrieval determinism (pass 5)
 
 | Invariant | Value |

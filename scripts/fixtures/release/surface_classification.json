@@ -88,7 +88,11 @@
       "test-transaction-kernel",
       "test-harness-realism",
       "test-deterministic-retrieval",
+      "test-agent-workflow-smoke",
+      "test-cli-agent-failures",
+      "test-docs-code-drift",
       "verify-agent-runtime",
+      "verify-agent-runtime-full",
       "release-check-agent-runtime",
       "agent-integration"
     ],
@@ -111,6 +115,7 @@
       "scripts/fixtures/retrieval/semantic_disabled_golden.json",
       "scripts/fixtures/retrieval/tool_registry_golden.json",
       "scripts/fixtures/retrieval/truncation_golden.json",
+      "scripts/fixtures/recovery/error_recovery_hints.json",
       "scripts/fixtures/release/surface_classification.json"
     ],
     "experimental": [],

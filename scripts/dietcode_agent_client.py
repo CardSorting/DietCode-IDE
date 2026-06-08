@@ -637,7 +637,10 @@ def load_params(args: argparse.Namespace) -> dict[str, Any]:
             raw = f.read()
     else:
         raw = args.params_json or "{}"
-    params = json.loads(raw)
+    try:
+        params = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"params JSON is invalid: {exc.msg} at line {exc.lineno} column {exc.colno}") from exc
     if not isinstance(params, dict):
         raise ValueError("params must decode to a JSON object")
     return params
@@ -1413,8 +1416,34 @@ def run_self_test() -> dict[str, Any]:
     return {"ok": ok, "checks": checks}
 
 
+CLI_EXAMPLES = """
+Examples:
+  %(prog)s --wait-ready --compact
+  %(prog)s --grep "CONTRACT:" --include scripts/agent_contracts.py --max-results 5 --compact
+  %(prog)s --search-literal "def main" --include "scripts/*.py" --compact
+  %(prog)s --patch-file fix.diff --path src/foo.py --patch-summary --compact
+  %(prog)s --expect-before-hash <hash> --patch-file fix.diff --path src/foo.py --confirm --compact
+  %(prog)s tool.capabilities --compact
+  %(prog)s --raw-response --error-json search.semantic '{"query":"foo"}'
+""".strip()
+
+
+def _emit_partial_success_hint(result: dict[str, Any], *, quiet: bool) -> None:
+    if quiet:
+        return
+    from agent_tooling import partial_success_hint
+
+    hint = partial_success_hint(result)
+    if hint:
+        print(f"hint: {hint}", file=sys.stderr)
+
+
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Ensure and call the DietCode headless control socket.")
+    parser = argparse.ArgumentParser(
+        description="DietCode agent control client — deterministic RPC/CLI for local automation.",
+        epilog=CLI_EXAMPLES,
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
     parser.add_argument("--config", help="JSON config file. Can also be set with DIETCODE_AGENT_CONFIG.")
     parser.add_argument("--app", help="Path to DietCode binary. Defaults to build/DietCode.app/Contents/MacOS/DietCode.")
     parser.add_argument("--socket", help="Unix socket path. Defaults to config, DIETCODE_SOCKET_PATH, or ~/.dietcode/control.sock.")
@@ -1456,7 +1485,8 @@ def main() -> int:
         default="json",
         help="With --grep: json prints RPC result; rg prints path:line:column:preview lines.",
     )
-    parser.add_argument("--search-text", help="Call search.text with a literal query.")
+    parser.add_argument("--search-text", help="Call search.text with a literal substring query.")
+    parser.add_argument("--search-literal", help="Call search.literal (agent-safe alias of search.text with explicit metadata).")
     parser.add_argument(
         "--search-semantic",
         help="DEPRECATED: calls search.semantic (quarantined; use --search-text or search.literal).",
@@ -1565,8 +1595,9 @@ def main() -> int:
 
         if args.batch_stdin and args.params_stdin:
             raise ValueError("provide only one of --batch-stdin or --params-stdin")
-        if args.grep and args.search_text:
-            raise ValueError("provide only one of --grep or --search-text")
+        search_shortcuts = [args.grep, args.search_text, args.search_literal, args.search_semantic]
+        if sum(1 for item in search_shortcuts if item) > 1:
+            raise ValueError("provide only one of --grep, --search-text, --search-literal, or --search-semantic")
         if args.listen_max_events is not None and args.listen_max_events <= 0:
             raise ValueError("--listen-max-events must be greater than zero")
         if args.listen_idle_timeout is not None and args.listen_idle_timeout <= 0:
@@ -1611,15 +1642,25 @@ def main() -> int:
                 shortcut_params["includeLines"] = True
             if args.max_lines_per_hunk is not None:
                 shortcut_params["maxLinesPerHunk"] = args.max_lines_per_hunk
-        elif args.grep or args.search_text or args.search_semantic:
+        elif args.grep or args.search_text or args.search_literal or args.search_semantic:
             if args.search_semantic:
                 print(
                     "warning: --search-semantic is deprecated; search.semantic is quarantined. "
-                    "Use search.literal, search.tokens, or workspace.grep instead.",
+                    "Use --search-literal, search.tokens, or --grep instead.",
                     file=sys.stderr,
                 )
-            shortcut_method = "workspace.grep" if args.grep else ("search.text" if args.search_text else "search.semantic")
-            shortcut_params = {"query": args.grep or args.search_text or args.search_semantic}
+            if args.search_literal:
+                shortcut_method = "search.literal"
+                shortcut_params = {"query": args.search_literal}
+            elif args.grep:
+                shortcut_method = "workspace.grep"
+                shortcut_params = {"query": args.grep}
+            elif args.search_text:
+                shortcut_method = "search.text"
+                shortcut_params = {"query": args.search_text}
+            else:
+                shortcut_method = "search.semantic"
+                shortcut_params = {"query": args.search_semantic}
             if args.max_results is not None:
                 shortcut_params["maxResults"] = args.max_results
             if args.result_offset is not None:
@@ -1714,6 +1755,8 @@ def main() -> int:
                 compact=args.compact,
             )
             shortcut_result = response.get("result", response) if isinstance(response, dict) and "result" in response else response
+            if shortcut_ok and isinstance(shortcut_result, dict):
+                _emit_partial_success_hint(shortcut_result, quiet=quiet)
             if shortcut_method == "workspace.grep" and shortcut_ok and isinstance(shortcut_result, dict):
                 from agent_tooling import format_grep_matches_rg, grep_empty_result_hint
 
@@ -1783,6 +1826,8 @@ def main() -> int:
             compact=args.compact,
         )
         method_result = response.get("result", response) if isinstance(response, dict) and "result" in response else response
+        if method_ok and isinstance(method_result, dict):
+            _emit_partial_success_hint(method_result, quiet=quiet)
         if (
             effective_method in ("patch.validate", "patch.preview")
             and args.patch_summary

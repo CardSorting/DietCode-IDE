@@ -83,4 +83,8 @@ NSDictionary* DiagnosticsSummaryFromProblems(NSArray<NSDictionary*>* problems);
 NSArray<NSDictionary*>* ClusterDiagnostics(NSArray<NSDictionary*>* problems);
 NSArray<NSString*>* ContextLines(const std::vector<std::string>& lines, NSInteger start, NSInteger end);
 
+NSDictionary* MacControlEnrichReadSearchResult(NSDictionary* result, NSString* methodName);
+NSDictionary* MacControlEnrichPatchValidateResult(NSDictionary* result);
+NSDictionary* MacControlEnrichPatchApplyResult(NSDictionary* result);
+
 using namespace dietcode::platform::macos;

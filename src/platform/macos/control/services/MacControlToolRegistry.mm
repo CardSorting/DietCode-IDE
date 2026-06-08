@@ -7,8 +7,11 @@ static NSDictionary* ToolEntry(
     BOOL agentSafe,
     BOOL mutates,
     BOOL idempotency,
+    BOOL dryRun,
     NSString* replacement,
-    BOOL deprecated) {
+    BOOL deprecated,
+    NSString* failureRecoveryHint,
+    NSString* successNextCommand) {
     NSMutableDictionary* entry = [@{
         @"method": method,
         @"stability": stability,
@@ -16,10 +19,12 @@ static NSDictionary* ToolEntry(
         @"agentSafe": @(agentSafe),
         @"mutatesWorkspace": @(mutates),
         @"supportsIdempotencyKey": @(idempotency),
-        @"supportsDryRun": @(NO),
+        @"supportsDryRun": @(dryRun),
         @"requiresConfirmation": @(mutates),
         @"deprecated": @(deprecated),
         @"contractVersion": @"1.0.0",
+        @"failureRecoveryHint": failureRecoveryHint ?: @"rg string_code docs/error-codes.md",
+        @"nextRecommendedCommand": successNextCommand ?: @"",
     } mutableCopy];
     if (replacement.length > 0) entry[@"replacementMethod"] = replacement;
     return entry;
@@ -30,26 +35,26 @@ static NSArray<NSDictionary*>* AgentToolEntries(void) {
     static dispatch_once_t onceToken;
     dispatch_once(&onceToken, ^{
         entries = @[
-            ToolEntry(@"workspace.grep", @"stable", YES, YES, NO, NO, nil, NO),
-            ToolEntry(@"search.literal", @"stable", YES, YES, NO, NO, nil, NO),
-            ToolEntry(@"search.text", @"stable", YES, YES, NO, NO, nil, NO),
-            ToolEntry(@"search.tokens", @"stable", YES, YES, NO, NO, nil, NO),
-            ToolEntry(@"search.files", @"stable", YES, YES, NO, NO, nil, NO),
-            ToolEntry(@"search.paths", @"stable", YES, YES, NO, NO, nil, NO),
-            ToolEntry(@"search.todo", @"stable", YES, YES, NO, NO, nil, NO),
-            ToolEntry(@"search.references", @"stable", YES, YES, NO, NO, nil, NO),
-            ToolEntry(@"search.semantic", @"deprecated", NO, NO, NO, NO, @"search.literal", YES),
-            ToolEntry(@"analysis.searchRanked", @"deprecated", NO, NO, NO, NO, @"search.literal", YES),
-            ToolEntry(@"symbols.references", @"stable", YES, YES, NO, NO, nil, NO),
-            ToolEntry(@"patch.validate", @"stable", YES, YES, NO, NO, nil, NO),
-            ToolEntry(@"patch.apply", @"stable", YES, YES, YES, YES, nil, NO),
-            ToolEntry(@"patch.applyBatch", @"stable", YES, YES, YES, YES, nil, NO),
-            ToolEntry(@"file.stat", @"stable", YES, YES, NO, NO, nil, NO),
-            ToolEntry(@"workspace.revision", @"stable", YES, YES, NO, NO, nil, NO),
-            ToolEntry(@"workspace.snapshot", @"stable", YES, YES, NO, NO, nil, NO),
-            ToolEntry(@"operation.status", @"stable", YES, YES, NO, NO, nil, NO),
-            ToolEntry(@"tool.registry", @"stable", YES, YES, NO, NO, nil, NO),
-            ToolEntry(@"tool.capabilities", @"stable", YES, YES, NO, NO, nil, NO),
+            ToolEntry(@"workspace.grep", @"stable", YES, YES, NO, NO, NO, nil, NO, @"narrow_include_globs_or_paginate", @"workspace.grep"),
+            ToolEntry(@"search.literal", @"stable", YES, YES, NO, NO, NO, nil, NO, @"narrow_include_globs_or_paginate", @"search.literal"),
+            ToolEntry(@"search.text", @"stable", YES, YES, NO, NO, NO, nil, NO, @"narrow_include_globs_or_paginate", @"search.text"),
+            ToolEntry(@"search.tokens", @"stable", YES, YES, NO, NO, NO, nil, NO, @"narrow_include_globs_or_paginate", @"search.tokens"),
+            ToolEntry(@"search.files", @"stable", YES, YES, NO, NO, NO, nil, NO, @"narrow_path_query", @"search.files"),
+            ToolEntry(@"search.paths", @"stable", YES, YES, NO, NO, NO, nil, NO, @"narrow_path_query", @"search.paths"),
+            ToolEntry(@"search.todo", @"stable", YES, YES, NO, NO, NO, nil, NO, @"narrow_include_globs", @"search.todo"),
+            ToolEntry(@"search.references", @"stable", YES, YES, NO, NO, NO, nil, NO, @"verify_symbol_name", @"search.references"),
+            ToolEntry(@"search.semantic", @"deprecated", NO, NO, NO, NO, NO, @"search.literal", YES, @"use_search_literal_or_search_tokens", @"search.literal"),
+            ToolEntry(@"analysis.searchRanked", @"deprecated", NO, NO, NO, NO, NO, @"search.literal", YES, @"use_workspace_grep_or_search_literal", @"workspace.grep"),
+            ToolEntry(@"symbols.references", @"stable", YES, YES, NO, NO, NO, nil, NO, @"verify_symbol_name", @"symbols.references"),
+            ToolEntry(@"patch.validate", @"stable", YES, YES, NO, NO, NO, nil, NO, @"fix_patch_or_target_path", @"patch.apply"),
+            ToolEntry(@"patch.apply", @"stable", YES, YES, YES, YES, YES, nil, NO, @"revalidate_patch_with_patch.validate", @"workspace.revision"),
+            ToolEntry(@"patch.applyBatch", @"stable", YES, YES, YES, YES, YES, nil, NO, @"revalidate_batch_patches", @"workspace.revision"),
+            ToolEntry(@"file.stat", @"stable", YES, YES, NO, NO, NO, nil, NO, @"verify_workspace_relative_path", @"file.read"),
+            ToolEntry(@"workspace.revision", @"stable", YES, YES, NO, NO, NO, nil, NO, @"workspace.openFolder", @"workspace.snapshot"),
+            ToolEntry(@"workspace.snapshot", @"stable", YES, YES, NO, NO, NO, nil, NO, @"narrow_snapshot_paths", @"workspace.revision"),
+            ToolEntry(@"operation.status", @"stable", YES, YES, NO, NO, NO, nil, NO, @"retry_with_same_idempotencyKey", @"workspace.revision"),
+            ToolEntry(@"tool.registry", @"stable", YES, YES, NO, NO, NO, nil, NO, @"rpc.describe_or_rpc.methods", @"tool.capabilities"),
+            ToolEntry(@"tool.capabilities", @"stable", YES, YES, NO, NO, NO, nil, NO, @"rpc.describe_or_rpc.methods", @"tool.registry"),
         ];
     });
     return entries;
@@ -70,6 +75,8 @@ NSDictionary* MacControlToolEntryForMethod(NSString* method) {
         @"requiresConfirmation": @NO,
         @"deprecated": @NO,
         @"contractVersion": @"1.0.0",
+        @"failureRecoveryHint": @"rpc.describe_or_rpc.methods",
+        @"nextRecommendedCommand": @"tool.registry",
     };
 }
 
@@ -87,6 +94,7 @@ NSDictionary* MacControlToolCapabilitiesSummary(void) {
     NSMutableArray* agentSafe = [NSMutableArray array];
     NSMutableArray* deprecated = [NSMutableArray array];
     NSMutableArray* deterministicSearch = [NSMutableArray array];
+    NSMutableArray* mutating = [NSMutableArray array];
     for (NSDictionary* entry in AgentToolEntries()) {
         NSString* method = entry[@"method"];
         if ([entry[@"agentSafe"] boolValue]) [agentSafe addObject:method];
@@ -94,16 +102,19 @@ NSDictionary* MacControlToolCapabilitiesSummary(void) {
         if ([entry[@"deterministic"] boolValue] && [method hasPrefix:@"search."]) {
             [deterministicSearch addObject:method];
         }
+        if ([entry[@"mutatesWorkspace"] boolValue]) [mutating addObject:method];
     }
     [agentSafe sortUsingSelector:@selector(compare:)];
     [deprecated sortUsingSelector:@selector(compare:)];
     [deterministicSearch sortUsingSelector:@selector(compare:)];
+    [mutating sortUsingSelector:@selector(compare:)];
     return @{
         @"mode": @"tool_capabilities",
         @"contractVersion": @"1.0.0",
         @"agentSafeMethods": agentSafe,
         @"deprecatedMethods": deprecated,
         @"deterministicSearchMethods": deterministicSearch,
+        @"mutatingMethods": mutating,
         @"semanticSearchDisabled": @YES,
         @"rankingPolicy": @"none",
         @"scoringDisabled": @YES,

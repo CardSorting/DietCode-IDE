@@ -229,7 +229,29 @@ TOOL_REGISTRY_ENTRY_KEYS = frozenset({
     "requiresConfirmation",
     "deprecated",
     "contractVersion",
+    "failureRecoveryHint",
+    "nextRecommendedCommand",
 })
+
+# CONTRACT: Optional partial-success keys on read/mutation success payloads.
+PARTIAL_SUCCESS_OPTIONAL_KEYS = frozenset({
+    "complete",
+    "partial",
+    "warnings",
+    "fallbackUsed",
+    "recoveryHint",
+    "nextRecommendedCommand",
+})
+
+# CONTRACT: Frozen error recovery hints (grep: rg 'RECOVERY:' scripts/fixtures/recovery/).
+ERROR_RECOVERY_HINTS = {
+    "stale_content": {"recovery_hint": "revalidate_patch_with_patch.validate", "nextRecommendedCommand": "patch.validate"},
+    "semantic_disabled": {"recovery_hint": "use_search_literal_or_search_tokens", "nextRecommendedCommand": "search.literal"},
+    "ranked_search_disabled": {"recovery_hint": "use_workspace_grep_or_search_literal", "nextRecommendedCommand": "workspace.grep"},
+    "symlink_target": {"recovery_hint": "use_non_symlink_target_path", "nextRecommendedCommand": "file.stat"},
+    "patch_failed": {"recovery_hint": "run_patch_preview_or_patch_validate", "nextRecommendedCommand": "patch.validate"},
+    "nested_call_timeout": {"recovery_hint": "reduce_concurrency_or_retry_later", "nextRecommendedCommand": "operation.status"},
+}
 
 # CONTRACT: tool.capabilities response keys.
 TOOL_CAPABILITIES_RESPONSE_KEYS = frozenset({
@@ -238,6 +260,7 @@ TOOL_CAPABILITIES_RESPONSE_KEYS = frozenset({
     "agentSafeMethods",
     "deprecatedMethods",
     "deterministicSearchMethods",
+    "mutatingMethods",
     "semanticSearchDisabled",
     "rankingPolicy",
     "scoringDisabled",
@@ -386,6 +409,10 @@ REQUIRED_MAKE_TARGETS = frozenset({
     "test-transaction-kernel",
     "test-harness-realism",
     "test-deterministic-retrieval",
+    "test-agent-workflow-smoke",
+    "test-cli-agent-failures",
+    "test-docs-code-drift",
+    "verify-agent-runtime-full",
     "agent-integration",
     "verify-agent-runtime",
     "release-check-agent-runtime",
@@ -406,6 +433,9 @@ INTEGRATION_SUITES = {
     "transaction_kernel": "scripts/test_transaction_kernel.py",
     "harness_realism": "scripts/test_harness_realism.py",
     "deterministic_retrieval": "scripts/test_deterministic_retrieval.py",
+    "agent_workflow_smoke": "scripts/test_agent_workflow_smoke.py",
+    "cli_agent_failures": "scripts/test_cli_agent_failures.py",
+    "docs_code_drift": "scripts/test_docs_code_drift.py",
 }
 
 
@@ -516,6 +546,24 @@ def validate_grep_match(match: dict[str, Any]) -> list[str]:
     return errors
 
 
+def validate_partial_success_signals(result: dict[str, Any], *, expect_complete: bool | None = None) -> list[str]:
+    errors: list[str] = []
+    if "complete" in result and not isinstance(result.get("complete"), bool):
+        errors.append("complete must be boolean when present")
+    if "partial" in result and not isinstance(result.get("partial"), bool):
+        errors.append("partial must be boolean when present")
+    if expect_complete is True and result.get("complete") is not True:
+        errors.append("complete must be true for fully succeeded read")
+    if result.get("partial") is True:
+        warnings = result.get("warnings")
+        if not isinstance(warnings, list) or not warnings:
+            errors.append("partial=true requires non-empty warnings list")
+    if result.get("partial") is True and result.get("complete") is not True:
+        if not result.get("recoveryHint") and not result.get("nextRecommendedCommand"):
+            errors.append("incomplete partial result requires recoveryHint or nextRecommendedCommand")
+    return errors
+
+
 def validate_grep_response(result: dict[str, Any]) -> list[str]:
     errors: list[str] = []
     missing = GREP_RESPONSE_KEYS - set(result.keys())
@@ -538,6 +586,7 @@ def validate_grep_response(result: dict[str, Any]) -> list[str]:
         errors.append("sortOrder must be path_line_column when present")
     if isinstance(matches, list) and matches and result.get("sortOrder") == "path_line_column":
         errors.extend(validate_grep_sort_order(matches))
+    errors.extend(validate_partial_success_signals(result))
     return errors
 
 
@@ -728,7 +777,7 @@ def validate_tool_capabilities_response(result: dict[str, Any]) -> list[str]:
         errors.append("rankingPolicy must be none")
     if result.get("scoringDisabled") is not True:
         errors.append("scoringDisabled must be true")
-    for key in ("agentSafeMethods", "deprecatedMethods", "deterministicSearchMethods"):
+    for key in ("agentSafeMethods", "deprecatedMethods", "deterministicSearchMethods", "mutatingMethods"):
         value = result.get(key)
         if not isinstance(value, list):
             errors.append(f"{key} must be list")

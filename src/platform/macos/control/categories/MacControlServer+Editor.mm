@@ -480,14 +480,14 @@
         NSDictionary* validation = [_patchService validatePatchAtPath:targetPath patch:patchStr currentText:params[@"currentText"] options:params];
         NSDictionary* preview = PatchPreviewSummary(patchStr);
         if ([method isEqualToString:@"patch.validate"]) {
-            *outResult = @{
+            *outResult = MacControlEnrichPatchValidateResult(@{
                 @"path": targetPath,
                 @"applies": validation[@"patchAppliesCleanly"] ?: @NO,
                 @"changedLines": validation[@"changedLineCount"] ?: @0,
                 @"hunks": @([validation[@"affectedHunks"] count]),
                 @"requiresConfirmation": validation[@"requiresConfirmation"] ?: @NO,
                 @"validation": validation
-            };
+            });
         } else {
             NSMutableDictionary* result = [preview mutableCopy];
             result[@"path"] = targetPath;
@@ -510,7 +510,7 @@
             *outErrMsg = errStr ?: @"Patch application failed.";
             return;
         }
-        *outResult = result;
+        *outResult = MacControlEnrichPatchApplyResult(result);
         return;
     }
 

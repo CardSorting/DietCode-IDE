@@ -141,6 +141,12 @@ def check_source_invariants() -> None:
     assert "semantic_disabled" in _read(REPO_ROOT / "src/platform/macos/control/services/MacControlSearchService.mm"), "semantic quarantine required"
     assert (REPO_ROOT / "src/platform/macos/control/services/MacControlToolRegistry.mm").is_file(), "tool registry required"
     assert (REPO_ROOT / "scripts/test_deterministic_retrieval.py").is_file(), "test_deterministic_retrieval.py required"
+    assert (REPO_ROOT / "scripts/test_agent_workflow_smoke.py").is_file(), "test_agent_workflow_smoke.py required"
+    assert (REPO_ROOT / "scripts/test_cli_agent_failures.py").is_file(), "test_cli_agent_failures.py required"
+    assert (REPO_ROOT / "scripts/test_docs_code_drift.py").is_file(), "test_docs_code_drift.py required"
+    assert (REPO_ROOT / "scripts/verify_agent_runtime_full.py").is_file(), "verify_agent_runtime_full.py required"
+    assert (REPO_ROOT / "scripts/fixtures/recovery/error_recovery_hints.json").is_file(), "recovery hints fixture required"
+    assert "MacControlEnrichReadSearchResult" in _read(REPO_ROOT / "src/platform/macos/control/utils/MacControlSupport.mm"), "partial success enrichment required"
     retrieval_fixtures = REPO_ROOT / "scripts" / "fixtures" / "retrieval"
     for name in (
         "search_literal_golden.json",

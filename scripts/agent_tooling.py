@@ -360,6 +360,31 @@ def format_diff_hunk_summary(payload: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def partial_success_hint(result: dict[str, Any]) -> str | None:
+    """Deterministic stderr hint when ok:true but result is partial or truncated."""
+    if not isinstance(result, dict):
+        return None
+    if result.get("partial") is not True and result.get("truncated") is not True:
+        return None
+    parts: list[str] = []
+    if result.get("partial") is True:
+        parts.append("partial=true")
+    if result.get("truncated") is True:
+        parts.append("truncated=true")
+    warnings = result.get("warnings")
+    if isinstance(warnings, list) and warnings:
+        parts.append(f"warnings={warnings}")
+    if result.get("fallbackUsed") is True:
+        parts.append("fallbackUsed=true")
+    if result.get("nextRecommendedCommand"):
+        parts.append(f"nextRecommendedCommand={result['nextRecommendedCommand']}")
+    if result.get("recoveryHint"):
+        parts.append(f"recoveryHint={result['recoveryHint']}")
+    if result.get("nextResultOffset") is not None:
+        parts.append(f"nextResultOffset={result['nextResultOffset']}")
+    return "; ".join(parts) if parts else None
+
+
 def grep_empty_result_hint(result: dict[str, Any]) -> str | None:
     """Deterministic guidance when workspace.grep returns zero matches."""
     matches = result.get("matches")

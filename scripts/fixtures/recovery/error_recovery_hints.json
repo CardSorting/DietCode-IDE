@@ -1,0 +1,27 @@
+{
+  "description": "RECOVERY: Frozen error recovery hints for docs-to-code drift checks",
+  "stale_content": {
+    "recovery_hint": "revalidate_patch_with_patch.validate",
+    "nextRecommendedCommand": "patch.validate"
+  },
+  "semantic_disabled": {
+    "recovery_hint": "use_search_literal_or_search_tokens",
+    "nextRecommendedCommand": "search.literal"
+  },
+  "ranked_search_disabled": {
+    "recovery_hint": "use_workspace_grep_or_search_literal",
+    "nextRecommendedCommand": "workspace.grep"
+  },
+  "symlink_target": {
+    "recovery_hint": "use_non_symlink_target_path",
+    "nextRecommendedCommand": "file.stat"
+  },
+  "patch_failed": {
+    "recovery_hint": "run_patch_preview_or_patch_validate",
+    "nextRecommendedCommand": "patch.validate"
+  },
+  "nested_call_timeout": {
+    "recovery_hint": "reduce_concurrency_or_retry_later",
+    "nextRecommendedCommand": "operation.status"
+  }
+}

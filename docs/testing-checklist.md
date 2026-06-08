@@ -22,6 +22,12 @@
 - [ ] `make test-deterministic-retrieval` passes (semantic quarantine, tool registry, literal/token search)
 - [ ] `search.semantic` returns `semantic_disabled` (4008) without `allowExperimental`
 - [ ] `tool.registry` / `tool.capabilities` list agent-safe deterministic methods
+- [ ] `make test-agent-workflow-smoke` passes (find/patch, stale recovery, batch rollback, deprecated recovery)
+- [ ] `make test-cli-agent-failures` passes (CLI bad JSON, deprecation, error-json envelopes)
+- [ ] `make test-docs-code-drift` passes (docs match contracts and recovery hints)
+- [ ] `make verify-agent-runtime-full` passes (full release ladder)
+- [ ] Partial success fields (`complete`, `partial`, `warnings`) present on truncated reads
+- [ ] Error envelopes include `nextRecommendedCommand`
 - [ ] Runtime invariants documented in [Runtime Invariants](runtime-invariants.md)
 - [ ] Runtime limits documented in [Runtime Safety](runtime-safety.md)
 - [ ] `make release-check-agent-runtime` passes before release

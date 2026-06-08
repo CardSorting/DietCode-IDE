@@ -120,6 +120,29 @@ Grep anchor fixture: `scripts/fixtures/tooling/grep_anchor.json`
 
 ---
 
+## Agent failure traps (pass 6)
+
+Success payloads expose partial-work signals so agents do not treat truncated reads or cautious validations as full success:
+
+| Field | When set |
+|-------|----------|
+| `complete` | `false` if truncated, paginated, or scan-limited |
+| `partial` | `true` if warnings, skips, or disk fallback reads occurred |
+| `warnings` | Stable tokens (`results_truncated`, `requires_confirmation`, …) |
+| `nextRecommendedCommand` | Safe next RPC (`patch.apply`, `workspace.revision`, …) |
+
+Errors include `nextRecommendedCommand` with `recovery_hint`.
+
+```bash
+make test-agent-workflow-smoke
+make test-cli-agent-failures
+make verify-agent-runtime-full
+```
+
+CLI additions: `--search-literal`, improved JSON parse errors, stderr `hint:` lines for partial success.
+
+---
+
 ## Deterministic retrieval (pass 5)
 
 Agent-safe search surfaces (no semantic/fuzzy/ranking):

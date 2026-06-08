@@ -52,6 +52,7 @@ NSDictionary* MacControlRpcErrorDiagnosticMetadata(NSString* stringCode) {
     NSString* category = @"domain";
     BOOL retryable = NO;
     NSString* recoveryHint = @"rg string_code docs/error-codes.md";
+    NSString* nextRecommendedCommand = @"tool.registry";
 
     if ([code isEqualToString:@"invalid_request"] || [code isEqualToString:@"invalid_params"] ||
         [code isEqualToString:@"request_too_large"] || [code isEqualToString:@"too_many_results"]) {
@@ -80,6 +81,9 @@ NSDictionary* MacControlRpcErrorDiagnosticMetadata(NSString* stringCode) {
                [code isEqualToString:@"nested_call_timeout"]) {
         category = @"validation";
         recoveryHint = @"reduce_concurrency_or_retry_later";
+        if ([code isEqualToString:@"nested_call_timeout"]) {
+            nextRecommendedCommand = @"operation.status";
+        }
     } else if ([code isEqualToString:@"socket_symlink"] ||
                [code isEqualToString:@"socket_wrong_owner"] ||
                [code isEqualToString:@"socket_unsafe_permissions"] ||
@@ -96,16 +100,24 @@ NSDictionary* MacControlRpcErrorDiagnosticMetadata(NSString* stringCode) {
     } else if ([code isEqualToString:@"stale_content"]) {
         category = @"validation";
         recoveryHint = @"revalidate_patch_with_patch.validate";
+        nextRecommendedCommand = @"patch.validate";
+    } else if ([code isEqualToString:@"symlink_target"]) {
+        category = @"validation";
+        recoveryHint = @"use_non_symlink_target_path";
+        nextRecommendedCommand = @"file.stat";
     } else if ([code isEqualToString:@"semantic_disabled"]) {
         category = @"validation";
         recoveryHint = @"use_search_literal_or_search_tokens";
+        nextRecommendedCommand = @"search.literal";
     } else if ([code isEqualToString:@"ranked_search_disabled"]) {
         category = @"validation";
         recoveryHint = @"use_workspace_grep_or_search_literal";
+        nextRecommendedCommand = @"workspace.grep";
     } else if ([code isEqualToString:@"verification_failed"] || [code isEqualToString:@"verify_failed"] ||
                [code isEqualToString:@"patch_failed"]) {
         category = @"domain";
-        recoveryHint = @"inspect_verify_or_patch_output";
+        recoveryHint = @"run_patch_preview_or_patch_validate";
+        nextRecommendedCommand = @"patch.validate";
     } else if ([code isEqualToString:@"rollback_failed"] || [code isEqualToString:@"backup_corrupt"]) {
         category = @"recovery";
         recoveryHint = @"recovery.list_or_recovery.scan";
@@ -115,6 +127,7 @@ NSDictionary* MacControlRpcErrorDiagnosticMetadata(NSString* stringCode) {
         @"category": category,
         @"retryable": @(retryable),
         @"recovery_hint": recoveryHint,
+        @"nextRecommendedCommand": nextRecommendedCommand,
     };
 }
 

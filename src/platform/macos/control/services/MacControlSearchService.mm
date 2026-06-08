@@ -400,7 +400,7 @@ static std::vector<std::filesystem::path> CollectSortedSearchFilePaths(
         }
     }
     id nextOffset = hasMore ? @(resultOffset + (NSInteger)matches.count) : [NSNull null];
-    return @{
+    return MacControlEnrichReadSearchResult(@{
         @"matches": matches,
         @"query": query,
         @"mode": @"literal_substring",
@@ -423,7 +423,7 @@ static std::vector<std::filesystem::path> CollectSortedSearchFilePaths(
         @"symlinkPolicy": @"skip_never_follow",
         @"sortOrder": @"path_line_column",
         @"scanDurationMs": @((NSInteger)round((CFAbsoluteTimeGetCurrent() - scanStarted) * 1000.0))
-    };
+    }, @"workspace.grep");
 }
 
 static BOOL PathMatchesExtensionFilter(const std::string& filename, NSString* extensionFilter) {
@@ -532,7 +532,7 @@ static NSInteger MatchReasonRank(NSString* reason) {
             @"matchReason": candidate.matchReason
         }];
     }
-    return @{
+    return MacControlEnrichReadSearchResult(@{
         @"results": results,
         @"query": query,
         @"searchMode": @"deterministic_path_match",
@@ -547,7 +547,7 @@ static NSInteger MatchReasonRank(NSString* reason) {
         @"filesSkippedOversize": @(filesSkippedOversize),
         @"symlinkPolicy": @"skip_never_follow",
         @"scanDurationMs": @((NSInteger)round((CFAbsoluteTimeGetCurrent() - scanStarted) * 1000.0))
-    };
+    }, @"search.files");
 }
 
 - (NSDictionary*)searchText:(NSDictionary*)params 
@@ -655,7 +655,7 @@ static NSInteger MatchReasonRank(NSString* reason) {
         }
     }
     id nextOffset = hasMore ? @(resultOffset + (NSInteger)results.count) : [NSNull null];
-    return @{
+    return MacControlEnrichReadSearchResult(@{
         @"results": results,
         @"query": query,
         @"mode": @"literal_substring",
@@ -678,7 +678,7 @@ static NSInteger MatchReasonRank(NSString* reason) {
         @"symlinkPolicy": @"skip_never_follow",
         @"sortOrder": @"path_line_column",
         @"scanDurationMs": @((NSInteger)round((CFAbsoluteTimeGetCurrent() - scanStarted) * 1000.0))
-    };
+    }, @"search.text");
 }
 
 - (NSDictionary*)searchTodo:(NSDictionary*)params 
@@ -767,7 +767,7 @@ static NSInteger MatchReasonRank(NSString* reason) {
             }
         }
     }
-    return @{
+    return MacControlEnrichReadSearchResult(@{
         @"results": all,
         @"mode": @"literal_marker_scan",
         @"markers": markers,
@@ -786,7 +786,7 @@ static NSInteger MatchReasonRank(NSString* reason) {
         @"symlinkPolicy": @"skip_never_follow",
         @"sortOrder": @"path_line_column",
         @"scanDurationMs": @((NSInteger)round((CFAbsoluteTimeGetCurrent() - scanStarted) * 1000.0))
-    };
+    }, @"search.todo");
 }
 
 - (NSDictionary*)searchLiteral:(NSDictionary*)params
@@ -917,7 +917,7 @@ static BOOL LineContainsAllTokens(const std::string& line, const std::vector<std
         }
     }
     id nextOffset = hasMore ? @(resultOffset + (NSInteger)results.count) : [NSNull null];
-    return @{
+    return MacControlEnrichReadSearchResult(@{
         @"results": results,
         @"query": query,
         @"tokens": tokenParts,
@@ -944,7 +944,7 @@ static BOOL LineContainsAllTokens(const std::string& line, const std::vector<std
         @"symlinkPolicy": @"skip_never_follow",
         @"sortOrder": @"path_line_column",
         @"scanDurationMs": @((NSInteger)round((CFAbsoluteTimeGetCurrent() - scanStarted) * 1000.0))
-    };
+    }, @"search.tokens");
 }
 
 - (NSDictionary*)searchReferences:(NSDictionary*)params

@@ -116,8 +116,8 @@ See [Runtime Safety](runtime-safety.md).
 | `verification_failed` | 4004 | Post-change verification failed |
 | `verify_failed` | 4004 | Alias of verification failure |
 | `patch_failed` | 4004 | Patch could not be applied |
-| `stale_content` | 4004 | Target file changed since validation (`expectBeforeHash` mismatch) |
-| `symlink_target` | 4004 | Patch attempted through symlink path |
+| `stale_content` | 4004 | Target file changed since validation (`expectBeforeHash` mismatch). **Next:** `patch.validate` |
+| `symlink_target` | 4004 | Patch attempted through symlink path. **Next:** `file.stat` on real path |
 | `rollback_conflict` | 4005 | Rollback state mismatch |
 | `rollback_failed` | 4005 | Rollback operation failed |
 | `permission_denied` | 4006 | Socket or sandbox permission denied |
@@ -125,7 +125,16 @@ See [Runtime Safety](runtime-safety.md).
 | `semantic_disabled` | 4008 | `search.semantic` quarantined in deterministic agent mode |
 | `ranked_search_disabled` | 4008 | `analysis.searchRanked` quarantined (probabilistic scoring removed) |
 
-**Recovery:** use `search.literal`, `search.tokens`, `workspace.grep`, or `search.references`. Recovery hints: `use_search_literal_or_search_tokens`, `use_workspace_grep_or_search_literal`.
+**Recovery:** use `search.literal`, `search.tokens`, `workspace.grep`, or `search.references`. Each error includes `recovery_hint` and `nextRecommendedCommand` in the envelope.
+
+| string_code | recovery_hint | nextRecommendedCommand |
+|-------------|---------------|------------------------|
+| `stale_content` | `revalidate_patch_with_patch.validate` | `patch.validate` |
+| `symlink_target` | `use_non_symlink_target_path` | `file.stat` |
+| `semantic_disabled` | `use_search_literal_or_search_tokens` | `search.literal` |
+| `ranked_search_disabled` | `use_workspace_grep_or_search_literal` | `workspace.grep` |
+| `patch_failed` | `run_patch_preview_or_patch_validate` | `patch.validate` |
+| `nested_call_timeout` | `reduce_concurrency_or_retry_later` | `operation.status` |
 
 ```bash
 python3 scripts/dietcode_agent_client.py --raw-response --compact search.semantic '{"query":"foo"}'

@@ -350,3 +350,93 @@ NSArray<NSString*>* ContextLines(const std::vector<std::string>& lines, NSIntege
     }
     return context;
 }
+
+NSDictionary* MacControlEnrichReadSearchResult(NSDictionary* result, NSString* methodName) {
+    if (![result isKindOfClass:[NSDictionary class]]) return result ?: @{};
+    BOOL truncated = [result[@"truncated"] boolValue];
+    BOOL hasMore = [result[@"hasMore"] boolValue];
+    BOOL scanLimit = [result[@"scanLimitReached"] boolValue];
+    NSInteger filesSkipped = [result[@"filesSkippedUnreadable"] integerValue]
+        + [result[@"filesSkippedBinary"] integerValue]
+        + [result[@"filesSkippedOversize"] integerValue]
+        + [result[@"filesSkippedExcluded"] integerValue]
+        + [result[@"filesSkippedSymlink"] integerValue];
+    NSInteger diskReads = [result[@"filesReadFromDisk"] integerValue];
+    BOOL complete = !truncated && !hasMore && !scanLimit;
+    BOOL partial = !complete || filesSkipped > 0 || diskReads > 0;
+
+    NSMutableDictionary* enriched = [result mutableCopy];
+    enriched[@"complete"] = @(complete);
+    enriched[@"partial"] = @(partial);
+
+    NSMutableArray* warnings = [NSMutableArray array];
+    if (truncated || hasMore) [warnings addObject:@"results_truncated"];
+    if (scanLimit) [warnings addObject:@"scan_limit_reached"];
+    if (filesSkipped > 0) [warnings addObject:@"files_skipped_during_scan"];
+    if (diskReads > 0) [warnings addObject:@"disk_fallback_reads"];
+    if (warnings.count > 0) enriched[@"warnings"] = warnings;
+
+    if (diskReads > 0) enriched[@"fallbackUsed"] = @YES;
+
+    if (!complete) {
+        enriched[@"nextRecommendedCommand"] = methodName ?: @"workspace.grep";
+        if (hasMore && result[@"nextResultOffset"] != [NSNull null]) {
+            enriched[@"recoveryHint"] = @"paginate_with_resultOffset";
+        } else if (scanLimit) {
+            enriched[@"recoveryHint"] = @"narrow_include_globs";
+        } else {
+            enriched[@"recoveryHint"] = @"raise_maxResults_or_paginate";
+        }
+    }
+    return enriched;
+}
+
+NSDictionary* MacControlEnrichPatchValidateResult(NSDictionary* result) {
+    if (![result isKindOfClass:[NSDictionary class]]) return result ?: @{};
+    NSDictionary* validation = result[@"validation"];
+    if (![validation isKindOfClass:[NSDictionary class]]) return result;
+
+    BOOL ok = [validation[@"ok"] boolValue];
+    BOOL needsConfirm = [validation[@"requiresConfirmation"] boolValue];
+    BOOL syntaxDanger = [validation[@"syntaxDanger"] boolValue];
+    NSString* readSource = validation[@"readSource"];
+
+    NSMutableDictionary* enriched = [result mutableCopy];
+    enriched[@"complete"] = @(ok && !needsConfirm);
+    enriched[@"partial"] = @(!ok || needsConfirm || syntaxDanger);
+
+    NSMutableArray* warnings = [NSMutableArray array];
+    if (needsConfirm) [warnings addObject:@"requires_confirmation"];
+    if (syntaxDanger) [warnings addObject:@"syntax_danger"];
+    if ([readSource isEqualToString:@"disk"]) {
+        [warnings addObject:@"read_from_disk_fallback"];
+        enriched[@"fallbackUsed"] = @YES;
+    }
+    if (warnings.count > 0) enriched[@"warnings"] = warnings;
+
+    if (ok) {
+        enriched[@"nextRecommendedCommand"] = @"patch.apply";
+        enriched[@"recoveryHint"] = needsConfirm ? @"set_confirm_true_on_patch_apply" : @"patch_apply_with_expectBeforeHash";
+    } else {
+        enriched[@"nextRecommendedCommand"] = @"patch.validate";
+        enriched[@"recoveryHint"] = @"fix_patch_or_target_path";
+    }
+    return enriched;
+}
+
+NSDictionary* MacControlEnrichPatchApplyResult(NSDictionary* result) {
+    if (![result isKindOfClass:[NSDictionary class]]) return result ?: @{};
+    NSMutableDictionary* enriched = [result mutableCopy];
+    BOOL replay = [result[@"idempotentReplay"] boolValue];
+    enriched[@"complete"] = @YES;
+    enriched[@"partial"] = @(replay);
+    if (replay) {
+        enriched[@"warnings"] = @[@"idempotent_replay"];
+        enriched[@"recoveryHint"] = @"operation_status_if_uncertain";
+        enriched[@"nextRecommendedCommand"] = @"operation.status";
+    } else {
+        enriched[@"nextRecommendedCommand"] = @"workspace.revision";
+        enriched[@"recoveryHint"] = @"verify_revision_and_mutation_receipt";
+    }
+    return enriched;
+}

@@ -198,14 +198,14 @@ static BOOL ApplyUnifiedPatchToDisk(NSString* absPath, NSString* beforeText, NSS
     if (_workspaceState && idempotencyKey.length > 0) {
         NSDictionary* prior = [_workspaceState operationStatusForKey:idempotencyKey];
         if ([prior[@"status"] isEqualToString:@"completed"]) {
-            return @{
+            return MacControlEnrichPatchApplyResult(@{
                 @"patched": @YES,
                 @"path": absPath,
                 @"mutationReceipt": prior[@"mutationReceipt"] ?: @{},
                 @"revisionBefore": prior[@"revisionBefore"] ?: @(_workspaceState.revisionId),
                 @"revisionAfter": prior[@"revisionAfter"] ?: @(_workspaceState.revisionId),
                 @"idempotentReplay": @YES
-            };
+            });
         }
     }
     if (PathIsSymlink(absPath)) {
@@ -284,21 +284,21 @@ static BOOL ApplyUnifiedPatchToDisk(NSString* absPath, NSString* beforeText, NSS
                                          idempotencyKey:idempotencyKey
                                          revisionBefore:revisionBefore];
         [_workspaceState trackHashesForPaths:@[targetPath] workspace:ws windowBridge:_windowBridge];
-        return @{
+        return MacControlEnrichPatchApplyResult(@{
             @"patched": @YES,
             @"path": absPath,
             @"validation": validation,
             @"mutationReceipt": mutationReceipt,
             @"revisionBefore": @(revisionBefore),
             @"revisionAfter": @(_workspaceState.revisionId)
-        };
+        });
     }
-    return @{
+    return MacControlEnrichPatchApplyResult(@{
         @"patched": @YES,
         @"path": absPath,
         @"validation": validation,
         @"mutationReceipt": mutationReceipt
-    };
+    });
 }
 
 - (NSDictionary*)applyPatchBatch:(NSDictionary*)params 

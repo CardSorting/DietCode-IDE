@@ -1428,6 +1428,7 @@ static const void* kDietCodeReadQueueKey = &kDietCodeReadQueueKey;
         @"category": meta[@"category"] ?: @"domain",
         @"retryable": meta[@"retryable"] ?: @NO,
         @"recovery_hint": meta[@"recovery_hint"] ?: @"rg string_code docs/error-codes.md",
+        @"nextRecommendedCommand": meta[@"nextRecommendedCommand"] ?: @"tool.registry",
     }];
     if (phase.length > 0) error[@"phase"] = phase;
     if (queue.length > 0) error[@"queue"] = queue;
