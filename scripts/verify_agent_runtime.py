@@ -36,11 +36,20 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Run verify-agent-runtime ladder with NDJSON summary.")
     add_output_args(parser)
     parser.add_argument("--skip-live", action="store_true", help="Run offline steps only.")
+    parser.add_argument(
+        "--assume-server-ready",
+        action="store_true",
+        help="Skip rebuild/restart prep; assume agent server and binary already match HEAD.",
+    )
     args = parser.parse_args()
     compact = output_compact(args)
     checks: list[dict] = []
 
-    if not args.skip_live:
+    if not args.skip_live and not args.assume_server_ready:
+        emit_test_line(
+            {"type": "progress", "step": "prep.restart_agent_server", "status": "running", "note": "rebuild+restart (~60s)"},
+            compact=compact,
+        )
         prep = subprocess.run(
             ["make", "restart-agent-server"],
             cwd=str(REPO_ROOT),
@@ -57,6 +66,10 @@ def main() -> int:
             checks.append(payload)
             emit_test_line(payload, compact=compact)
             return finish_test_run(checks, suite="verify_agent_runtime", compact=compact)
+        emit_test_line(
+            {"type": "progress", "step": "prep.restart_agent_server", "status": "done"},
+            compact=compact,
+        )
         ready = subprocess.run(
             [sys.executable, "scripts/dietcode_agent_client.py", "--wait-ready", "--compact", "--error-json", "--quiet"],
             cwd=str(REPO_ROOT),
@@ -69,10 +82,16 @@ def main() -> int:
         emit_test_line(payload, compact=compact)
         if not prep_ok:
             return finish_test_run(checks, suite="verify_agent_runtime", compact=compact)
+    elif not args.skip_live and args.assume_server_ready:
+        emit_test_line(
+            {"type": "progress", "step": "prep.assume_server_ready", "status": "skipped", "note": "no rebuild/restart"},
+            compact=compact,
+        )
 
     for name, cmd, needs_live in LADDER:
         if args.skip_live and needs_live:
             continue
+        emit_test_line({"type": "progress", "step": name, "status": "running"}, compact=compact)
         completed = subprocess.run(cmd, cwd=str(REPO_ROOT), capture_output=True, text=True)
         ok = completed.returncode == 0
         detail: dict = {"exitCode": completed.returncode}

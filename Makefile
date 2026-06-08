@@ -88,7 +88,7 @@ MACOS_MM := \
 	src/filesystem/FileWatcher.mm \
 	src/core/LSPClient.mm
 
-.PHONY: all app run headless ensure-socket restart-agent-server agent-ready agent-status agent-ping agent-methods agent-capabilities agent-self-test test-agent-offline control-smoke test-task-health test-rpc-transaction test-ergonomics test-grep-diff-tooling test-runtime-determinism test-transaction-kernel test-harness-realism test-deterministic-retrieval test-agent-workflow-smoke test-cli-agent-failures test-docs-code-drift test-partial-success-closure test-broccoliq-runtime-memory test-agent-integration agent-integration verify-agent-runtime verify-agent-runtime-full test clean
+.PHONY: all app run headless ensure-socket restart-agent-server restart-agent-server-fast agent-ready agent-status agent-ping agent-methods agent-capabilities agent-self-test test-agent-offline control-smoke test-task-health test-rpc-transaction test-ergonomics test-grep-diff-tooling test-runtime-determinism test-transaction-kernel test-harness-realism test-deterministic-retrieval test-agent-workflow-smoke test-cli-agent-failures test-docs-code-drift test-partial-success-closure test-broccoliq-runtime-memory test-broccoliq-runtime-memory-fast test-agent-integration agent-integration verify-agent-runtime verify-agent-runtime-fast verify-agent-runtime-full verify-agent-runtime-full-fast test clean
 
 all: app test
 
@@ -116,6 +116,12 @@ ensure-socket: app
 	$(APP_MACOS)/$(APP_NAME) --ensure-socket
 
 restart-agent-server: app
+	-pkill -f "$(APP_MACOS)/$(APP_NAME)" 2>/dev/null || true
+	sleep 0.5
+	DIETCODE_REPO_ROOT=$(CURDIR) $(APP_MACOS)/$(APP_NAME) --ensure-socket
+
+# Restart agent server without rebuilding — assumes binary already matches HEAD.
+restart-agent-server-fast:
 	-pkill -f "$(APP_MACOS)/$(APP_NAME)" 2>/dev/null || true
 	sleep 0.5
 	DIETCODE_REPO_ROOT=$(CURDIR) $(APP_MACOS)/$(APP_NAME) --ensure-socket
@@ -196,8 +202,13 @@ test-partial-success-closure: restart-agent-server
 	python3 scripts/dietcode_agent_client.py --wait-ready --compact --error-json --quiet
 	python3 scripts/test_partial_success_closure.py --compact
 
+# BroccoliQ runtime memory: full target rebuilds app + restarts agent server before live harness.
 test-broccoliq-runtime-memory: restart-agent-server
 	DIETCODE_REPO_ROOT=$(CURDIR) python3 scripts/dietcode_agent_client.py --wait-ready --compact --error-json --quiet
+	DIETCODE_REPO_ROOT=$(CURDIR) python3 scripts/test_broccoliq_runtime_memory.py --compact
+
+# BroccoliQ runtime memory: fast iteration — no rebuild/restart; assumes server/binary already match HEAD.
+test-broccoliq-runtime-memory-fast:
 	DIETCODE_REPO_ROOT=$(CURDIR) python3 scripts/test_broccoliq_runtime_memory.py --compact
 
 test-ergonomics: app
@@ -213,8 +224,16 @@ test-agent-integration: agent-integration
 verify-agent-runtime:
 	python3 scripts/verify_agent_runtime.py --compact
 
+# Fast runtime ladder — no rebuild/restart; assumes server/binary already match HEAD.
+verify-agent-runtime-fast:
+	python3 scripts/verify_agent_runtime.py --compact --assume-server-ready
+
 verify-agent-runtime-full:
 	python3 scripts/verify_agent_runtime_full.py --compact
+
+# Fast full ladder — single restart without rebuild; nested verify skips second restart.
+verify-agent-runtime-full-fast:
+	python3 scripts/verify_agent_runtime_full.py --compact --assume-server-ready
 
 release-check-agent-runtime:
 	python3 scripts/release_check_agent_runtime.py --compact

@@ -92,10 +92,22 @@ Audit context: [Agent Runtime Audit](agent-runtime-audit.md). Full ladder: `make
 
 ---
 
+## Pass VII — BroccoliQ runtime memory
+
+- [ ] `make test-broccoliq-runtime-memory-fast` passes during iteration (assumes fresh server/binary; no rebuild)
+- [ ] `make test-broccoliq-runtime-memory` passes before merge (full rebuild + restart)
+- [ ] `memory.status` reports `mutationAuthority: cpp_kernel` and `memoryAuthority: broccoliq_record_only`
+- [ ] `operation.status` / `memory.operation.findByIdempotencyKey` resolve durable replay after mutation
+- [ ] Docs: [BroccoliQ Runtime Memory](broccoliq-runtime-memory.md)
+
+---
+
 ## Verification ladders
 
-- [ ] `make verify-agent-runtime` passes (14 checks)
-- [ ] `make verify-agent-runtime-full` passes (release ladder)
+- [ ] `make verify-agent-runtime-fast` passes during iteration (no rebuild/restart)
+- [ ] `make verify-agent-runtime` passes (14 checks, rebuilds + restarts once)
+- [ ] `make verify-agent-runtime-full-fast` passes during iteration (full ladder, no rebuild/restart)
+- [ ] `make verify-agent-runtime-full` passes (release ladder, includes full BroccoliQ memory verification; rebuilds + restarts once)
 - [ ] `make release-check-agent-runtime` passes before release
 - [ ] Release notes filled from [template](templates/runtime-release-notes.md) when contracts change
 - [ ] Runtime limits in [Runtime Safety](runtime-safety.md)

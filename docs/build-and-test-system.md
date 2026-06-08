@@ -74,11 +74,17 @@ Full audit context: [Agent Runtime Audit](agent-runtime-audit.md) (Passes I–VI
 
 | Target | Contents |
 |--------|----------|
-| `make verify-agent-runtime` | 14 checks: offline + smoke + task + RPC + ergonomics + operator + safety + passes I–V |
-| `make verify-agent-runtime-full` | 9 checks: offline drift + full ladder + workflow + CLI + partial-success + release readiness |
+| `make verify-agent-runtime-fast` | Same as `verify-agent-runtime` but **no rebuild/restart** (assumes fresh server/binary) |
+| `make verify-agent-runtime` | 14 checks: offline + smoke + task + RPC + ergonomics + operator + safety + passes I–V; rebuilds + restarts once |
+| `make verify-agent-runtime-full-fast` | Same as `verify-agent-runtime-full` but **no rebuild/restart** |
+| `make verify-agent-runtime-full` | 9 checks: offline drift + full ladder + workflow + CLI + partial-success + BroccoliQ memory + release readiness; rebuilds + restarts once |
+| `make test-broccoliq-runtime-memory-fast` | BroccoliQ memory tests only, no rebuild/restart |
+| `make test-broccoliq-runtime-memory` | BroccoliQ memory tests with rebuild + restart |
 | `make release-check-agent-runtime` | Release-grade gate (`release_check_agent_runtime.py`) |
 
-**After C++ changes:** targets that depend on `restart-agent-server` (`test-deterministic-retrieval`, workflow smoke, CLI failures, partial-success closure) auto-restart in `verify-agent-runtime`; run `make restart-agent-server` manually when iterating on a single suite.
+**Fast vs full:** `*-fast` targets skip `make app` / `make restart-agent-server` and are for day-to-day iteration after you have already built and restarted. Full targets rebuild and restart once at the start (the app link step takes ~60s with no output — progress lines now emit before each ladder step).
+
+**After C++ changes:** run `make app && make restart-agent-server` once, then use `*-fast` targets while iterating; use full targets before merge/release.
 
 Environment variables and config precedence: [Agent Environment](agent-environment.md).
 

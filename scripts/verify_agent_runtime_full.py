@@ -45,11 +45,20 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Run verify-agent-runtime-full ladder.")
     add_output_args(parser)
     parser.add_argument("--skip-live", action="store_true", help="Run offline steps only.")
+    parser.add_argument(
+        "--assume-server-ready",
+        action="store_true",
+        help="Skip rebuild/restart prep; assume agent server and binary already match HEAD.",
+    )
     args = parser.parse_args()
     compact = output_compact(args)
     checks: list[dict] = []
 
-    if not args.skip_live:
+    if not args.skip_live and not args.assume_server_ready:
+        emit_test_line(
+            {"type": "progress", "step": "prep.restart_agent_server", "status": "running", "note": "rebuild+restart (~60s)"},
+            compact=compact,
+        )
         prep = subprocess.run(["make", "restart-agent-server"], cwd=str(REPO_ROOT), capture_output=True, text=True)
         prep_ok = prep.returncode == 0
         payload = {
@@ -62,10 +71,39 @@ def main() -> int:
         emit_test_line(payload, compact=compact)
         if not prep_ok:
             return finish_test_run(checks, suite="verify_agent_runtime_full", compact=compact)
+        emit_test_line(
+            {"type": "progress", "step": "prep.restart_agent_server", "status": "done"},
+            compact=compact,
+        )
+        ready = subprocess.run(
+            [sys.executable, "scripts/dietcode_agent_client.py", "--wait-ready", "--compact", "--error-json", "--quiet"],
+            cwd=str(REPO_ROOT),
+            capture_output=True,
+            text=True,
+        )
+        ready_ok = ready.returncode == 0
+        ready_payload = {
+            "type": "check",
+            "name": "prep.wait_ready",
+            "ok": ready_ok,
+            "detail": {"exitCode": ready.returncode, "nextCommand": "make restart-agent-server"},
+        }
+        checks.append(ready_payload)
+        emit_test_line(ready_payload, compact=compact)
+        if not ready_ok:
+            return finish_test_run(checks, suite="verify_agent_runtime_full", compact=compact)
+    elif not args.skip_live and args.assume_server_ready:
+        emit_test_line(
+            {"type": "progress", "step": "prep.assume_server_ready", "status": "skipped", "note": "no rebuild/restart"},
+            compact=compact,
+        )
 
     for name, cmd, needs_live, skip_if_live_ran_kernel in LADDER:
         if args.skip_live and needs_live:
             continue
+        if name == "live_verify_agent_runtime" and not args.skip_live:
+            cmd = cmd + ["--assume-server-ready"]
+        emit_test_line({"type": "progress", "step": name, "status": "running"}, compact=compact)
         completed = subprocess.run(cmd, cwd=str(REPO_ROOT), capture_output=True, text=True)
         ok = completed.returncode == 0
         detail: dict = {"exitCode": completed.returncode, "nextCommand": NEXT_COMMANDS.get(name, "make verify-agent-runtime-full")}

@@ -3,9 +3,24 @@
 BroccoliQ is embedded as the **durable memory and coordination layer** for the DietCode agent runtime. The C++ mutation kernel remains the sole authority for file correctness.
 
 ```bash
+# Quick local iteration (no rebuild/restart; server + binary must already be fresh)
+make test-broccoliq-runtime-memory-fast
+
+# Full BroccoliQ memory verification (rebuilds app, restarts agent server)
 make test-broccoliq-runtime-memory
-make verify-agent-runtime-full   # includes BroccoliQ memory tests
+
+# Release ladder — includes full BroccoliQ memory verification among other checks
+make verify-agent-runtime-full
 ```
+
+| Target | Rebuild | Restart server | When to use |
+|--------|---------|----------------|-------------|
+| `make test-broccoliq-runtime-memory-fast` | No | No | Day-to-day BroccoliQ iteration after `make app` + `make restart-agent-server` |
+| `make test-broccoliq-runtime-memory` | Yes | Yes | Reliable pre-merge / after C++ memory-layer changes |
+| `make verify-agent-runtime-full-fast` | No | No | Quick full-ladder iteration (assumes fresh server/binary) |
+| `make verify-agent-runtime-full` | Yes (once) | Yes (once) | Release and full runtime closure |
+
+**Why `verify-agent-runtime-full` felt slow:** the full target runs `make restart-agent-server`, which rebuilds the app (~60s) before any test output appears. The nested `verify_agent_runtime` step used to restart again (second rebuild). That duplicate restart is now skipped; progress lines emit before each step.
 
 ---
 

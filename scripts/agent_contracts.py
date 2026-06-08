@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
 # broccoliq-memory-test
+# broccoliq-memory-test
+# broccoliq-memory-test
+# broccoliq-memory-test
 """CONTRACT: Frozen runtime contract constants — grep with `rg 'CONTRACT:' scripts/agent_contracts.py`."""
 
 from __future__ import annotations
