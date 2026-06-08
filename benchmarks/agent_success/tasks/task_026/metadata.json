@@ -1,0 +1,30 @@
+{
+  "id": "task_026",
+  "title": "Stale read recovery",
+  "category": "stale_read_recovery",
+  "workflow": "adv_stale_read",
+  "modes": [
+    "raw_rpc",
+    "bridge"
+  ],
+  "expectedTools": [
+    "patch.validate",
+    "patch.apply"
+  ],
+  "failureModes": [
+    "stale_content",
+    "patch_failed"
+  ],
+  "targetFiles": [
+    "worker.py"
+  ],
+  "staleMutation": "status = 'stale'\n",
+  "expectedFailureModes": [
+    "stale_content"
+  ],
+  "requiresRecovery": true,
+  "requiresRollback": false,
+  "mustInspectVerify": true,
+  "adversarial": true,
+  "trapType": "stale_read_recovery"
+}

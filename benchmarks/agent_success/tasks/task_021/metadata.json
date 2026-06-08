@@ -1,0 +1,34 @@
+{
+  "id": "task_021",
+  "title": "Wrong file decoy",
+  "category": "wrong_file_decoy",
+  "workflow": "adv_wrong_file_decoy",
+  "modes": [
+    "raw_rpc",
+    "bridge"
+  ],
+  "expectedTools": [
+    "search.literal",
+    "file.stat",
+    "patch.validate",
+    "patch.apply"
+  ],
+  "failureModes": [
+    "wrongFileEdited",
+    "patch_failed"
+  ],
+  "targetFiles": [
+    "src/config.py"
+  ],
+  "decoyFiles": [
+    "src/config_backup.py"
+  ],
+  "expectedFailureModes": [
+    "wrongFileEdited"
+  ],
+  "requiresRecovery": false,
+  "requiresRollback": false,
+  "mustInspectVerify": true,
+  "adversarial": true,
+  "trapType": "wrong_file_decoy"
+}

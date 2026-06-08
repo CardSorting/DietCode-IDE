@@ -64,7 +64,9 @@ Each task/mode run emits one line to `results/<run-id>.jsonl`:
 - `failureCode`, `recoveryHintsUsed`
 - `commandsUsed`, `patchValidateFailures`
 
-## Task categories (20 tasks)
+## Task categories (30 tasks)
+
+### Normal (001–020)
 
 | Category | Tasks |
 |----------|-------|
@@ -78,3 +80,34 @@ Each task/mode run emits one line to `results/<run-id>.jsonl`:
 | Deprecated semantic search recovery | 015–016 |
 | Partial / truncated results | 017–018 |
 | Verify-after-mutation | 019–020 |
+
+### Adversarial (021–030)
+
+| Task | Trap | What it tests |
+|------|------|---------------|
+| 021 | wrong_file_decoy | Similar filenames — edit the correct one |
+| 022 | verify_only_requirement | Incomplete README — verify reveals requirement |
+| 023 | preserve_partial_fix | Do not overwrite already-correct code |
+| 024 | recover_from_failed_patch | First patch fails — retry required |
+| 025 | multi_file_coordination | Implementation + export + test stay consistent |
+| 026 | stale_read_recovery | File changes after read — stale recovery |
+| 027 | rollback_after_corruption | Bad patch breaks verify — rollback then fix |
+| 028 | noop_success_trap | Grep decoy passes — behavior must actually change |
+| 029 | path_containment_decoy | Tempting out-of-workspace target ignored |
+| 030 | ambiguous_symbol_choice | Same symbol in two modules — patch the live one |
+
+Adversarial tasks set `metadata.json` fields: `adversarial`, `trapType`,
+`expectedFailureModes`, `requiresRecovery`, `requiresRollback`, `mustInspectVerify`.
+
+**Agent honesty rule:** in `--executor agent` mode, the driver sees only
+`README.md`, `verify.sh`, and workspace files via tools — never `trapType`,
+`expected.patch`, or workflow metadata.
+
+## Reports
+
+`report_results.py` produces a **money table** comparing normal vs adversarial
+pass rates, plus trap-type breakdowns for wrong-file edits, rollbacks, and recovery.
+
+```bash
+make benchmark-agent-success-report
+```

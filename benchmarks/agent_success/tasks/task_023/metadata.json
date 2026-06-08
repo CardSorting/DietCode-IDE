@@ -1,0 +1,30 @@
+{
+  "id": "task_023",
+  "title": "Preserve partial fix",
+  "category": "preserve_partial_fix",
+  "workflow": "adv_preserve_partial",
+  "modes": [
+    "raw_rpc",
+    "bridge"
+  ],
+  "expectedTools": [
+    "file.read",
+    "patch.validate",
+    "patch.apply"
+  ],
+  "failureModes": [
+    "wrongFileEdited",
+    "patch_failed"
+  ],
+  "targetFiles": [
+    "src/module.py"
+  ],
+  "expectedFailureModes": [
+    "wrongFileEdited"
+  ],
+  "requiresRecovery": false,
+  "requiresRollback": false,
+  "mustInspectVerify": false,
+  "adversarial": true,
+  "trapType": "preserve_partial_fix"
+}

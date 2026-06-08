@@ -1,0 +1,7 @@
+--- app.py
++++ app.py
+@@ -2,3 +2,3 @@
+
+ def run():
+-    return 0
++    return 42

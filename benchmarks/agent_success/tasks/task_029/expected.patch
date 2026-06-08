@@ -1,0 +1,5 @@
+--- src/local.py
++++ src/local.py
+@@ -1 +1 @@
+-secret = 'keep'
++secret = 'updated'

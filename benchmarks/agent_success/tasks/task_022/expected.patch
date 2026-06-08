@@ -1,0 +1,5 @@
+--- src/settings.py
++++ src/settings.py
+@@ -1 +1 @@
+-TIMEOUT_MS = 1000
++TIMEOUT_MS = 2500

@@ -1,0 +1,33 @@
+{
+  "id": "task_030",
+  "title": "Ambiguous symbol choice",
+  "category": "ambiguous_symbol_choice",
+  "workflow": "adv_ambiguous_symbol",
+  "modes": [
+    "raw_rpc",
+    "bridge"
+  ],
+  "expectedTools": [
+    "search.literal",
+    "patch.validate",
+    "patch.apply"
+  ],
+  "failureModes": [
+    "wrongFileEdited",
+    "patch_failed"
+  ],
+  "targetFiles": [
+    "providers/a.py"
+  ],
+  "decoyFiles": [
+    "providers/b.py"
+  ],
+  "expectedFailureModes": [
+    "wrongFileEdited"
+  ],
+  "requiresRecovery": false,
+  "requiresRollback": false,
+  "mustInspectVerify": true,
+  "adversarial": true,
+  "trapType": "ambiguous_symbol_choice"
+}

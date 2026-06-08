@@ -1,0 +1,31 @@
+{
+  "id": "task_028",
+  "title": "Noop success trap",
+  "category": "noop_success_trap",
+  "workflow": "adv_noop_trap",
+  "modes": [
+    "raw_rpc",
+    "bridge"
+  ],
+  "expectedTools": [
+    "shell.rg",
+    "patch.validate",
+    "patch.apply"
+  ],
+  "failureModes": [
+    "wrongFileEdited",
+    "verify_failed"
+  ],
+  "targetFiles": [
+    "app.py"
+  ],
+  "expectedFailureModes": [
+    "wrongFileEdited",
+    "verify_failed"
+  ],
+  "requiresRecovery": false,
+  "requiresRollback": false,
+  "mustInspectVerify": true,
+  "adversarial": true,
+  "trapType": "noop_success_trap"
+}

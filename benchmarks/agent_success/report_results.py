@@ -16,18 +16,18 @@ RESULTS_DIR = BENCHMARK_ROOT / "results"
 TASKS_DIR = BENCHMARK_ROOT / "tasks"
 
 
-def load_task_categories() -> dict[str, str]:
-    categories: dict[str, str] = {}
+def load_task_meta() -> dict[str, dict[str, Any]]:
+    meta_by_id: dict[str, dict[str, Any]] = {}
     if not TASKS_DIR.is_dir():
-        return categories
+        return meta_by_id
     for task_dir in sorted(TASKS_DIR.iterdir()):
         meta_path = task_dir / "metadata.json"
         if not meta_path.is_file():
             continue
         with open(meta_path, encoding="utf-8") as handle:
             meta = json.load(handle)
-        categories[str(meta.get("id", task_dir.name))] = str(meta.get("category", "unknown"))
-    return categories
+        meta_by_id[str(meta.get("id", task_dir.name))] = meta
+    return meta_by_id
 
 
 def pick_jsonl_files(input_path: Path | None, *, latest_only: bool) -> list[Path]:
@@ -60,25 +60,50 @@ def passed(row: dict[str, Any]) -> bool:
     return bool(row.get("taskSuccess")) and bool(row.get("verifyPassed"))
 
 
-def aggregate(rows: list[dict[str, Any]], categories: dict[str, str], paths: list[Path]) -> dict[str, Any]:
+def _pass_rate(group: list[dict[str, Any]]) -> float:
+    if not group:
+        return 0.0
+    return round(sum(1 for row in group if passed(row)) / len(group), 4)
+
+
+def _mode_key(row: dict[str, Any]) -> str:
+    mode = str(row.get("mode", "unknown"))
+    executor = str(row.get("executor", "reference"))
+    return f"{executor}:{mode}" if executor != "reference" else mode
+
+
+def aggregate(rows: list[dict[str, Any]], task_meta: dict[str, dict[str, Any]], paths: list[Path]) -> dict[str, Any]:
     by_mode: dict[str, list[dict[str, Any]]] = defaultdict(list)
     by_category_mode: dict[str, dict[str, list[dict[str, Any]]]] = defaultdict(lambda: defaultdict(list))
+    by_trap_mode: dict[str, dict[str, list[dict[str, Any]]]] = defaultdict(lambda: defaultdict(list))
 
     failure_codes: Counter[str] = Counter()
     recovery_hints: Counter[str] = Counter()
     wrong_file_by_mode: Counter[str] = Counter()
     stale_recovery_by_mode: Counter[str] = Counter()
     rollback_by_mode: Counter[str] = Counter()
+    wrong_file_by_trap: Counter[str] = Counter()
+    rollback_by_trap: Counter[str] = Counter()
+    recovery_by_trap: Counter[str] = Counter()
+
+    normal_rows: list[dict[str, Any]] = []
+    adversarial_rows: list[dict[str, Any]] = []
 
     for row in rows:
-        mode = str(row.get("mode", "unknown"))
-        executor = str(row.get("executor", "reference"))
-        mode_key = f"{mode}:{executor}" if executor != "reference" else mode
+        mode_key = _mode_key(row)
         by_mode[mode_key].append(row)
 
         task_id = str(row.get("taskId", ""))
-        category = categories.get(task_id, "unknown")
+        meta = task_meta.get(task_id, {})
+        category = str(meta.get("category", "unknown"))
         by_category_mode[category][mode_key].append(row)
+
+        if meta.get("adversarial"):
+            adversarial_rows.append(row)
+            trap = str(meta.get("trapType", "unknown"))
+            by_trap_mode[trap][mode_key].append(row)
+        else:
+            normal_rows.append(row)
 
         code = row.get("failureCode")
         if code:
@@ -87,12 +112,19 @@ def aggregate(rows: list[dict[str, Any]], categories: dict[str, str], paths: lis
         for hint in row.get("recoveryHintsUsed") or []:
             recovery_hints[str(hint)] += 1
 
+        trap = str(meta.get("trapType", "")) if meta.get("adversarial") else ""
         if row.get("wrongFileEdited"):
             wrong_file_by_mode[mode_key] += 1
+            if trap:
+                wrong_file_by_trap[trap] += 1
         if row.get("staleRecoverySucceeded"):
             stale_recovery_by_mode[mode_key] += 1
+            if trap:
+                recovery_by_trap[trap] += 1
         if row.get("rollbackSucceeded"):
             rollback_by_mode[mode_key] += 1
+            if trap:
+                rollback_by_trap[trap] += 1
 
     def mode_stats(group: list[dict[str, Any]]) -> dict[str, Any]:
         total = len(group)
@@ -112,16 +144,52 @@ def aggregate(rows: list[dict[str, Any]], categories: dict[str, str], paths: lis
     for category, mode_groups in sorted(by_category_mode.items()):
         by_category[category] = {mode: mode_stats(group) for mode, group in sorted(mode_groups.items())}
 
+    adversarial_pass_rate = {
+        mode: _pass_rate([row for row in adversarial_rows if _mode_key(row) == mode])
+        for mode in sorted(by_mode)
+    }
+    normal_pass_rate = {
+        mode: _pass_rate([row for row in normal_rows if _mode_key(row) == mode])
+        for mode in sorted(by_mode)
+    }
+
+    trap_type_pass_rate: dict[str, dict[str, float]] = {}
+    for trap, mode_groups in sorted(by_trap_mode.items()):
+        trap_type_pass_rate[trap] = {mode: _pass_rate(group) for mode, group in sorted(mode_groups.items())}
+
+    money_table: list[dict[str, Any]] = []
+    for mode in sorted(by_mode):
+        group = by_mode[mode]
+        money_table.append(
+            {
+                "executorMode": mode,
+                "normalPassRate": normal_pass_rate.get(mode, 0.0),
+                "adversarialPassRate": adversarial_pass_rate.get(mode, 0.0),
+                "wrongFileEdited": sum(1 for row in group if row.get("wrongFileEdited")),
+                "rollbackSucceeded": sum(1 for row in group if row.get("rollbackSucceeded")),
+                "recoverySucceeded": sum(1 for row in group if row.get("staleRecoverySucceeded")),
+            }
+        )
+
     return {
         "sourceFiles": [str(p) for p in paths],
         "taskResultCount": len(rows),
+        "normalTaskCount": len(normal_rows),
+        "adversarialTaskCount": len(adversarial_rows),
         "overallByMode": overall_by_mode,
+        "normalPassRate": normal_pass_rate,
+        "adversarialPassRate": adversarial_pass_rate,
+        "trapTypePassRate": trap_type_pass_rate,
+        "moneyTable": money_table,
         "byCategory": by_category,
         "failureCodeCounts": dict(failure_codes.most_common()),
         "recoveryHintsUsedCounts": dict(recovery_hints.most_common()),
         "wrongFileEditedCounts": dict(wrong_file_by_mode),
+        "wrongFileEditedByTrapType": dict(wrong_file_by_trap),
         "staleRecoverySucceededCounts": dict(stale_recovery_by_mode),
+        "recoverySucceededByTrapType": dict(recovery_by_trap),
         "rollbackSucceededCounts": dict(rollback_by_mode),
+        "rollbackSucceededByTrapType": dict(rollback_by_trap),
     }
 
 
@@ -133,19 +201,56 @@ def render_markdown(summary: dict[str, Any]) -> str:
     lines: list[str] = [
         "# Agent Success Benchmark Report",
         "",
-        f"Task results: **{summary['taskResultCount']}**",
+        f"Task results: **{summary['taskResultCount']}** "
+        f"(normal: {summary['normalTaskCount']}, adversarial: {summary['adversarialTaskCount']})",
         "",
-        "## Overall pass rate by mode",
+        "## Money table",
         "",
-        "| Mode | Total | Passed | Pass rate | Avg tool calls | Avg retries | Avg duration (ms) |",
-        "|------|------:|-------:|----------:|---------------:|------------:|------------------:|",
+        "| executor | mode | normal pass | adversarial pass | wrong file | rollback | recovery |",
+        "|----------|------|------------:|-----------------:|-----------:|---------:|---------:|",
     ]
+
+    for row in summary["moneyTable"]:
+        em = row["executorMode"]
+        if ":" in em:
+            executor, mode = em.split(":", 1)
+        else:
+            executor, mode = "reference", em
+        lines.append(
+            f"| {executor} | {mode} | {_fmt_rate(row['normalPassRate'])} | "
+            f"{_fmt_rate(row['adversarialPassRate'])} | {row['wrongFileEdited']} | "
+            f"{row['rollbackSucceeded']} | {row['recoverySucceeded']} |"
+        )
+
+    lines.extend(
+        [
+            "",
+            "## Overall pass rate by mode",
+            "",
+            "| Mode | Total | Passed | Pass rate | Avg tool calls | Avg retries | Avg duration (ms) |",
+            "|------|------:|-------:|----------:|---------------:|------------:|------------------:|",
+        ]
+    )
 
     for mode, stats in summary["overallByMode"].items():
         lines.append(
             f"| {mode} | {stats['total']} | {stats['passed']} | {_fmt_rate(stats['passRate'])} "
             f"| {stats['avgToolCalls']} | {stats['avgRetries']} | {stats['avgDurationMs']} |"
         )
+
+    lines.extend(["", "## Adversarial pass rate by trap type", ""])
+    if summary["trapTypePassRate"]:
+        for trap, mode_rates in summary["trapTypePassRate"].items():
+            lines.append(f"### {trap}")
+            lines.append("")
+            lines.append("| Mode | Pass rate |")
+            lines.append("|------|----------:|")
+            for mode, rate in mode_rates.items():
+                lines.append(f"| {mode} | {_fmt_rate(rate)} |")
+            lines.append("")
+    else:
+        lines.append("_No adversarial tasks in this run._")
+        lines.append("")
 
     lines.extend(["", "## Pass rate by category", ""])
     for category, mode_stats in summary["byCategory"].items():
@@ -173,9 +278,12 @@ def render_markdown(summary: dict[str, Any]) -> str:
 
     counter_section("Failure code counts", summary["failureCodeCounts"])
     counter_section("Recovery hints used", summary["recoveryHintsUsedCounts"])
-    counter_section("Wrong file edited", summary["wrongFileEditedCounts"])
-    counter_section("Stale recovery succeeded", summary["staleRecoverySucceededCounts"])
-    counter_section("Rollback succeeded", summary["rollbackSucceededCounts"])
+    counter_section("Wrong file edited (by mode)", summary["wrongFileEditedCounts"])
+    counter_section("Wrong file edited (by trap type)", summary["wrongFileEditedByTrapType"])
+    counter_section("Stale recovery succeeded (by mode)", summary["staleRecoverySucceededCounts"])
+    counter_section("Recovery succeeded (by trap type)", summary["recoverySucceededByTrapType"])
+    counter_section("Rollback succeeded (by mode)", summary["rollbackSucceededCounts"])
+    counter_section("Rollback succeeded (by trap type)", summary["rollbackSucceededByTrapType"])
 
     return "\n".join(lines).rstrip() + "\n"
 
@@ -198,8 +306,8 @@ def main() -> int:
             print("no task_result rows found", file=sys.stderr)
             return 1
 
-        categories = load_task_categories()
-        summary = aggregate(rows, categories, paths)
+        task_meta = load_task_meta()
+        summary = aggregate(rows, task_meta, paths)
 
         print_console_table(summary)
 

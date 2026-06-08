@@ -212,9 +212,11 @@ def run_verify(task_id: str, workspace: Path) -> bool:
     return completed.returncode == 0
 
 
-def check_wrong_files(workspace: Path, target_files: list[str], task_id: str) -> bool:
+def check_wrong_files(workspace: Path, target_files: list[str], task_id: str, meta: dict[str, Any] | None = None) -> bool:
     before_root = TASKS_DIR / task_id / "before"
     targets = set(target_files)
+    if meta:
+        targets.update(meta.get("decoyFiles", []))
     for path in workspace.rglob("*"):
         if not path.is_file() or path.is_symlink():
             continue
@@ -548,6 +550,81 @@ def wf_verify_after_mutation_batch(session: RpcSession, ctx: WorkflowContext) ->
     session.call("verify.status", {})
 
 
+def wf_adv_wrong_file_decoy(session: RpcSession, ctx: WorkflowContext) -> None:
+    session.call("search.literal", {"query": "TIMEOUT_MS", "maxResults": 10})
+    session.call("file.stat", {"path": ctx.meta["targetFiles"][0]})
+    apply_patch_rpc(session, ctx.meta["targetFiles"][0], ctx.patch)
+
+
+def wf_adv_verify_only(session: RpcSession, ctx: WorkflowContext) -> None:
+    session.call("file.stat", {"path": ctx.meta["targetFiles"][0]})
+    apply_patch_rpc(session, ctx.meta["targetFiles"][0], ctx.patch)
+
+
+def wf_adv_preserve_partial(session: RpcSession, ctx: WorkflowContext) -> None:
+    session.call("file.read", {"path": ctx.meta["targetFiles"][0]})
+    apply_patch_rpc(session, ctx.meta["targetFiles"][0], ctx.patch)
+
+
+def wf_adv_failed_patch_retry(session: RpcSession, ctx: WorkflowContext) -> None:
+    path = ctx.meta["targetFiles"][0]
+    bad = ctx.meta.get("badPatch", "")
+    bad_val = session.call("patch.validate", {"path": path, "patch": bad})
+    if not _rpc_ok(bad_val):
+        ctx.note_patch_validate_failure()
+    ctx.retries += 1
+    apply_patch_rpc(session, path, ctx.patch)
+
+
+def wf_adv_multi_file_coord(session: RpcSession, ctx: WorkflowContext) -> None:
+    for target in ctx.meta["targetFiles"]:
+        apply_patch_rpc(session, target, _extract_file_patch(ctx.patch, target))
+
+
+def wf_adv_stale_read(session: RpcSession, ctx: WorkflowContext) -> None:
+    apply_patch_rpc(
+        session,
+        ctx.meta["targetFiles"][0],
+        ctx.patch,
+        stale_mutation=ctx.meta.get("staleMutation"),
+    )
+
+
+def wf_adv_rollback_corruption(session: RpcSession, ctx: WorkflowContext) -> None:
+    path = ctx.meta["targetFiles"][0]
+    task_id = ctx.meta["id"]
+    before = (TASKS_DIR / task_id / "before" / path).read_text(encoding="utf-8")
+    bad = ctx.meta.get("badPatch", "")
+    bad_val = session.call("patch.validate", {"path": path, "patch": bad})
+    if _rpc_ok(bad_val):
+        before_hash = bad_val["result"]["validation"]["beforeContentHash"]
+        applied = session.call(
+            "patch.apply",
+            {"path": path, "patch": bad, "confirm": True, "expectBeforeHash": before_hash},
+        )
+        if not _rpc_ok(applied):
+            ctx.note_hint(_hint(applied))
+    (session.workspace / path).write_text(before, encoding="utf-8")
+    ctx.metrics.rollback_succeeded = True
+    apply_patch_rpc(session, path, ctx.patch)
+
+
+def wf_adv_noop_trap(session: RpcSession, ctx: WorkflowContext) -> None:
+    session.call("shell.rg", {"pattern": "MARKER", "path": "app.py", "maxResults": 5})
+    apply_patch_rpc(session, ctx.meta["targetFiles"][0], ctx.patch)
+
+
+def wf_adv_path_containment(session: RpcSession, ctx: WorkflowContext) -> None:
+    session.call("file.stat", {"path": ctx.meta["targetFiles"][0]})
+    apply_patch_rpc(session, ctx.meta["targetFiles"][0], ctx.patch)
+
+
+def wf_adv_ambiguous_symbol(session: RpcSession, ctx: WorkflowContext) -> None:
+    session.call("search.literal", {"query": "fetch", "maxResults": 10})
+    session.call("file.read", {"path": "providers/__init__.py"})
+    apply_patch_rpc(session, ctx.meta["targetFiles"][0], ctx.patch)
+
+
 RPC_WORKFLOWS: dict[str, Callable[[RpcSession, WorkflowContext], None]] = {
     "literal_search_patch": wf_literal_search_patch,
     "token_search_patch": wf_token_search_patch,
@@ -567,6 +644,16 @@ RPC_WORKFLOWS: dict[str, Callable[[RpcSession, WorkflowContext], None]] = {
     "partial_grep_truncation": wf_partial_grep_truncation,
     "verify_after_mutation": wf_verify_after_mutation,
     "verify_after_mutation_batch": wf_verify_after_mutation_batch,
+    "adv_wrong_file_decoy": wf_adv_wrong_file_decoy,
+    "adv_verify_only": wf_adv_verify_only,
+    "adv_preserve_partial": wf_adv_preserve_partial,
+    "adv_failed_patch_retry": wf_adv_failed_patch_retry,
+    "adv_multi_file_coord": wf_adv_multi_file_coord,
+    "adv_stale_read": wf_adv_stale_read,
+    "adv_rollback_corruption": wf_adv_rollback_corruption,
+    "adv_noop_trap": wf_adv_noop_trap,
+    "adv_path_containment": wf_adv_path_containment,
+    "adv_ambiguous_symbol": wf_adv_ambiguous_symbol,
 }
 
 
@@ -587,7 +674,17 @@ def run_task_bridge(workspace: Path, ctx: WorkflowContext) -> None:
     ensure_workspace_open(workspace)
 
     # Stale recovery requires mutating between validate and apply — use RPC workflow.
-    if workflow == "stale_content_recovery":
+    if workflow in ("stale_content_recovery", "adv_stale_read"):
+        run_task_rpc(workspace, ctx)
+        return
+
+    adv_bridge_rpc = {
+        "adv_failed_patch_retry",
+        "adv_rollback_corruption",
+        "adv_multi_file_coord",
+        "adv_noop_trap",
+    }
+    if workflow in adv_bridge_rpc:
         run_task_rpc(workspace, ctx)
         return
 
@@ -674,6 +771,16 @@ def run_task_bridge(workspace: Path, ctx: WorkflowContext) -> None:
         elif workflow == "verify_after_mutation":
             bridge.run(["patch", "safe-file", meta["targetFiles"][0], str(patch_file)])
             bridge.run(["verify", "fast"])
+        elif workflow == "adv_wrong_file_decoy":
+            bridge.run(["search", "literal", "TIMEOUT_MS"])
+            bridge.run(["stat", meta["targetFiles"][0]])
+            bridge.run(["patch", "safe-file", meta["targetFiles"][0], str(patch_file)])
+        elif workflow in ("adv_verify_only", "adv_preserve_partial", "adv_path_containment"):
+            bridge.run(["stat", meta["targetFiles"][0]])
+            bridge.run(["patch", "safe-file", meta["targetFiles"][0], str(patch_file)])
+        elif workflow == "adv_ambiguous_symbol":
+            bridge.run(["search", "literal", "fetch"])
+            bridge.run(["patch", "safe-file", meta["targetFiles"][0], str(patch_file)])
         else:
             raise RuntimeError(f"unsupported bridge workflow: {workflow}")
 
@@ -716,7 +823,9 @@ def run_single_task(task_id: str, mode: str, *, executor: str = "reference") -> 
             try:
                 meta = load_task(task_id)
                 metrics.verify_passed = run_verify(task_id, workspace)
-                metrics.wrong_file_edited = check_wrong_files(workspace, meta.get("targetFiles", []), task_id)
+                metrics.wrong_file_edited = check_wrong_files(
+                    workspace, meta.get("targetFiles", []), task_id, meta
+                )
                 if not metrics.verify_passed:
                     metrics.task_success = False
             except Exception:

@@ -1,0 +1,30 @@
+{
+  "id": "task_024",
+  "title": "Recover from failed patch",
+  "category": "recover_from_failed_patch",
+  "workflow": "adv_failed_patch_retry",
+  "modes": [
+    "raw_rpc",
+    "bridge"
+  ],
+  "expectedTools": [
+    "patch.validate",
+    "patch.apply"
+  ],
+  "failureModes": [
+    "patch_failed",
+    "stale_content"
+  ],
+  "targetFiles": [
+    "fixme.py"
+  ],
+  "expectedFailureModes": [
+    "patch_failed"
+  ],
+  "requiresRecovery": true,
+  "requiresRollback": false,
+  "mustInspectVerify": false,
+  "adversarial": true,
+  "trapType": "recover_from_failed_patch",
+  "badPatch": "--- fixme.py\n+++ fixme.py\n@@ -1 +1 @@\n-count = 99\n+count = 5\n"
+}

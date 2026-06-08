@@ -1,0 +1,30 @@
+{
+  "id": "task_022",
+  "title": "Verify-only requirement",
+  "category": "verify_only_requirement",
+  "workflow": "adv_verify_only",
+  "modes": [
+    "raw_rpc",
+    "bridge"
+  ],
+  "expectedTools": [
+    "file.read",
+    "patch.validate",
+    "patch.apply"
+  ],
+  "failureModes": [
+    "wrongFileEdited",
+    "patch_failed"
+  ],
+  "targetFiles": [
+    "src/settings.py"
+  ],
+  "expectedFailureModes": [
+    "wrongFileEdited"
+  ],
+  "requiresRecovery": false,
+  "requiresRollback": false,
+  "mustInspectVerify": true,
+  "adversarial": true,
+  "trapType": "verify_only_requirement"
+}

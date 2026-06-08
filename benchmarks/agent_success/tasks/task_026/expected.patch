@@ -1,0 +1,5 @@
+--- worker.py
++++ worker.py
+@@ -1 +1 @@
+-status = 'pending'
++status = 'ready'

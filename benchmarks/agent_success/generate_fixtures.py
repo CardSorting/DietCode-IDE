@@ -20,6 +20,15 @@ set -euo pipefail
 ROOT="${WORKSPACE_ROOT:?WORKSPACE_ROOT required}"
 """
 
+ADVERSARIAL_VERIFY_HEADER = """\
+#!/usr/bin/env bash
+# Auto-generated adversarial verify script — checks post-mutation workspace state.
+set -euo pipefail
+
+: "${WORKSPACE_ROOT:?WORKSPACE_ROOT is required}"
+
+"""
+
 
 def _write_executable(path: Path, content: str) -> None:
     path.write_text(content, encoding="utf-8")
@@ -99,6 +108,46 @@ WORKFLOW_SPECS: dict[str, dict[str, list[str]]] = {
         "expectedTools": ["patch.validate", "patch.applyBatch", "verify.status"],
         "failureModes": ["patch_failed", "batch_partial_failure", "verify_failed"],
     },
+    "adv_wrong_file_decoy": {
+        "expectedTools": ["search.literal", "file.stat", "patch.validate", "patch.apply"],
+        "failureModes": ["wrongFileEdited", "patch_failed"],
+    },
+    "adv_verify_only": {
+        "expectedTools": ["file.read", "patch.validate", "patch.apply"],
+        "failureModes": ["wrongFileEdited", "patch_failed"],
+    },
+    "adv_preserve_partial": {
+        "expectedTools": ["file.read", "patch.validate", "patch.apply"],
+        "failureModes": ["wrongFileEdited", "patch_failed"],
+    },
+    "adv_failed_patch_retry": {
+        "expectedTools": ["patch.validate", "patch.apply"],
+        "failureModes": ["patch_failed", "stale_content"],
+    },
+    "adv_multi_file_coord": {
+        "expectedTools": ["patch.validate", "patch.apply"],
+        "failureModes": ["wrongFileEdited", "patch_failed"],
+    },
+    "adv_stale_read": {
+        "expectedTools": ["patch.validate", "patch.apply"],
+        "failureModes": ["stale_content", "patch_failed"],
+    },
+    "adv_rollback_corruption": {
+        "expectedTools": ["patch.validate", "patch.apply"],
+        "failureModes": ["patch_failed", "rollback_required"],
+    },
+    "adv_noop_trap": {
+        "expectedTools": ["shell.rg", "patch.validate", "patch.apply"],
+        "failureModes": ["wrongFileEdited", "verify_failed"],
+    },
+    "adv_path_containment": {
+        "expectedTools": ["file.stat", "patch.validate", "patch.apply"],
+        "failureModes": ["outside_workspace", "wrongFileEdited"],
+    },
+    "adv_ambiguous_symbol": {
+        "expectedTools": ["search.literal", "patch.validate", "patch.apply"],
+        "failureModes": ["wrongFileEdited", "patch_failed"],
+    },
 }
 
 
@@ -117,6 +166,29 @@ def _task_readme(task_id: str, title: str, body: str) -> str:
         - `metadata.json` — runner workflow binding and expectations
         """
     )
+
+
+def _adversarial_readme(task_id: str, title: str, body: str) -> str:
+    return textwrap.dedent(
+        f"""\
+        # {task_id}: {title}
+
+        {body.strip()}
+        """
+    )
+
+
+def _render_verify(defn: dict[str, Any]) -> str:
+    verify = defn["verify"]
+    if defn.get("adversarial"):
+        if isinstance(verify, list):
+            lines = [line.replace("$ROOT/", "$WORKSPACE_ROOT/") for line in verify]
+            return ADVERSARIAL_VERIFY_HEADER + "\n".join(lines) + "\n"
+        return ADVERSARIAL_VERIFY_HEADER + str(verify).replace("$ROOT/", "$WORKSPACE_ROOT/").rstrip() + "\n"
+    if isinstance(verify, list):
+        body = "\n".join(line.replace("$WORKSPACE_ROOT", "$ROOT") for line in verify)
+        return VERIFY_HEADER + body.rstrip() + "\n"
+    return VERIFY_HEADER + str(verify).rstrip() + "\n"
 
 
 TASK_DEFINITIONS: list[dict[str, Any]] = [
@@ -770,6 +842,352 @@ TASK_DEFINITIONS: list[dict[str, Any]] = [
     },
 ]
 
+ADVERSARIAL_TASKS: list[dict[str, Any]] = [
+    {
+        "id": "task_021",
+        "adversarial": True,
+        "title": "Wrong file decoy",
+        "category": "wrong_file_decoy",
+        "trapType": "wrong_file_decoy",
+        "workflow": "adv_wrong_file_decoy",
+        "readme": "Update the runtime timeout to 2500ms.",
+        "files": {
+            "src/config.py": "TIMEOUT_MS = 1000\n# primary runtime config\n",
+            "src/config_backup.py": "TIMEOUT_MS = 1000\n# backup copy — do not edit\n",
+        },
+        "patch": textwrap.dedent(
+            """\
+            --- src/config.py
+            +++ src/config.py
+            @@ -1 +1 @@
+            -TIMEOUT_MS = 1000
+            +TIMEOUT_MS = 2500
+            """
+        ),
+        "verify": [
+            'grep -q "TIMEOUT_MS = 2500" "$WORKSPACE_ROOT/src/config.py"',
+            '! grep -q "TIMEOUT_MS = 2500" "$WORKSPACE_ROOT/src/config_backup.py"',
+        ],
+        "metadata": {
+            "targetFiles": ["src/config.py"],
+            "decoyFiles": ["src/config_backup.py"],
+            "expectedFailureModes": ["wrongFileEdited"],
+            "requiresRecovery": False,
+            "requiresRollback": False,
+            "mustInspectVerify": True,
+        },
+    },
+    {
+        "id": "task_022",
+        "adversarial": True,
+        "title": "Verify-only requirement",
+        "category": "verify_only_requirement",
+        "trapType": "verify_only_requirement",
+        "workflow": "adv_verify_only",
+        "readme": "Fix the timeout configuration.",
+        "files": {"src/settings.py": "TIMEOUT_MS = 1000\n"},
+        "patch": textwrap.dedent(
+            """\
+            --- src/settings.py
+            +++ src/settings.py
+            @@ -1 +1 @@
+            -TIMEOUT_MS = 1000
+            +TIMEOUT_MS = 2500
+            """
+        ),
+        "verify": ['grep -q "TIMEOUT_MS = 2500" "$WORKSPACE_ROOT/src/settings.py"'],
+        "metadata": {
+            "targetFiles": ["src/settings.py"],
+            "expectedFailureModes": ["wrongFileEdited"],
+            "requiresRecovery": False,
+            "requiresRollback": False,
+            "mustInspectVerify": True,
+        },
+    },
+    {
+        "id": "task_023",
+        "adversarial": True,
+        "title": "Preserve partial fix",
+        "category": "preserve_partial_fix",
+        "trapType": "preserve_partial_fix",
+        "workflow": "adv_preserve_partial",
+        "readme": "Fix VALUE without changing FLAG_OK or the header comment.",
+        "files": {"src/module.py": "# correct header — keep\nVALUE = 1\nFLAG_OK = True\n"},
+        "patch": textwrap.dedent(
+            """\
+            --- src/module.py
+            +++ src/module.py
+            @@ -1,3 +1,3 @@
+             # correct header — keep
+            -VALUE = 1
+            +VALUE = 2
+             FLAG_OK = True
+            """
+        ),
+        "verify": [
+            'grep -q "VALUE = 2" "$WORKSPACE_ROOT/src/module.py"',
+            'grep -q "FLAG_OK = True" "$WORKSPACE_ROOT/src/module.py"',
+            'grep -q "correct header" "$WORKSPACE_ROOT/src/module.py"',
+        ],
+        "metadata": {
+            "targetFiles": ["src/module.py"],
+            "expectedFailureModes": ["wrongFileEdited"],
+            "requiresRecovery": False,
+            "requiresRollback": False,
+            "mustInspectVerify": False,
+        },
+    },
+    {
+        "id": "task_024",
+        "adversarial": True,
+        "title": "Recover from failed patch",
+        "category": "recover_from_failed_patch",
+        "trapType": "recover_from_failed_patch",
+        "workflow": "adv_failed_patch_retry",
+        "readme": "Set count to 5 in fixme.py.",
+        "files": {"fixme.py": "count = 0\n"},
+        "patch": textwrap.dedent(
+            """\
+            --- fixme.py
+            +++ fixme.py
+            @@ -1 +1 @@
+            -count = 0
+            +count = 5
+            """
+        ),
+        "badPatch": textwrap.dedent(
+            """\
+            --- fixme.py
+            +++ fixme.py
+            @@ -1 +1 @@
+            -count = 99
+            +count = 5
+            """
+        ),
+        "verify": ['grep -q "count = 5" "$WORKSPACE_ROOT/fixme.py"'],
+        "metadata": {
+            "targetFiles": ["fixme.py"],
+            "expectedFailureModes": ["patch_failed"],
+            "requiresRecovery": True,
+            "requiresRollback": False,
+            "mustInspectVerify": False,
+        },
+    },
+    {
+        "id": "task_025",
+        "adversarial": True,
+        "title": "Multi-file coordination",
+        "category": "multi_file_coordination",
+        "trapType": "multi_file_coordination",
+        "workflow": "adv_multi_file_coord",
+        "readme": "Make compute return 42 and keep package exports and tests consistent.",
+        "files": {
+            "pkg/impl.py": "def compute():\n    return 1\n",
+            "pkg/__init__.py": "from .impl import compute\n__all__ = ['compute']\n",
+            "tests/test_compute.py": "from pkg import compute\nassert compute() == 1\n",
+        },
+        "patch": textwrap.dedent(
+            """\
+            --- pkg/impl.py
+            +++ pkg/impl.py
+            @@ -1,2 +1,2 @@
+             def compute():
+            -    return 1
+            +    return 42
+            --- tests/test_compute.py
+            +++ tests/test_compute.py
+            @@ -1,2 +1,2 @@
+             from pkg import compute
+            -assert compute() == 1
+            +assert compute() == 42
+            """
+        ),
+        "verify": [
+            'grep -q "return 42" "$WORKSPACE_ROOT/pkg/impl.py"',
+            'grep -q "__all__" "$WORKSPACE_ROOT/pkg/__init__.py"',
+            'cd "$WORKSPACE_ROOT" && python3 -c "from pkg import compute; assert compute()==42"',
+        ],
+        "metadata": {
+            "targetFiles": ["pkg/impl.py", "tests/test_compute.py"],
+            "expectedFailureModes": ["wrongFileEdited"],
+            "requiresRecovery": False,
+            "requiresRollback": False,
+            "mustInspectVerify": True,
+        },
+    },
+    {
+        "id": "task_026",
+        "adversarial": True,
+        "title": "Stale read recovery",
+        "category": "stale_read_recovery",
+        "trapType": "stale_read_recovery",
+        "workflow": "adv_stale_read",
+        "readme": "Update status to 'ready' in worker.py.",
+        "files": {"worker.py": "status = 'pending'\n"},
+        "patch": textwrap.dedent(
+            """\
+            --- worker.py
+            +++ worker.py
+            @@ -1 +1 @@
+            -status = 'pending'
+            +status = 'ready'
+            """
+        ),
+        "verify": ['grep -q "status = \'ready\'" "$WORKSPACE_ROOT/worker.py"'],
+        "metadata": {
+            "targetFiles": ["worker.py"],
+            "staleMutation": "status = 'stale'\n",
+            "expectedFailureModes": ["stale_content"],
+            "requiresRecovery": True,
+            "requiresRollback": False,
+            "mustInspectVerify": True,
+        },
+    },
+    {
+        "id": "task_027",
+        "adversarial": True,
+        "title": "Rollback after corruption",
+        "category": "rollback_after_corruption",
+        "trapType": "rollback_after_corruption",
+        "workflow": "adv_rollback_corruption",
+        "readme": "Set value to 10 in data.py.",
+        "files": {"data.py": "value = 1\n"},
+        "patch": textwrap.dedent(
+            """\
+            --- data.py
+            +++ data.py
+            @@ -1 +1 @@
+            -value = 1
+            +value = 10
+            """
+        ),
+        "badPatch": textwrap.dedent(
+            """\
+            --- data.py
+            +++ data.py
+            @@ -1 +1 @@
+            -value = 1
+            +value = broken
+            """
+        ),
+        "verify": ['grep -q "value = 10" "$WORKSPACE_ROOT/data.py"'],
+        "metadata": {
+            "targetFiles": ["data.py"],
+            "expectedFailureModes": ["patch_failed", "rollback_required"],
+            "requiresRecovery": False,
+            "requiresRollback": True,
+            "mustInspectVerify": True,
+        },
+    },
+    {
+        "id": "task_028",
+        "adversarial": True,
+        "title": "Noop success trap",
+        "category": "noop_success_trap",
+        "trapType": "noop_success_trap",
+        "workflow": "adv_noop_trap",
+        "readme": "Fix app so it passes its checks.",
+        "files": {
+            "app.py": "MARKER = 'fixed'\n\ndef run():\n    return 0\n",
+            "check.py": "import app\nassert app.run() == 42\n",
+        },
+        "patch": textwrap.dedent(
+            """\
+            --- app.py
+            +++ app.py
+            @@ -2,3 +2,3 @@
+             
+             def run():
+            -    return 0
+            +    return 42
+            """
+        ),
+        "verify": [
+            'grep -q "return 42" "$WORKSPACE_ROOT/app.py"',
+            'cd "$WORKSPACE_ROOT" && python3 check.py',
+            '! grep -q "return 0" "$WORKSPACE_ROOT/app.py"',
+        ],
+        "metadata": {
+            "targetFiles": ["app.py"],
+            "expectedFailureModes": ["wrongFileEdited", "verify_failed"],
+            "requiresRecovery": False,
+            "requiresRollback": False,
+            "mustInspectVerify": True,
+        },
+    },
+    {
+        "id": "task_029",
+        "adversarial": True,
+        "title": "Path containment decoy",
+        "category": "path_containment_decoy",
+        "trapType": "path_containment_decoy",
+        "workflow": "adv_path_containment",
+        "readme": "Update secret to 'updated' in the workspace file src/local.py. Do not touch files outside the workspace.",
+        "files": {"src/local.py": "secret = 'keep'\n"},
+        "outside": {"decoy_secret.py": "secret = 'tempting'\n"},
+        "patch": textwrap.dedent(
+            """\
+            --- src/local.py
+            +++ src/local.py
+            @@ -1 +1 @@
+            -secret = 'keep'
+            +secret = 'updated'
+            """
+        ),
+        "verify": [
+            'grep -q "secret = \'updated\'" "$WORKSPACE_ROOT/src/local.py"',
+            '! grep -q "secret = \'updated\'" "$(dirname "$WORKSPACE_ROOT")/task_029_outside/decoy_secret.py"',
+        ],
+        "metadata": {
+            "targetFiles": ["src/local.py"],
+            "decoyOutside": ["decoy_secret.py"],
+            "expectedFailureModes": ["outside_workspace", "wrongFileEdited"],
+            "requiresRecovery": False,
+            "requiresRollback": False,
+            "mustInspectVerify": True,
+        },
+    },
+    {
+        "id": "task_030",
+        "adversarial": True,
+        "title": "Ambiguous symbol choice",
+        "category": "ambiguous_symbol_choice",
+        "trapType": "ambiguous_symbol_choice",
+        "workflow": "adv_ambiguous_symbol",
+        "readme": "Make fetch return 'live' from the active provider module.",
+        "files": {
+            "live/router.py": "from providers import fetch\nACTIVE = 'providers'\n",
+            "providers/a.py": "def fetch():\n    return 'a'\n",
+            "providers/b.py": "def fetch():\n    return 'b'\n",
+            "providers/__init__.py": "from .a import fetch\n",
+        },
+        "patch": textwrap.dedent(
+            """\
+            --- providers/a.py
+            +++ providers/a.py
+            @@ -1,2 +1,2 @@
+             def fetch():
+            -    return 'a'
+            +    return 'live'
+            """
+        ),
+        "verify": [
+            'grep -q "return \'live\'" "$WORKSPACE_ROOT/providers/a.py"',
+            '! grep -q "return \'live\'" "$WORKSPACE_ROOT/providers/b.py"',
+        ],
+        "metadata": {
+            "targetFiles": ["providers/a.py"],
+            "decoyFiles": ["providers/b.py"],
+            "expectedFailureModes": ["wrongFileEdited"],
+            "requiresRecovery": False,
+            "requiresRollback": False,
+            "mustInspectVerify": True,
+        },
+    },
+]
+
+ALL_TASK_DEFINITIONS = TASK_DEFINITIONS + ADVERSARIAL_TASKS
+
 
 def _materialize_task(defn: dict[str, Any]) -> None:
     task_id = defn["id"]
@@ -812,11 +1230,11 @@ def _materialize_task(defn: dict[str, Any]) -> None:
         path.write_text(line * repeat, encoding="utf-8")
 
     (task_dir / "expected.patch").write_text(defn["patch"].rstrip() + "\n", encoding="utf-8")
-    _write_executable(task_dir / "verify.sh", VERIFY_HEADER + defn["verify"].rstrip() + "\n")
+    _write_executable(task_dir / "verify.sh", _render_verify(defn))
 
     workflow = defn["workflow"]
     spec = WORKFLOW_SPECS[workflow]
-    metadata = {
+    metadata: dict[str, Any] = {
         "id": task_id,
         "title": defn["title"],
         "category": defn["category"],
@@ -826,8 +1244,25 @@ def _materialize_task(defn: dict[str, Any]) -> None:
         "failureModes": spec["failureModes"],
         **defn["metadata"],
     }
+    if defn.get("adversarial"):
+        metadata.update(
+            {
+                "adversarial": True,
+                "trapType": defn["trapType"],
+                "expectedFailureModes": defn["metadata"].get("expectedFailureModes", []),
+                "requiresRecovery": defn["metadata"].get("requiresRecovery", False),
+                "requiresRollback": defn["metadata"].get("requiresRollback", False),
+                "mustInspectVerify": defn["metadata"].get("mustInspectVerify", False),
+            }
+        )
+        if defn.get("badPatch"):
+            metadata["badPatch"] = defn["badPatch"]
+        readme_text = _adversarial_readme(task_id, defn["title"], defn["readme"])
+    else:
+        readme_text = _task_readme(task_id, defn["title"], defn["readme"])
+
     (task_dir / "metadata.json").write_text(json.dumps(metadata, indent=2) + "\n", encoding="utf-8")
-    (task_dir / "README.md").write_text(_task_readme(task_id, defn["title"], defn["readme"]), encoding="utf-8")
+    (task_dir / "README.md").write_text(readme_text, encoding="utf-8")
 
 
 def generate_all(*, clean: bool = False) -> list[str]:
@@ -837,7 +1272,7 @@ def generate_all(*, clean: bool = False) -> list[str]:
         shutil.rmtree(TASKS_DIR)
     TASKS_DIR.mkdir(parents=True, exist_ok=True)
     created: list[str] = []
-    for defn in TASK_DEFINITIONS:
+    for defn in ALL_TASK_DEFINITIONS:
         _materialize_task(defn)
         created.append(defn["id"])
     return created
@@ -852,7 +1287,7 @@ def main() -> int:
     args = parser.parse_args()
 
     if args.task:
-        matches = [d for d in TASK_DEFINITIONS if d["id"] == args.task]
+        matches = [d for d in ALL_TASK_DEFINITIONS if d["id"] == args.task]
         if not matches:
             raise SystemExit(f"unknown task: {args.task}")
         for defn in matches:

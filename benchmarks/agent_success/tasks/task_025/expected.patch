@@ -1,0 +1,12 @@
+--- pkg/impl.py
++++ pkg/impl.py
+@@ -1,2 +1,2 @@
+ def compute():
+-    return 1
++    return 42
+--- tests/test_compute.py
++++ tests/test_compute.py
+@@ -1,2 +1,2 @@
+ from pkg import compute
+-assert compute() == 1
++assert compute() == 42

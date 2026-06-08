@@ -1,0 +1,30 @@
+{
+  "id": "task_025",
+  "title": "Multi-file coordination",
+  "category": "multi_file_coordination",
+  "workflow": "adv_multi_file_coord",
+  "modes": [
+    "raw_rpc",
+    "bridge"
+  ],
+  "expectedTools": [
+    "patch.validate",
+    "patch.apply"
+  ],
+  "failureModes": [
+    "wrongFileEdited",
+    "patch_failed"
+  ],
+  "targetFiles": [
+    "pkg/impl.py",
+    "tests/test_compute.py"
+  ],
+  "expectedFailureModes": [
+    "wrongFileEdited"
+  ],
+  "requiresRecovery": false,
+  "requiresRollback": false,
+  "mustInspectVerify": true,
+  "adversarial": true,
+  "trapType": "multi_file_coordination"
+}

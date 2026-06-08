@@ -1,0 +1,31 @@
+{
+  "id": "task_027",
+  "title": "Rollback after corruption",
+  "category": "rollback_after_corruption",
+  "workflow": "adv_rollback_corruption",
+  "modes": [
+    "raw_rpc",
+    "bridge"
+  ],
+  "expectedTools": [
+    "patch.validate",
+    "patch.apply"
+  ],
+  "failureModes": [
+    "patch_failed",
+    "rollback_required"
+  ],
+  "targetFiles": [
+    "data.py"
+  ],
+  "expectedFailureModes": [
+    "patch_failed",
+    "rollback_required"
+  ],
+  "requiresRecovery": false,
+  "requiresRollback": true,
+  "mustInspectVerify": true,
+  "adversarial": true,
+  "trapType": "rollback_after_corruption",
+  "badPatch": "--- data.py\n+++ data.py\n@@ -1 +1 @@\n-value = 1\n+value = broken\n"
+}
