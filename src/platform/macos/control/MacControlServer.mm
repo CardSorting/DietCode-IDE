@@ -1195,6 +1195,14 @@ static const void* kDietCodeReadQueueKey = &kDietCodeReadQueueKey;
            outErrCode:(NSString**)outErrCode 
           outErrMsg:(NSString**)outErrMsg
              outPaths:(NSString**)outPaths {
+
+    if ([method hasPrefix:@"memory."] ||
+        [method isEqualToString:@"patch.apply"] ||
+        [method isEqualToString:@"patch.applyBatch"] ||
+        [method isEqualToString:@"operation.status"] ||
+        [method isEqualToString:@"workspace.revision"]) {
+        [self ensureMemoryServiceForWorkspace];
+    }
     
     NSString* path = params[@"path"];
     if (path &&
@@ -1288,7 +1296,9 @@ static const void* kDietCodeReadQueueKey = &kDietCodeReadQueueKey;
     }
 
     // Route based on namespace prefixes to respective categories
-    if ([method hasPrefix:@"workspace."] || [method hasPrefix:@"file."] || [method hasPrefix:@"search."] || [method hasPrefix:@"operation."]) {
+    if ([method hasPrefix:@"memory."]) {
+        [self executeMemoryMethod:method params:params outResult:outResult outErrCode:outErrCode outErrMsg:outErrMsg outPaths:outPaths];
+    } else if ([method hasPrefix:@"workspace."] || [method hasPrefix:@"file."] || [method hasPrefix:@"search."] || [method hasPrefix:@"operation."]) {
         [self executeFileMethod:method params:params outResult:outResult outErrCode:outErrCode outErrMsg:outErrMsg outPaths:outPaths];
     } else if ([method hasPrefix:@"editor."] || [method hasPrefix:@"buffers."] || [method hasPrefix:@"changes."] || [method hasPrefix:@"diff."] || [method hasPrefix:@"patch."]) {
         [self executeEditorMethod:method params:params outResult:outResult outErrCode:outErrCode outErrMsg:outErrMsg outPaths:outPaths];

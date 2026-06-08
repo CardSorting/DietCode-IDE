@@ -8,6 +8,7 @@
 #import "MacControlWorkspaceState.hpp"
 #import "MacControlTaskRuntime.hpp"
 #import "MacControlComboRuntime.hpp"
+#import "MacControlMemoryService.hpp"
 
 @class DietCodeClientConnection;
 
@@ -20,6 +21,7 @@
     MacControlWorkspaceState* _workspaceState;
     MacControlTaskRuntime* _taskRuntime;
     MacControlComboRuntime* _comboRuntime;
+    MacControlMemoryService* _memoryService;
     int _serverFd;
     NSThread* _acceptThread;
     NSString* _lastVerifyCommand;
@@ -92,4 +94,10 @@
 
 @interface DietCodeControlServer (Context)
 - (void)executeContextMethod:(NSString*)method params:(NSDictionary*)params outResult:(NSDictionary**)outResult outErrCode:(NSString**)outErrCode outErrMsg:(NSString**)outErrMsg outPaths:(NSString**)outPaths;
+@end
+
+@interface DietCodeControlServer (Memory)
+- (void)ensureMemoryServiceForWorkspace;
+- (void)executeMemoryMethod:(NSString*)method params:(NSDictionary*)params outResult:(NSDictionary**)outResult outErrCode:(NSString**)outErrCode outErrMsg:(NSString**)outErrMsg outPaths:(NSString**)outPaths;
+- (void)persistMutationToMemory:(NSString*)method idempotencyKey:(NSString*)idempotencyKey paramsHash:(NSString*)paramsHash receipt:(NSDictionary*)receipt changedPaths:(NSArray<NSString*>*)paths revisionBefore:(NSInteger)revisionBefore revisionAfter:(NSInteger)revisionAfter resultPayload:(NSDictionary*)resultPayload;
 @end

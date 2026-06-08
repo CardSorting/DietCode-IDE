@@ -71,6 +71,8 @@ MACOS_MM := \
 	src/platform/macos/control/services/MacControlSearchService.mm \
 	src/platform/macos/control/services/MacControlPatchService.mm \
 	src/platform/macos/control/services/MacControlWorkspaceState.mm \
+	src/platform/macos/control/services/MacControlMemoryService.mm \
+	src/platform/macos/control/categories/MacControlServer+Memory.mm \
 	src/platform/macos/control/services/MacControlTaskRuntime.mm \
 	src/platform/macos/control/services/MacControlComboRuntime.mm \
 	src/platform/macos/control/services/MacControlRoutingPolicy.mm \
@@ -86,7 +88,7 @@ MACOS_MM := \
 	src/filesystem/FileWatcher.mm \
 	src/core/LSPClient.mm
 
-.PHONY: all app run headless ensure-socket restart-agent-server agent-ready agent-status agent-ping agent-methods agent-capabilities agent-self-test test-agent-offline control-smoke test-task-health test-rpc-transaction test-ergonomics test-grep-diff-tooling test-runtime-determinism test-transaction-kernel test-harness-realism test-deterministic-retrieval test-agent-workflow-smoke test-cli-agent-failures test-docs-code-drift test-partial-success-closure test-agent-integration agent-integration verify-agent-runtime verify-agent-runtime-full test clean
+.PHONY: all app run headless ensure-socket restart-agent-server agent-ready agent-status agent-ping agent-methods agent-capabilities agent-self-test test-agent-offline control-smoke test-task-health test-rpc-transaction test-ergonomics test-grep-diff-tooling test-runtime-determinism test-transaction-kernel test-harness-realism test-deterministic-retrieval test-agent-workflow-smoke test-cli-agent-failures test-docs-code-drift test-partial-success-closure test-broccoliq-runtime-memory test-agent-integration agent-integration verify-agent-runtime verify-agent-runtime-full test clean
 
 all: app test
 
@@ -102,7 +104,7 @@ $(APP_RESOURCES):
 app: $(APP_MACOS) $(APP_RESOURCES)
 	cp resources/Info.plist $(APP_CONTENTS)/Info.plist
 	if [ -f resources/AppIcon.icns ]; then cp resources/AppIcon.icns $(APP_RESOURCES)/AppIcon.icns; fi
-	$(CXX) $(OBJCXXFLAGS) $(CORE_CPP) $(MACOS_MM) -framework Cocoa -o $(APP_MACOS)/$(APP_NAME)
+	$(CXX) $(OBJCXXFLAGS) $(CORE_CPP) $(MACOS_MM) -framework Cocoa -lsqlite3 -o $(APP_MACOS)/$(APP_NAME)
 
 run: app
 	open $(APP_BUNDLE)
@@ -116,7 +118,7 @@ ensure-socket: app
 restart-agent-server: app
 	-pkill -f "$(APP_MACOS)/$(APP_NAME)" 2>/dev/null || true
 	sleep 0.5
-	$(APP_MACOS)/$(APP_NAME) --ensure-socket
+	DIETCODE_REPO_ROOT=$(CURDIR) $(APP_MACOS)/$(APP_NAME) --ensure-socket
 
 agent-ready: app
 	python3 scripts/dietcode_agent_client.py --wait-ready --compact --error-json
@@ -193,6 +195,10 @@ test-docs-code-drift:
 test-partial-success-closure: restart-agent-server
 	python3 scripts/dietcode_agent_client.py --wait-ready --compact --error-json --quiet
 	python3 scripts/test_partial_success_closure.py --compact
+
+test-broccoliq-runtime-memory: restart-agent-server
+	DIETCODE_REPO_ROOT=$(CURDIR) python3 scripts/dietcode_agent_client.py --wait-ready --compact --error-json --quiet
+	DIETCODE_REPO_ROOT=$(CURDIR) python3 scripts/test_broccoliq_runtime_memory.py --compact
 
 test-ergonomics: app
 	python3 scripts/dietcode_agent_client.py --wait-ready --compact --error-json --quiet

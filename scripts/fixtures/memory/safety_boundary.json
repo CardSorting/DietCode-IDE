@@ -1,0 +1,22 @@
+{
+  "schemaVersion": "1.0.0",
+  "mutationKernelRemainsAuthoritative": true,
+  "memoryLayerRole": "record_only",
+  "forbiddenAuthority": [
+    "patch_validity",
+    "stale_content_decision",
+    "rollback_success",
+    "file_content_truth",
+    "symlink_safety",
+    "search_determinism"
+  ],
+  "allowedStorage": [
+    "receipts",
+    "telemetry",
+    "operation_history",
+    "workflow_state",
+    "verification_history",
+    "replay_cache_records",
+    "revision_journal_metadata"
+  ]
+}

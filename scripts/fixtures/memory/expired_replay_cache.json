@@ -1,0 +1,9 @@
+{
+  "schemaVersion": "1.0.0",
+  "idempotencyKey": "expired-fixture-key",
+  "mode": "memory_replay_cache",
+  "retained": false,
+  "expired": true,
+  "recoveryHint": "retry_with_new_idempotencyKey_or_revalidate",
+  "nextRecommendedCommand": "patch.validate"
+}

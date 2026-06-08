@@ -3,9 +3,12 @@
 #import <Foundation/Foundation.h>
 
 @class DietCodeControlWindowBridge;
+@class MacControlMemoryService;
 
 // INVARIANT: Monotonic workspace revision + operation registry for transaction kernel.
 @interface MacControlWorkspaceState : NSObject
+
+@property (nonatomic, weak) MacControlMemoryService* memoryService;
 
 @property (nonatomic, readonly) NSInteger revisionId;
 @property (nonatomic, readonly, copy) NSDictionary* lastMutationReceipt;
@@ -33,5 +36,14 @@
 - (void)noteExternalChangeForPath:(NSString*)path;
 - (void)clearExternalChangeFlag;
 - (void)trackHashesForPaths:(NSArray<NSString*>*)paths workspace:(NSString*)ws windowBridge:(DietCodeControlWindowBridge*)windowBridge;
+
+- (void)persistMutationToMemory:(NSString*)method
+                   idempotencyKey:(NSString*)idempotencyKey
+                       paramsHash:(NSString*)paramsHash
+                          receipt:(NSDictionary*)receipt
+                     changedPaths:(NSArray<NSString*>*)paths
+                   revisionBefore:(NSInteger)revisionBefore
+                    revisionAfter:(NSInteger)revisionAfter
+                    resultPayload:(NSDictionary*)resultPayload;
 
 @end

@@ -1,0 +1,22 @@
+{
+  "schemaVersion": "1.0.0",
+  "idempotencyKey": "replay-fixture-key",
+  "method": "patch.apply",
+  "retained": true,
+  "mode": "memory_replay_cache",
+  "result": {
+    "patched": true,
+    "revisionBefore": 2,
+    "revisionAfter": 3,
+    "mutationReceipt": {
+      "path": "scripts/example.py",
+      "beforeContentHash": "abc123",
+      "postContentHash": "def456",
+      "patchFingerprint": "fp789",
+      "applyChannel": "disk",
+      "atomic": true
+    }
+  },
+  "recoveryHint": null,
+  "nextRecommendedCommand": "workspace.revision"
+}

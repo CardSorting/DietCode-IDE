@@ -1,0 +1,27 @@
+{
+  "schemaVersion": "1.0.0",
+  "mutationAuthority": "cpp_kernel",
+  "memoryAuthority": "broccoliq_record_only",
+  "methods": [
+    "memory.status",
+    "memory.operation.get",
+    "memory.operation.list",
+    "memory.operation.findByIdempotencyKey",
+    "memory.operation.findByRevision",
+    "memory.operation.recent",
+    "memory.replay.get",
+    "memory.revision.get",
+    "memory.revision.list",
+    "memory.revision.changedFiles",
+    "memory.revision.lastMutation",
+    "memory.workflow.start",
+    "memory.workflow.step",
+    "memory.workflow.complete",
+    "memory.workflow.fail",
+    "memory.workflow.get",
+    "memory.workflow.recent",
+    "memory.verify.record",
+    "memory.verify.latest",
+    "memory.verify.history"
+  ]
+}

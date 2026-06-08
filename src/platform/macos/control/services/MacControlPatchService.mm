@@ -197,6 +197,11 @@ static BOOL ApplyUnifiedPatchToDisk(NSString* absPath, NSString* beforeText, NSS
     NSString* idempotencyKey = params[@"idempotencyKey"];
     if (_workspaceState && idempotencyKey.length > 0) {
         NSDictionary* prior = [_workspaceState operationStatusForKey:idempotencyKey];
+        if ([prior[@"status"] isEqualToString:@"expired"]) {
+            if (errorCodeOut) *errorCodeOut = @"replay_expired";
+            if (errorOut) *errorOut = @"Idempotency replay entry expired; re-validate before retry.";
+            return nil;
+        }
         if ([prior[@"status"] isEqualToString:@"completed"]) {
             return MacControlEnrichPatchApplyResult(@{
                 @"patched": @YES,
@@ -284,6 +289,22 @@ static BOOL ApplyUnifiedPatchToDisk(NSString* absPath, NSString* beforeText, NSS
                                          idempotencyKey:idempotencyKey
                                          revisionBefore:revisionBefore];
         [_workspaceState trackHashesForPaths:@[targetPath] workspace:ws windowBridge:_windowBridge];
+        NSDictionary* resultPayload = @{
+            @"patched": @YES,
+            @"path": absPath,
+            @"mutationReceipt": mutationReceipt,
+            @"revisionBefore": @(revisionBefore),
+            @"revisionAfter": @(_workspaceState.revisionId),
+        };
+        NSString* paramsHash = StableHashForString([NSString stringWithFormat:@"%@:%@", targetPath, StableHashForString(patchStr ?: @"")]);
+        [_workspaceState persistMutationToMemory:@"patch.apply"
+                                  idempotencyKey:idempotencyKey
+                                      paramsHash:paramsHash
+                                         receipt:mutationReceipt
+                                    changedPaths:@[targetPath]
+                                  revisionBefore:revisionBefore
+                                   revisionAfter:_workspaceState.revisionId
+                                   resultPayload:resultPayload];
         return MacControlEnrichPatchApplyResult(@{
             @"patched": @YES,
             @"path": absPath,
@@ -315,6 +336,11 @@ static BOOL ApplyUnifiedPatchToDisk(NSString* absPath, NSString* beforeText, NSS
 
     if (_workspaceState && idempotencyKey.length > 0) {
         NSDictionary* prior = [_workspaceState operationStatusForKey:idempotencyKey];
+        if ([prior[@"status"] isEqualToString:@"expired"]) {
+            if (errorCodeOut) *errorCodeOut = @"replay_expired";
+            if (errorOut) *errorOut = @"Idempotency replay entry expired; re-validate batch before retry.";
+            return nil;
+        }
         if ([prior[@"status"] isEqualToString:@"completed"]) {
             return @{
                 @"dryRun": @NO,
@@ -460,6 +486,21 @@ static BOOL ApplyUnifiedPatchToDisk(NSString* absPath, NSString* beforeText, NSS
                                         idempotencyKey:idempotencyKey
                                         revisionBefore:revisionBefore];
         [_workspaceState trackHashesForPaths:changedRelPaths workspace:ws windowBridge:_windowBridge];
+        NSDictionary* batchResultPayload = @{
+            @"applied": @YES,
+            @"batchMutationReceipt": batchReceipt,
+            @"revisionBefore": @(revisionBefore),
+            @"revisionAfter": @(_workspaceState.revisionId),
+        };
+        NSString* batchParamsHash = StableHashForString([NSString stringWithFormat:@"batch:%lu", (unsigned long)patches.count]);
+        [_workspaceState persistMutationToMemory:@"patch.applyBatch"
+                                  idempotencyKey:idempotencyKey
+                                      paramsHash:batchParamsHash
+                                         receipt:batchReceipt
+                                    changedPaths:changedRelPaths
+                                  revisionBefore:revisionBefore
+                                   revisionAfter:_workspaceState.revisionId
+                                   resultPayload:batchResultPayload];
     }
 
     NSMutableDictionary* response = [@{

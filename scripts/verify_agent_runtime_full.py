@@ -24,6 +24,7 @@ NEXT_COMMANDS = {
     "live_cli_agent_failures": "python3 scripts/test_cli_agent_failures.py --compact",
     "live_release_readiness": "python3 scripts/test_release_readiness.py --compact",
     "live_partial_success_closure": "make test-partial-success-closure",
+    "live_broccoliq_runtime_memory": "make test-broccoliq-runtime-memory",
     "live_verify_agent_runtime": "make verify-agent-runtime",
 }
 
@@ -35,6 +36,7 @@ LADDER: list[tuple[str, list[str], bool, bool]] = [
     ("live_agent_workflow_smoke", [sys.executable, "scripts/test_agent_workflow_smoke.py", "--compact"], True, False),
     ("live_cli_agent_failures", [sys.executable, "scripts/test_cli_agent_failures.py", "--compact"], True, False),
     ("live_partial_success_closure", [sys.executable, "scripts/test_partial_success_closure.py", "--compact"], True, False),
+    ("live_broccoliq_runtime_memory", [sys.executable, "scripts/test_broccoliq_runtime_memory.py", "--compact"], True, False),
     ("live_release_readiness", [sys.executable, "scripts/test_release_readiness.py", "--compact"], True, False),
 ]
 

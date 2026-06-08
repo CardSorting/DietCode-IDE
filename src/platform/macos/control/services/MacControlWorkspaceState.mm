@@ -1,4 +1,5 @@
 #import "MacControlWorkspaceState.hpp"
+#import "MacControlMemoryService.hpp"
 #import "MacControlWindowBridge.hpp"
 #import "MacControlSupport.hpp"
 #import "MacControlPathSecurity.hpp"
@@ -165,6 +166,54 @@ static NSString* ReadHashForPath(NSString* absPath, DietCodeControlWindowBridge*
         return @{ @"status": @"unknown", @"reason": @"idempotencyKey required" };
     }
     NSDictionary* record = _completedOperations[idempotencyKey];
+    if (!record && self.memoryService.available) {
+        NSDictionary* durable = [self.memoryService operationForIdempotencyKey:idempotencyKey];
+        if (durable && [durable[@"status"] isEqualToString:@"completed"]) {
+            NSMutableDictionary* payload = [NSMutableDictionary dictionary];
+            payload[@"status"] = @"completed";
+            payload[@"idempotencyKey"] = idempotencyKey;
+            payload[@"revisionBefore"] = durable[@"revisionBefore"] ?: @0;
+            payload[@"revisionAfter"] = durable[@"revisionAfter"] ?: @0;
+            payload[@"completedAt"] = durable[@"completedAt"] ?: @0;
+            NSDictionary* receipt = durable[@"receipt"];
+            if (receipt) {
+                if (receipt[@"atomic"] && [receipt[@"fileReceipts"] isKindOfClass:[NSArray class]]) {
+                    payload[@"batchMutationReceipt"] = receipt;
+                } else {
+                    payload[@"mutationReceipt"] = receipt;
+                }
+            }
+            payload[@"durableReplay"] = @YES;
+            payload[@"source"] = @"broccoliq_memory";
+            return payload;
+        }
+        NSDictionary* replay = [self.memoryService replayCacheForKey:idempotencyKey];
+        if (replay && [replay[@"retained"] boolValue]) {
+            NSDictionary* result = replay[@"result"];
+            NSMutableDictionary* payload = [NSMutableDictionary dictionary];
+            payload[@"status"] = @"completed";
+            payload[@"idempotencyKey"] = idempotencyKey;
+            payload[@"durableReplay"] = @YES;
+            payload[@"source"] = @"broccoliq_replay_cache";
+            if ([result[@"mutationReceipt"] isKindOfClass:[NSDictionary class]]) {
+                payload[@"mutationReceipt"] = result[@"mutationReceipt"];
+            }
+            if ([result[@"batchMutationReceipt"] isKindOfClass:[NSDictionary class]]) {
+                payload[@"batchMutationReceipt"] = result[@"batchMutationReceipt"];
+            }
+            payload[@"revisionBefore"] = result[@"revisionBefore"] ?: @0;
+            payload[@"revisionAfter"] = result[@"revisionAfter"] ?: @0;
+            return payload;
+        }
+        if (replay && [replay[@"expired"] boolValue]) {
+            return @{
+                @"status": @"expired",
+                @"idempotencyKey": idempotencyKey,
+                @"recoveryHint": replay[@"recoveryHint"] ?: @"retry_with_new_idempotencyKey_or_revalidate",
+                @"nextRecommendedCommand": replay[@"nextRecommendedCommand"] ?: @"patch.validate",
+            };
+        }
+    }
     if (!record) {
         return @{ @"status": @"unknown", @"idempotencyKey": idempotencyKey };
     }
@@ -239,6 +288,60 @@ static NSString* ReadHashForPath(NSString* absPath, DietCodeControlWindowBridge*
 - (void)clearExternalChangeFlag {
     _externalChangeDetected = NO;
     [_externallyChangedPaths removeAllObjects];
+}
+
+- (void)persistMutationToMemory:(NSString*)method
+                   idempotencyKey:(NSString*)idempotencyKey
+                       paramsHash:(NSString*)paramsHash
+                          receipt:(NSDictionary*)receipt
+                     changedPaths:(NSArray<NSString*>*)paths
+                   revisionBefore:(NSInteger)revisionBefore
+                    revisionAfter:(NSInteger)revisionAfter
+                    resultPayload:(NSDictionary*)resultPayload {
+    MacControlMemoryService* memory = self.memoryService;
+    if (!memory.available) return;
+
+    NSString* opId = [[NSUUID UUID] UUIDString];
+    NSString* receiptJson = [[NSString alloc] initWithData:[NSJSONSerialization dataWithJSONObject:receipt ?: @{} options:0 error:nil] encoding:NSUTF8StringEncoding] ?: @"";
+    NSString* receiptHash = StableHashForString(receiptJson);
+
+    [memory recordOperation:@{
+        @"operationId": opId,
+        @"method": method ?: @"",
+        @"paramsHash": paramsHash ?: @"",
+        @"idempotencyKey": idempotencyKey ?: @"",
+        @"status": @"completed",
+        @"receipt": receipt ?: @{},
+        @"receiptHash": receiptHash,
+        @"revisionBefore": @(revisionBefore),
+        @"revisionAfter": @(revisionAfter),
+        @"completedAt": @([[NSDate date] timeIntervalSince1970]),
+    } error:nil];
+
+    [memory recordRevision:@{
+        @"revisionId": @(revisionAfter),
+        @"changedFiles": paths ?: @[],
+        @"mutationSource": @"agent",
+        @"operationId": opId,
+        @"receiptHash": receiptHash,
+        @"previousRevisionId": @(revisionBefore),
+    } error:nil];
+
+    if (idempotencyKey.length > 0 && resultPayload) {
+        [memory storeReplayCache:@{
+            @"idempotencyKey": idempotencyKey,
+            @"method": method ?: @"",
+            @"paramsHash": paramsHash ?: @"",
+            @"result": resultPayload,
+            @"receiptHash": receiptHash,
+        } error:nil];
+    }
+
+    [memory recordTelemetryEvent:@"mutation_recorded" payload:@{
+        @"method": method ?: @"",
+        @"revisionAfter": @(revisionAfter),
+        @"idempotencyKey": idempotencyKey ?: @"",
+    }];
 }
 
 @end

@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# broccoliq-memory-test
 """CONTRACT: Frozen runtime contract constants — grep with `rg 'CONTRACT:' scripts/agent_contracts.py`."""
 
 from __future__ import annotations
@@ -347,6 +348,131 @@ OPERATION_STATUS_COMPLETED_KEYS = frozenset({
     "revisionAfter",
     "changedFiles",
     "completedAt",
+})
+
+# CONTRACT: memory.status response keys (BroccoliQ runtime memory layer).
+MEMORY_STATUS_KEYS = frozenset({
+    "mode",
+    "available",
+    "checkpointStatus",
+    "maxMemoryBytes",
+    "maxBufferedOperations",
+    "flushIntervalMs",
+    "shardCount",
+    "backpressureMode",
+    "bufferedOperations",
+    "droppedTelemetryCount",
+    "mutationAuthority",
+    "memoryAuthority",
+    "workspacePath",
+})
+
+# CONTRACT: memory.operation record keys.
+MEMORY_OPERATION_KEYS = frozenset({
+    "operationId",
+    "method",
+    "paramsHash",
+    "status",
+    "mode",
+})
+
+# CONTRACT: memory.operation completed optional keys.
+MEMORY_OPERATION_COMPLETED_OPTIONAL_KEYS = frozenset({
+    "idempotencyKey",
+    "startedAt",
+    "completedAt",
+    "revisionBefore",
+    "revisionAfter",
+    "receiptHash",
+    "receipt",
+})
+
+# CONTRACT: memory.replay_cache retained entry keys.
+MEMORY_REPLAY_CACHE_KEYS = frozenset({
+    "idempotencyKey",
+    "method",
+    "paramsHash",
+    "result",
+    "receiptHash",
+    "createdAt",
+    "expiresAt",
+    "mode",
+    "retained",
+})
+
+# CONTRACT: memory.revision entry keys.
+MEMORY_REVISION_KEYS = frozenset({
+    "revisionId",
+    "changedFiles",
+    "mutationSource",
+    "receiptHash",
+    "timestamp",
+    "mode",
+})
+
+# CONTRACT: memory.workflow entry keys.
+MEMORY_WORKFLOW_KEYS = frozenset({
+    "workflowId",
+    "agentId",
+    "status",
+    "startedAt",
+    "mode",
+})
+
+# CONTRACT: memory.workflow_step entry keys.
+MEMORY_WORKFLOW_STEP_KEYS = frozenset({
+    "stepId",
+    "workflowId",
+    "command",
+    "status",
+    "timestamp",
+    "mode",
+})
+
+# CONTRACT: memory.verification run keys.
+MEMORY_VERIFICATION_KEYS = frozenset({
+    "runId",
+    "command",
+    "suiteName",
+    "passedCount",
+    "failedCount",
+    "durationMs",
+    "timestamp",
+    "mode",
+})
+
+# CONTRACT: memory.* RPC method names (frozen agent-safe query surface).
+MEMORY_RPC_METHODS = frozenset({
+    "memory.status",
+    "memory.operation.get",
+    "memory.operation.list",
+    "memory.operation.findByIdempotencyKey",
+    "memory.operation.findByRevision",
+    "memory.operation.recent",
+    "memory.replay.get",
+    "memory.revision.get",
+    "memory.revision.list",
+    "memory.revision.changedFiles",
+    "memory.revision.lastMutation",
+    "memory.workflow.start",
+    "memory.workflow.step",
+    "memory.workflow.complete",
+    "memory.workflow.fail",
+    "memory.workflow.get",
+    "memory.workflow.recent",
+    "memory.verify.record",
+    "memory.verify.latest",
+    "memory.verify.history",
+})
+
+# CONTRACT: BroccoliQ memory safety boundary — memory layer must never expose mutation authority.
+MEMORY_SAFETY_BOUNDARY_FORBIDDEN_AUTHORITY = frozenset({
+    "patch_validity",
+    "stale_content_decision",
+    "rollback_success",
+    "file_content_truth",
+    "symlink_safety",
+    "search_determinism",
 })
 
 # CONTRACT: patch.validate validation object keys.
@@ -834,6 +960,60 @@ def validate_tool_capabilities_response(result: dict[str, Any]) -> list[str]:
         for prefix in INTERNAL_METHOD_NAMESPACES:
             if prefix not in internal:
                 errors.append(f"internalNamespaces must include {prefix}")
+    return errors
+
+
+def validate_memory_status(result: dict[str, Any]) -> list[str]:
+    errors: list[str] = []
+    missing = MEMORY_STATUS_KEYS - set(result.keys())
+    if missing:
+        errors.append(f"memory.status missing keys: {sorted(missing)}")
+    if result.get("mode") != "memory_status":
+        errors.append("mode must be memory_status")
+    if result.get("mutationAuthority") != "cpp_kernel":
+        errors.append("mutationAuthority must be cpp_kernel")
+    if result.get("memoryAuthority") != "broccoliq_record_only":
+        errors.append("memoryAuthority must be broccoliq_record_only")
+    return errors
+
+
+def validate_memory_operation(result: dict[str, Any]) -> list[str]:
+    errors: list[str] = []
+    missing = MEMORY_OPERATION_KEYS - set(result.keys())
+    if missing:
+        errors.append(f"memory.operation missing keys: {sorted(missing)}")
+    if result.get("mode") != "memory_operation":
+        errors.append("mode must be memory_operation")
+    return errors
+
+
+def validate_memory_revision(result: dict[str, Any]) -> list[str]:
+    errors: list[str] = []
+    missing = MEMORY_REVISION_KEYS - set(result.keys())
+    if missing:
+        errors.append(f"memory.revision missing keys: {sorted(missing)}")
+    if result.get("mode") not in ("memory_revision", "memory_revision_last_mutation"):
+        errors.append("mode must be memory_revision or memory_revision_last_mutation")
+    return errors
+
+
+def validate_memory_workflow(result: dict[str, Any]) -> list[str]:
+    errors: list[str] = []
+    missing = MEMORY_WORKFLOW_KEYS - set(result.keys())
+    if missing:
+        errors.append(f"memory.workflow missing keys: {sorted(missing)}")
+    if result.get("mode") != "memory_workflow":
+        errors.append("mode must be memory_workflow")
+    return errors
+
+
+def validate_memory_verification(result: dict[str, Any]) -> list[str]:
+    errors: list[str] = []
+    missing = MEMORY_VERIFICATION_KEYS - set(result.keys())
+    if missing:
+        errors.append(f"memory.verification missing keys: {sorted(missing)}")
+    if result.get("mode") != "memory_verification":
+        errors.append("mode must be memory_verification")
     return errors
 
 

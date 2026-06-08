@@ -1,0 +1,15 @@
+{
+  "schemaVersion": "1.0.0",
+  "workflowId": "wf-fixture-001",
+  "agentId": "agent-fixture",
+  "status": "running",
+  "startedAt": 1710000000,
+  "mode": "memory_workflow",
+  "lastStep": {
+    "stepId": "step-001",
+    "command": "search.literal",
+    "status": "completed",
+    "nextRecommendedCommand": "patch.validate",
+    "recoveryHint": "revalidate_patch_with_patch.validate"
+  }
+}
