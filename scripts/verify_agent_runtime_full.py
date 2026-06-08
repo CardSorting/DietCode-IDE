@@ -33,6 +33,8 @@ NEXT_COMMANDS = {
     "live_agent_bridge": "make test-agent-bridge",
     "live_agent_bridge_audit": "python3 scripts/test_agent_bridge_audit.py --compact",
     "live_verify_agent_runtime": "make verify-agent-runtime",
+    "live_agent_chat_workspace_switch": "make test-agent-chat-workspace-switch",
+    "live_smoke_agent_chat": "make smoke-agent-chat-live",
 }
 
 LADDER: list[tuple[str, list[str], bool, bool]] = [
@@ -51,6 +53,8 @@ LADDER: list[tuple[str, list[str], bool, bool]] = [
     ("live_runtime_native_integration", [sys.executable, "scripts/test_runtime_native_integration.py", "--compact"], True, False),
     ("live_agent_bridge", ["make", "test-agent-bridge"], True, False),
     ("live_release_readiness", [sys.executable, "scripts/test_release_readiness.py", "--compact"], True, False),
+    ("live_agent_chat_workspace_switch", ["make", "test-agent-chat-workspace-switch"], True, False),
+    ("live_smoke_agent_chat", ["make", "smoke-agent-chat-live"], True, False),
 ]
 
 

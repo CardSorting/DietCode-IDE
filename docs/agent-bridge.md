@@ -79,7 +79,10 @@ Live bounded-edit smoke (temp workspace, real Hermes patch via bridge):
 
 ```bash
 make smoke-agent-chat-live
+make test-agent-chat-workspace-switch
 ```
+
+Workspace authority: when `--workspace` is passed, the bridge calls `workspace.openFolder` even if another folder is already open. `dietcode-agent-chat` refuses Hermes if `requestedWorkspace != workspaceRootObserved`.
 
 ---
 

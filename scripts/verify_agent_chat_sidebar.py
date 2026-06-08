@@ -53,6 +53,10 @@ def main() -> int:
     rec.record("sidebar.uses_real_chat_on_send", "launchChatTool:chatPath" in text.replace(" ", "") or ("launchChatTool" in text and "--prompt" in text))
     rec.record("sidebar.stop_button", "_stopButton" in text)
     rec.record("sidebar.open_folder_guard", "Open a folder first." in text)
+    rec.record("sidebar.workspace_requested_label", "Workspace requested:" in text)
+    rec.record("sidebar.workspace_active_label", "Workspace active:" in text)
+    rec.record("sidebar.workspace_mismatch_guard", "Workspace mismatch" in text)
+    rec.record("workspace.switch_test", (REPO_ROOT / "scripts/test_agent_chat_workspace_switch.py").is_file())
     rec.record("sidebar.async_dispatch", "dispatch_get_global_queue" in text)
 
     makefile = (REPO_ROOT / "Makefile").read_text(encoding="utf-8") if (REPO_ROOT / "Makefile").is_file() else ""

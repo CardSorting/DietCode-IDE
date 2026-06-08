@@ -41,6 +41,7 @@ static NSColor* AgentSidebarBackgroundColor(void) {
     NSScrollView* _transcriptScroll;
     BOOL _runningCommand;
     BOOL _cancelRequested;
+    BOOL _workspaceAuthorityMatch;
     NSTask* _activeTask;
     NSInteger _lastExitCode;
 }
@@ -49,6 +50,7 @@ static NSColor* AgentSidebarBackgroundColor(void) {
     self = [super initWithFrame:frameRect];
     if (self) {
         _lastExitCode = 0;
+        _workspaceAuthorityMatch = YES;
         [self buildInterface];
         [self appendTranscriptWithSpeaker:kAgentSpeakerHermes
                                   message:@"Agent chat ready. Open a folder, then send a prompt."];
@@ -161,20 +163,41 @@ static NSColor* AgentSidebarBackgroundColor(void) {
     return @"";
 }
 
+- (BOOL)updateWorkspaceAuthorityFromPayload:(NSDictionary*)payload requested:(NSString*)requested {
+    NSDictionary* authority = payload[@"workspaceAuthority"];
+    if (![authority isKindOfClass:[NSDictionary class]]) {
+        authority = [payload valueForKeyPath:@"status.workspaceAuthority"];
+    }
+    if (![authority isKindOfClass:[NSDictionary class]]) {
+        _workspaceAuthorityMatch = requested.length > 0;
+        return _workspaceAuthorityMatch;
+    }
+    id matchValue = authority[@"workspaceMatch"];
+    if (matchValue != nil) {
+        _workspaceAuthorityMatch = [matchValue boolValue];
+    } else {
+        NSString* observed = authority[@"workspaceRootObserved"];
+        _workspaceAuthorityMatch = requested.length == 0
+            || (observed.length > 0 && [observed isEqualToString:requested]);
+    }
+    return _workspaceAuthorityMatch;
+}
+
 - (NSString*)statusTextFromDoctorJSON:(NSString*)output workspace:(NSString*)workspace exitCode:(NSInteger)exitCode running:(BOOL)running {
     NSMutableArray<NSString*>* lines = [NSMutableArray array];
     if (running) {
         [lines addObject:@"Running: Hermes active"];
     }
     if (workspace.length > 0) {
-        [lines addObject:[NSString stringWithFormat:@"Workspace: %@", workspace]];
+        [lines addObject:[NSString stringWithFormat:@"Workspace requested: %@", workspace]];
     } else {
-        [lines addObject:@"Workspace: (none — open a folder)"];
+        [lines addObject:@"Workspace requested: (none — open a folder)"];
     }
     [lines addObject:[NSString stringWithFormat:@"Last exit: %ld", (long)exitCode]];
 
     if (output.length == 0) {
         [lines insertObject:@"Runtime: unknown · Bridge: unknown · Hermes: unknown" atIndex:0];
+        [lines insertObject:@"Workspace active: (unknown)" atIndex:1];
         return [lines componentsJoinedByString:@"\n"];
     }
     NSString* line = output;
@@ -193,6 +216,25 @@ static NSColor* AgentSidebarBackgroundColor(void) {
         return [lines componentsJoinedByString:@"\n"];
     }
     NSDictionary* payload = (NSDictionary*)json;
+    [self updateWorkspaceAuthorityFromPayload:payload requested:workspace];
+
+    NSDictionary* authority = payload[@"workspaceAuthority"];
+    if (![authority isKindOfClass:[NSDictionary class]]) {
+        authority = [payload valueForKeyPath:@"status.workspaceAuthority"];
+    }
+    NSString* observed = @"";
+    if ([authority isKindOfClass:[NSDictionary class]]) {
+        observed = authority[@"workspaceRootObserved"] ?: @"";
+    }
+    if (observed.length > 0) {
+        [lines insertObject:[NSString stringWithFormat:@"Workspace active: %@", observed] atIndex:1];
+    } else {
+        [lines insertObject:@"Workspace active: (unknown)" atIndex:1];
+    }
+    if (workspace.length > 0 && !_workspaceAuthorityMatch) {
+        [lines insertObject:@"Workspace mismatch — agent disabled" atIndex:2];
+    }
+
     NSDictionary* status = payload[@"status"];
     if ([status isKindOfClass:[NSDictionary class]]) {
         [lines insertObject:[NSString stringWithFormat:@"Runtime: %@ · Bridge: %@ · Hermes: %@",
@@ -258,10 +300,15 @@ static NSColor* AgentSidebarBackgroundColor(void) {
 }
 
 - (void)runDoctorWithCompletion:(void (^)(NSString* output, int exitCode))completion {
+    NSString* workspace = [self workspacePath];
     NSString* chatPath = DietCodeAgentChatPath();
     if (chatPath != nil) {
+        NSMutableArray<NSString*>* args = [NSMutableArray arrayWithObjects:@"--doctor", @"--format", @"json", nil];
+        if (workspace.length > 0) {
+            [args addObjectsFromArray:@[@"--workspace", workspace]];
+        }
         [self launchChatTool:chatPath
-                   arguments:@[@"--doctor", @"--format", @"json"]
+                   arguments:args
                   completion:^(NSString* output, int exitCode, BOOL cancelled) {
             (void)cancelled;
             completion(output, exitCode);
@@ -292,6 +339,8 @@ static NSColor* AgentSidebarBackgroundColor(void) {
                     summary = [NSString stringWithFormat:@"Doctor exit %d\n%@", exitCode, summary];
                 }
                 [self->_statusLabel setStringValue:summary];
+                BOOL canSend = workspace.length > 0 && self->_workspaceAuthorityMatch && !self->_runningCommand;
+                [self->_sendButton setEnabled:canSend];
             });
         }];
     });
@@ -306,7 +355,12 @@ static NSColor* AgentSidebarBackgroundColor(void) {
     NSString* workspace = [[self workspacePath] stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
     if (workspace.length == 0) {
         [self appendTranscriptWithSpeaker:kAgentSpeakerHermes message:@"Open a folder first."];
-        [_statusLabel setStringValue:@"Workspace: (none — open a folder)\nLast exit: —"];
+        [_statusLabel setStringValue:@"Workspace requested: (none — open a folder)\nLast exit: —"];
+        return;
+    }
+    if (!_workspaceAuthorityMatch) {
+        [self appendTranscriptWithSpeaker:kAgentSpeakerHermes
+                                  message:@"Workspace mismatch — agent disabled. Re-open the folder or check runtime workspace."];
         return;
     }
 

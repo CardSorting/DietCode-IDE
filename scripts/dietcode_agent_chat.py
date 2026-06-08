@@ -17,11 +17,13 @@ from dietcode_agent_bundle import (
     CHAT_VERSION,
     AgentChatError,
     assert_chat_ready,
+    observe_runtime_workspace,
     readiness_report,
     repo_root_from_script,
     resolve_context,
     run_hermes_chat,
     validate_workspace,
+    workspace_authority_report,
 )
 
 
@@ -44,6 +46,20 @@ def _emit(payload: dict[str, Any], *, fmt: str) -> None:
                 print(payload.get("message") or payload, file=sys.stderr)
 
 
+def _workspace_authority_for_doctor(ctx, workspace: Path | None) -> dict[str, Any] | None:
+    if workspace is None:
+        observed = observe_runtime_workspace(ctx)
+        return {
+            "requestedWorkspace": None,
+            "runtimeWorkspaceBefore": observed,
+            "runtimeWorkspaceAfter": observed,
+            "workspaceRootObserved": observed,
+            "workspaceSwitchSucceeded": True,
+            "workspaceMatch": True,
+        }
+    return workspace_authority_report(ctx, workspace)
+
+
 def cmd_version(ctx_manifest: dict[str, Any]) -> int:
     payload = {
         "ok": True,
@@ -59,14 +75,18 @@ def cmd_version(ctx_manifest: dict[str, Any]) -> int:
     return 0
 
 
-def cmd_doctor(repo_root: Path, ctx, *, fmt: str) -> int:
-    status = readiness_report(ctx, repo_root)
+def cmd_doctor(repo_root: Path, ctx, *, fmt: str, workspace: Path | None) -> int:
+    authority = _workspace_authority_for_doctor(ctx, workspace)
+    status = readiness_report(ctx, repo_root, workspace=workspace, workspace_authority=authority)
     ok = bool(status["runtime"]["ready"]) and bool(status["bridge"]["ready"]) and bool(status["hermes"]["ready"])
+    if authority and workspace is not None:
+        ok = ok and bool(authority.get("workspaceMatch"))
     payload: dict[str, Any] = {
         "ok": ok,
         "action": "doctor",
         "summary": ctx.manifest.get("summary"),
         "status": status,
+        "workspaceAuthority": authority,
     }
     if fmt == "json":
         print(json.dumps(payload, indent=2))
@@ -76,7 +96,12 @@ def cmd_doctor(repo_root: Path, ctx, *, fmt: str) -> int:
             f"Bridge: {'ready' if status['bridge']['ready'] else 'not ready'}",
             f"Hermes: {'ready' if status['hermes']['ready'] else 'not ready'}",
         ]
-        if status.get("workspace"):
+        if authority:
+            parts.append(f"Workspace requested: {authority.get('requestedWorkspace') or '(none)'}")
+            parts.append(f"Workspace active: {authority.get('workspaceRootObserved') or '(unknown)'}")
+            if not authority.get("workspaceMatch", True):
+                parts.append("Workspace mismatch — agent disabled")
+        elif status.get("workspace"):
             parts.append(f"Workspace: {status['workspace']}")
         print("\n".join(parts))
     return 0 if ok else 1
@@ -85,6 +110,7 @@ def cmd_doctor(repo_root: Path, ctx, *, fmt: str) -> int:
 def cmd_chat(repo_root: Path, ctx, *, workspace: Path, prompt: str, fmt: str, max_turns: int) -> int:
     try:
         status = assert_chat_ready(ctx, repo_root, workspace)
+        authority = status.get("workspaceAuthority")
         exit_code, transcript = run_hermes_chat(ctx, workspace, prompt, max_turns=max_turns)
         ok = exit_code == 0
         payload: dict[str, Any] = {
@@ -94,6 +120,7 @@ def cmd_chat(repo_root: Path, ctx, *, workspace: Path, prompt: str, fmt: str, ma
             "exitCode": exit_code,
             "transcript": transcript,
             "status": status,
+            "workspaceAuthority": authority,
         }
         _emit(payload, fmt=fmt)
         return 0 if ok else 10
@@ -132,19 +159,32 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.version:
         return cmd_version(ctx.manifest)
+
+    workspace: Path | None = None
+    if args.workspace:
+        try:
+            workspace = validate_workspace(args.workspace)
+        except AgentChatError as exc:
+            _emit(exc.to_dict(), fmt=args.format)
+            return exc.exit_code
+
     if args.doctor:
-        return cmd_doctor(repo_root, ctx, fmt=args.format)
+        return cmd_doctor(repo_root, ctx, fmt=args.format, workspace=workspace)
 
     if not args.prompt:
         err = AgentChatError("--prompt is required for chat", code="prompt_missing", exit_code=2)
         _emit(err.to_dict(), fmt=args.format)
         return err.exit_code
 
-    try:
-        workspace = validate_workspace(args.workspace or "")
-    except AgentChatError as exc:
-        _emit(exc.to_dict(), fmt=args.format)
-        return exc.exit_code
+    if workspace is None:
+        err = AgentChatError(
+            "Workspace is required. Open a folder in DietCode or pass --workspace.",
+            code="workspace_missing",
+            exit_code=2,
+            recovery_hint="open_folder",
+        )
+        _emit(err.to_dict(), fmt=args.format)
+        return err.exit_code
 
     return cmd_chat(
         repo_root,

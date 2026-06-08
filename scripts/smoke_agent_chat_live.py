@@ -23,7 +23,6 @@ if str(SCRIPTS) not in sys.path:
 
 from dietcode_agent_bundle import (  # noqa: E402
     assert_chat_ready,
-    open_runtime_workspace,
     repo_root_from_script,
     resolve_context,
     run_enable_doctor,
@@ -136,6 +135,7 @@ def _run_hermes_with_heartbeat(
     rec: Recorder,
     ctx,
     workspace: Path,
+    authority: dict[str, Any],
     *,
     max_turns: int,
     timeout: int,
@@ -147,7 +147,13 @@ def _run_hermes_with_heartbeat(
         while not stop.wait(15):
             rec.progress(
                 "smoke.chat_running",
-                {"elapsedSec": int(time.monotonic() - started), "timeoutSec": timeout},
+                {
+                    "elapsedSec": int(time.monotonic() - started),
+                    "timeoutSec": timeout,
+                    "requestedWorkspace": authority.get("requestedWorkspace"),
+                    "workspaceRootObserved": authority.get("workspaceRootObserved"),
+                    "workspaceMatch": authority.get("workspaceMatch"),
+                },
             )
 
     thread = threading.Thread(target=_heartbeat, daemon=True)
@@ -188,14 +194,18 @@ def run_smoke(*, app_bundle: str | None, compact: bool, max_turns: int, timeout:
         rec.record("smoke.workspace_created", probe_path.is_file(), {"workspace": str(workspace)})
 
         try:
-            assert_chat_ready(ctx, repo_root, workspace)
-            rec.record("smoke.chat_ready", True)
+            readiness = assert_chat_ready(ctx, repo_root, workspace)
+            authority = readiness.get("workspaceAuthority") or {}
+            rec.record("smoke.chat_ready", True, authority)
         except Exception as exc:
             rec.record("smoke.chat_ready", False, str(exc))
             return rec.finish(suite="smoke_agent_chat_live")
 
-        opened = open_runtime_workspace(ctx, workspace)
-        rec.record("smoke.workspace_opened", bool(opened.get("ok")), opened)
+        rec.record(
+            "smoke.workspace_authority",
+            bool(authority.get("workspaceMatch")),
+            authority,
+        )
 
         ok_verify, verify_payload = _run_bridge(ctx, workspace, ["verify", "fast"])
         rec.record("smoke.bridge_verify", ok_verify, verify_payload)
@@ -203,13 +213,14 @@ def run_smoke(*, app_bundle: str | None, compact: bool, max_turns: int, timeout:
         rec.record(
             "smoke.chat_start",
             True,
-            {"prompt": _smoke_prompt(workspace), "maxTurns": max_turns, "timeout": timeout},
+            {"prompt": _smoke_prompt(workspace), "maxTurns": max_turns, "timeout": timeout, **authority},
         )
 
         chat_exit, transcript = _run_hermes_with_heartbeat(
             rec,
             ctx,
             workspace,
+            authority,
             max_turns=max_turns,
             timeout=timeout,
         )

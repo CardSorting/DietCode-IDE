@@ -111,7 +111,7 @@ MACOS_MM := \
 
 AGENT_CHAT_BUNDLE := $(APP_BINARY) $(PACKAGED_BRIDGE) $(PACKAGED_BRIDGE_CLI) $(PACKAGED_HERMES_PLUGIN) $(PACKAGED_ENABLE_AGENT) $(PACKAGED_ENABLE_AGENT_PY) $(PACKAGED_AGENT_CHAT) $(PACKAGED_AGENT_CHAT_PY) $(PACKAGED_AGENT_BUNDLE_PY) $(PACKAGED_BUNDLE_MANIFEST)
 
-.PHONY: all app agent-chat-bundle agent-bridge agent-bridge-fast run headless ensure-socket restart-agent-server restart-agent-server-fast agent-ready agent-status agent-ping agent-methods agent-capabilities agent-self-test test-agent-offline control-smoke test-task-health test-rpc-transaction test-ergonomics test-grep-diff-tooling test-runtime-determinism test-transaction-kernel test-harness-realism test-deterministic-retrieval test-agent-workflow-smoke test-agent-shell-tooling test-agent-shell-tooling-fast test-agent-shell-workflows test-agent-shell-workflows-fast test-authority-boundaries test-authority-boundaries-fast test-agent-bridge-authority test-cli-agent-failures test-docs-code-drift test-partial-success-closure test-broccoliq-runtime-memory test-broccoliq-runtime-memory-fast test-runtime-native-integration test-runtime-native-integration-fast test-agent-bridge test-agent-bridge-fast test-agent-integration sync-hermes-plugin enable-hermes-agent test-dietcode-enable-agent test-dietcode-agent-chat verify-agent-chat-sidebar smoke-agent-chat-live setup-hermes-bridge test-hermes-bridge-audit test-hermes-bridge-workflows hermes-ide-watchdog verify-hermes-bridge agent-integration verify-agent-runtime verify-agent-runtime-fast verify-agent-runtime-full verify-agent-runtime-full-fast benchmark-agent-success benchmark-agent-success-fast benchmark-agent-success-report test-agent-success-report test clean
+.PHONY: all app agent-chat-bundle agent-bridge agent-bridge-fast run headless ensure-socket restart-agent-server restart-agent-server-fast agent-ready agent-status agent-ping agent-methods agent-capabilities agent-self-test test-agent-offline control-smoke test-task-health test-rpc-transaction test-ergonomics test-grep-diff-tooling test-runtime-determinism test-transaction-kernel test-harness-realism test-deterministic-retrieval test-agent-workflow-smoke test-agent-shell-tooling test-agent-shell-tooling-fast test-agent-shell-workflows test-agent-shell-workflows-fast test-authority-boundaries test-authority-boundaries-fast test-agent-bridge-authority test-cli-agent-failures test-docs-code-drift test-partial-success-closure test-broccoliq-runtime-memory test-broccoliq-runtime-memory-fast test-runtime-native-integration test-runtime-native-integration-fast test-agent-bridge test-agent-bridge-fast test-agent-integration sync-hermes-plugin enable-hermes-agent test-dietcode-enable-agent test-dietcode-agent-chat test-agent-chat-workspace-switch verify-agent-chat-sidebar smoke-agent-chat-live setup-hermes-bridge test-hermes-bridge-audit test-hermes-bridge-workflows hermes-ide-watchdog verify-hermes-bridge agent-integration verify-agent-runtime verify-agent-runtime-fast verify-agent-runtime-full verify-agent-runtime-full-fast benchmark-agent-success benchmark-agent-success-fast benchmark-agent-success-report test-agent-success-report test clean
 
 all: app test
 
@@ -363,12 +363,17 @@ verify-agent-chat-sidebar: agent-chat-bundle
 smoke-agent-chat-live: agent-bridge-fast $(PACKAGED_BRIDGE) $(APP_BINARY) $(PACKAGED_AGENT_CHAT) $(PACKAGED_AGENT_CHAT_PY) $(PACKAGED_AGENT_BUNDLE_PY) $(PACKAGED_ENABLE_AGENT_PY) $(PACKAGED_BUNDLE_MANIFEST) $(PACKAGED_BRIDGE_CLI)
 	PYTHONUNBUFFERED=1 python3 scripts/smoke_agent_chat_live.py --compact
 
+test-agent-chat-workspace-switch: agent-bridge-fast $(PACKAGED_BRIDGE) $(APP_BINARY) $(PACKAGED_AGENT_BUNDLE_PY) $(PACKAGED_BRIDGE_CLI)
+	python3 scripts/test_agent_chat_workspace_switch.py
+
 verify-hermes-bridge: setup-hermes-bridge
 	python3 scripts/test_hermes_bridge_audit.py --compact
 	python3 scripts/test_hermes_bridge_workflows.py --compact
 	python3 scripts/test_dietcode_enable_agent.py
 	python3 scripts/test_dietcode_agent_chat.py
+	python3 scripts/test_agent_chat_workspace_switch.py
 	python3 scripts/verify_agent_chat_sidebar.py
+	python3 scripts/smoke_agent_chat_live.py --skip-live
 
 test-agent-bridge: restart-agent-server
 	cd $(AGENT_BRIDGE_DIR) && npm test

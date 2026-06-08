@@ -190,10 +190,11 @@ build/DietCode.app/Contents/Resources/bin/dietcode-agent-chat \
 
 See [Agent Chat Sidebar](docs/agent-chat-sidebar.md).
 
-Live bounded-edit proof (Hermes + bridge, not mocked):
+Live bounded-edit proof (sidebar/chat → Hermes → `dietcode_ide` → bridge → runtime mutation):
 
 ```bash
 make smoke-agent-chat-live
+make test-agent-chat-workspace-switch
 ```
 
 ---

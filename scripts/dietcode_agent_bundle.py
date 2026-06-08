@@ -279,23 +279,47 @@ def hermes_version() -> str | None:
     return None
 
 
-def open_runtime_workspace(ctx: BundleContext, workspace: Path, *, timeout: int = 45) -> dict[str, Any]:
-    """Force workspace.openFolder on the DietCode runtime for the requested root."""
+def _bridge_launch_prefix(ctx: BundleContext) -> list[str]:
+    if not ctx.bridge_cli:
+        return []
+    if ctx.bridge_cli.suffix == ".js":
+        return ["node", str(ctx.bridge_cli)]
+    return [str(ctx.bridge_cli)]
+
+
+def _normalize_workspace_path(path: str | Path | None) -> str | None:
+    if not path:
+        return None
+    try:
+        return str(Path(str(path)).expanduser().resolve())
+    except OSError:
+        return str(path)
+
+
+def _run_bridge_profile(
+    ctx: BundleContext,
+    *,
+    workspace: Path | None = None,
+    no_start: bool = False,
+    timeout: int = 45,
+) -> dict[str, Any]:
+    """Invoke bridge ``profile`` and return the parsed JSON payload."""
     if not ctx.bridge_cli:
         return {"ok": False, "error": "bridge_cli_missing", "code": "bridge_missing"}
     if not ctx.app_path:
         return {"ok": False, "error": "app_binary_missing", "code": "runtime_unavailable"}
-    prefix = ["node", str(ctx.bridge_cli)] if ctx.bridge_cli.suffix == ".js" else [str(ctx.bridge_cli)]
     cmd = [
-        *prefix,
+        *_bridge_launch_prefix(ctx),
         "--compact",
         "--wait-ready",
-        "--workspace",
-        str(workspace),
         "--app",
         str(ctx.app_path),
-        "profile",
     ]
+    if no_start:
+        cmd.append("--no-start")
+    if workspace is not None:
+        cmd.extend(["--workspace", str(workspace)])
+    cmd.append("profile")
     completed = subprocess.run(cmd, capture_output=True, text=True, check=False, timeout=timeout)
     raw = (completed.stdout or completed.stderr).strip()
     line = raw.splitlines()[-1] if raw else ""
@@ -304,11 +328,106 @@ def open_runtime_workspace(ctx: BundleContext, workspace: Path, *, timeout: int 
     except json.JSONDecodeError:
         payload = {"ok": False, "error": raw[:300]}
     payload["exit_code"] = completed.returncode
+    observed = _normalize_workspace_path(payload.get("workspacePath"))
     if payload.get("ok") is None:
-        opened = str(payload.get("workspacePath") or "")
-        payload["ok"] = completed.returncode == 0 and (
-            not opened or Path(opened).resolve() == workspace.resolve()
+        if workspace is not None:
+            payload["ok"] = completed.returncode == 0 and observed == _normalize_workspace_path(workspace)
+        else:
+            payload["ok"] = completed.returncode == 0 and bool(observed)
+    if observed:
+        payload["workspacePath"] = observed
+    return payload
+
+
+def observe_runtime_workspace(ctx: BundleContext, *, timeout: int = 30) -> str | None:
+    """Return the active DietCode runtime workspace root without switching."""
+    ensure_runtime_socket(ctx)
+    payload = _run_bridge_profile(ctx, workspace=None, no_start=True, timeout=timeout)
+    return _normalize_workspace_path(payload.get("workspacePath"))
+
+
+def open_runtime_workspace(ctx: BundleContext, workspace: Path, *, timeout: int = 45) -> dict[str, Any]:
+    """Force workspace.openFolder on the DietCode runtime for the requested root."""
+    return _run_bridge_profile(ctx, workspace=workspace, no_start=False, timeout=timeout)
+
+
+def workspace_authority_report(ctx: BundleContext, requested: Path) -> dict[str, Any]:
+    """Observe runtime workspace before/after opening the requested root."""
+    requested_path = _normalize_workspace_path(requested)
+    if not requested_path:
+        raise AgentChatError("Requested workspace path is invalid.", code="workspace_invalid", exit_code=3)
+
+    before = observe_runtime_workspace(ctx)
+    opened = open_runtime_workspace(ctx, Path(requested_path))
+    after = _normalize_workspace_path(opened.get("workspacePath")) or before
+    observed = after
+    match = observed == requested_path
+    switch_needed = before != requested_path
+    switch_succeeded = match and (not switch_needed or before != observed)
+
+    return {
+        "requestedWorkspace": requested_path,
+        "runtimeWorkspaceBefore": before,
+        "runtimeWorkspaceAfter": observed,
+        "workspaceRootObserved": observed,
+        "workspaceSwitchSucceeded": switch_succeeded,
+        "workspaceMatch": match,
+    }
+
+
+def enforce_workspace_authority(ctx: BundleContext, requested: Path) -> dict[str, Any]:
+    """Switch runtime to requested workspace and fail fast if authority diverges."""
+    report = workspace_authority_report(ctx, requested)
+    if not report["workspaceMatch"]:
+        observed = report.get("workspaceRootObserved") or "(unknown)"
+        raise AgentChatError(
+            "Workspace mismatch:\n"
+            f"requested: {report['requestedWorkspace']}\n"
+            f"runtime:   {observed}\n"
+            "Refusing to start agent chat against the wrong workspace.",
+            code="workspace_mismatch",
+            exit_code=3,
+            recovery_hint="open_folder",
         )
+    return report
+
+
+def bridge_search_literal(
+    ctx: BundleContext,
+    workspace: Path,
+    query: str,
+    *,
+    max_results: int = 10,
+    timeout: int = 45,
+) -> dict[str, Any]:
+    """Run bridge search literal in the given workspace."""
+    if not ctx.bridge_cli or not ctx.app_path:
+        return {"ok": False, "error": "bridge_unavailable"}
+    prefix = _bridge_launch_prefix(ctx)
+    cmd = [
+        *prefix,
+        "--compact",
+        "--wait-ready",
+        "--workspace",
+        str(workspace),
+        "--app",
+        str(ctx.app_path),
+        "--max-results",
+        str(max_results),
+        "search",
+        "literal",
+        query,
+    ]
+    completed = subprocess.run(cmd, cwd=str(workspace), capture_output=True, text=True, check=False, timeout=timeout)
+    raw = (completed.stdout or completed.stderr).strip()
+    line = raw.splitlines()[-1] if raw else ""
+    try:
+        payload = json.loads(line) if line else {"ok": False, "error": raw[:500]}
+    except json.JSONDecodeError:
+        payload = {"ok": False, "error": raw[:500]}
+    payload["exit_code"] = completed.returncode
+    if payload.get("ok") is None:
+        payload["ok"] = completed.returncode == 0
     return payload
 
 
@@ -394,6 +513,7 @@ def readiness_report(
     workspace: Path | None = None,
     doctor: dict[str, Any] | None = None,
     bridge: dict[str, Any] | None = None,
+    workspace_authority: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     doctor = doctor or run_enable_doctor(repo_root, ctx)
     bridge = bridge or (run_bridge_verify(ctx, workspace) if workspace else run_bridge_verify(ctx))
@@ -417,6 +537,7 @@ def readiness_report(
             "pluginInstalled": plugin_installed(),
         },
         "workspace": str(workspace) if workspace else None,
+        "workspaceAuthority": workspace_authority,
         "doctor": doctor,
     }
 
@@ -452,14 +573,7 @@ def assert_chat_ready(ctx: BundleContext, repo_root: Path, workspace: Path) -> d
             recovery_hint="dietcode-enable-agent --doctor",
         )
     ensure_runtime_socket(ctx)
-    opened = open_runtime_workspace(ctx, workspace)
-    if not opened.get("ok"):
-        raise AgentChatError(
-            f"Failed to open workspace on runtime: {opened.get('error', opened)}",
-            code="workspace_open_failed",
-            exit_code=3,
-            recovery_hint="open_folder",
-        )
+    authority = enforce_workspace_authority(ctx, workspace)
     bridge = run_bridge_verify(ctx, workspace)
     if not bridge.get("ok"):
         raise AgentChatError(
@@ -468,7 +582,14 @@ def assert_chat_ready(ctx: BundleContext, repo_root: Path, workspace: Path) -> d
             exit_code=9,
             recovery_hint="dietcode-enable-agent --doctor",
         )
-    return readiness_report(ctx, repo_root, workspace=workspace, doctor=doctor, bridge=bridge)
+    return readiness_report(
+        ctx,
+        repo_root,
+        workspace=workspace,
+        doctor=doctor,
+        bridge=bridge,
+        workspace_authority=authority,
+    )
 
 
 def build_system_prompt(workspace: Path, prompt: str) -> str:
@@ -495,6 +616,7 @@ def run_hermes_chat(
     hermes_bin = find_hermes_binary()
     if not hermes_bin:
         raise AgentChatError("Hermes missing", code="hermes_missing", exit_code=4)
+    enforce_workspace_authority(ctx, workspace)
     full_prompt = build_system_prompt(workspace, prompt)
     env = os.environ.copy()
     env["HERMES_HOME"] = str(HERMES_HOME)

@@ -49,13 +49,42 @@ Readiness checks (fail early):
 
 Hermes receives a strict instruction to use `dietcode_ide` only — no raw writes, no benchmark fixture reads.
 
+## Workspace authority
+
+Requested workspace, runtime workspace, Hermes env, and bridge `--workspace` must agree before chat starts.
+
+`dietcode-agent-chat --doctor --workspace /path --format json` includes:
+
+```json
+{
+  "workspaceAuthority": {
+    "requestedWorkspace": "/tmp/dietcode-smoke-...",
+    "runtimeWorkspaceBefore": "/Users/.../DietCode-IDE",
+    "runtimeWorkspaceAfter": "/tmp/dietcode-smoke-...",
+    "workspaceRootObserved": "/tmp/dietcode-smoke-...",
+    "workspaceSwitchSucceeded": true,
+    "workspaceMatch": true
+  }
+}
+```
+
+If `requestedWorkspace != workspaceRootObserved` after switch, chat exits before Hermes:
+
+```text
+Workspace mismatch:
+requested: <path>
+runtime:   <path>
+Refusing to start agent chat against the wrong workspace.
+```
+
 ## Sidebar UX (v1)
 
-- Status: runtime · bridge · Hermes · workspace · last exit
+- Status: runtime · bridge · Hermes · workspace requested/active · last exit
 - Transcript: `You:` / `Hermes:` plain text
 - Send runs `dietcode-agent-chat` off the main thread
 - Stop cancels the active subprocess
 - No workspace → “Open a folder first.”
+- Workspace mismatch → “Workspace mismatch — agent disabled” (Send disabled)
 
 Not in v1: streaming UI, markdown, model picker, persisted history, diff viewer.
 
@@ -63,17 +92,20 @@ Not in v1: streaming UI, markdown, model picker, persisted history, diff viewer.
 
 ```bash
 make test-dietcode-agent-chat
+make test-agent-chat-workspace-switch
 make verify-agent-chat-sidebar
 make verify-hermes-bridge
 ```
 
 ## Live smoke (bounded edit proof)
 
-Proves the installed app path can perform a real Hermes edit through `dietcode_ide` + bridge:
+Proof command for **sidebar/chat → Hermes → dietcode_ide → bridge → runtime → real file mutation**:
 
 ```bash
 make smoke-agent-chat-live
 ```
+
+Proves the installed app path can perform a real Hermes edit through `dietcode_ide` + bridge:
 
 The smoke harness:
 
