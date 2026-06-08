@@ -58,6 +58,12 @@ class RunMetrics:
     final_verify_passed: bool = False
     contract_coverage: dict[str, Any] = field(default_factory=dict)
     contract_reliability_index: int = 100
+    minimum_contract_set: list[str] = field(default_factory=list)
+    contract_escalation_path: list[dict[str, Any]] = field(default_factory=list)
+    failure_classes_observed: list[str] = field(default_factory=list)
+    orchestration_steps: int = 0
+    escalation_succeeded: bool = False
+    mcs_reference_match: dict[str, Any] = field(default_factory=dict)
 
     def to_json(self) -> dict[str, Any]:
         payload: dict[str, Any] = {
@@ -86,6 +92,12 @@ class RunMetrics:
             "secondInvariantPassed": self.second_invariant_passed,
             "contractCoverage": self.contract_coverage,
             "contractReliabilityIndex": self.contract_reliability_index,
+            "minimumContractSet": self.minimum_contract_set,
+            "contractEscalationPath": self.contract_escalation_path,
+            "failureClassesObserved": self.failure_classes_observed,
+            "orchestrationSteps": self.orchestration_steps,
+            "escalationSucceeded": self.escalation_succeeded,
+            "mcsReferenceMatch": self.mcs_reference_match,
             "timestamp": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
         }
         if self.agent_profile:
@@ -1012,10 +1024,10 @@ def run_single_task(
     executor: str = "reference",
     agent_profile: str = "grep_only",
 ) -> RunMetrics:
-    from contract_ladder import compute_cri, contract_coverage
+    from contract_ladder import AGENT_PROFILES, compute_cri, contract_coverage
 
     metrics = RunMetrics(task_id=task_id, mode=mode, executor=executor, agent_profile=agent_profile)
-    if executor == "agent":
+    if executor == "agent" and agent_profile in AGENT_PROFILES:
         metrics.contract_coverage = contract_coverage(agent_profile)
     started = time.monotonic()
     workspace: Path | None = None
@@ -1119,9 +1131,17 @@ def main() -> int:
     parser.add_argument("--run-id", help="Results filename stem.")
     parser.add_argument(
         "--agent-profile",
-        choices=["grep_only", "verify_exec", "invariant_aware", "trace_aware", "contract_full", "recovery_aware"],
+        choices=[
+            "grep_only",
+            "verify_exec",
+            "invariant_aware",
+            "trace_aware",
+            "contract_full",
+            "recovery_aware",
+            "orchestrated",
+        ],
         default="grep_only",
-        help="Runtime Contract Evaluation profile (agent executor only).",
+        help="Contract profile, or orchestrated = adaptive escalation broker (Phase 3).",
     )
     args = parser.parse_args()
 

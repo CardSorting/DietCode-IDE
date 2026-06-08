@@ -2,7 +2,7 @@
 
 **A whitepaper on evaluating bounded agent code mutation as a transactional runtime problem**
 
-Version 1.1 · June 2026  
+Version 1.2 · June 2026  
 Location: `benchmarks/agent_success/`
 
 **Live results:** [RESULTS.md](RESULTS.md) (001–030) · [NIGHTMARE_RESULTS.md](NIGHTMARE_RESULTS.md) (051–060) · [RESULTS_CONTRACT_LADDER.md](RESULTS_CONTRACT_LADDER.md) (profiles)
@@ -277,6 +277,52 @@ make benchmark-contract-ladder   # full nightmare × profile sweep
 
 Results: [RESULTS_CONTRACT_LADDER.md](RESULTS_CONTRACT_LADDER.md)
 
+### 6.5 Phase 3 — Runtime Contract Orchestrator
+
+Phase 2 proved **static** contract visibility improves reliability. Phase 3 asks: *how should the runtime decide what truth to reveal during failure recovery?*
+
+The orchestrator (`contracts.py`, `contract_orchestrator.py`) implements an **adaptive contract broker**:
+
+```text
+agent starts minimally bounded (readme + verify_grep)
+  → mutation attempt
+  → verify failure classified (orchestrator-side)
+  → runtime grants next contract layer
+  → workspace restored from fixture
+  → retry
+```
+
+**Failure classification** (no trap metadata exposed to agent):
+
+| Failure class | Contract granted |
+|---------------|------------------|
+| `hidden_invariant_missing` | `hidden_invariant` |
+| `runtime_behavior_mismatch` | `verify_exec` |
+| `execution_trace_required` | `execution_trace` |
+| `stale_read_detected` | `authoritative_read` |
+| `concurrent_mutation` | `stale_read_protocol` |
+
+**Minimum Contract Set (MCS)** — per task, the smallest contract set observed at first successful pass:
+
+```json
+{
+  "minimumContractSet": ["readme", "verify_grep", "hidden_invariant"],
+  "contractEscalationPath": [
+    {"failureClass": "hidden_invariant_missing", "grantedContract": "hidden_invariant"}
+  ],
+  "escalationSucceeded": true
+}
+```
+
+```bash
+python3 benchmarks/agent_success/run_benchmark.py --executor agent --agent-profile orchestrated --mode bridge
+make benchmark-contract-orchestrator   # nightmare tier → RESULTS_ORCHESTRATOR.md
+```
+
+**Claim (Phase 3):** Reliable bounded autonomy emerges through **adaptive runtime contract escalation**, not static maximal visibility.
+
+Results: [RESULTS_ORCHESTRATOR.md](RESULTS_ORCHESTRATOR.md)
+
 ---
 
 ## 7. Metrics
@@ -304,6 +350,11 @@ Each run emits one JSONL `task_result` row:
 | `apiShapePreserved` | Public API unchanged aside from fix (nightmare) |
 | `secondInvariantPassed` | `verify_invariant.sh` passed when present |
 | `finalVerifyPassed` | Mirrors final `verifyPassed` after all checks |
+| `minimumContractSet` | MCS at first successful pass (`orchestrated` profile) |
+| `contractEscalationPath` | Failure class → granted contract per step |
+| `escalationSucceeded` | Task passed after at least one contract escalation |
+| `orchestrationSteps` | Broker iterations consumed |
+| `mcsReferenceMatch` | Observed MCS vs diagnostic reference |
 | `executor` | `reference` or `agent` |
 | `mode` | `raw_rpc` or `bridge` |
 
@@ -559,3 +610,4 @@ DietCode does not only measure whether an agent can patch code. It measures **wh
 |---------|------|-------|
 | 1.0 | June 2026 | 30 tasks: dual modes, dual executors, adversarial traps, claim-ready reporting |
 | 1.1 | June 2026 | +10 nightmare tasks (051–060), contract metrics, Runtime Contract Evaluation Ladder (6 profiles), CRI, failure attribution, three result papers |
+| 1.2 | June 2026 | Phase 3: Runtime Contract Orchestrator, adaptive escalation, MCS metric, `orchestrated` agent profile |

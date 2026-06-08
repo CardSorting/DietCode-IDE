@@ -8,7 +8,7 @@
 
 DietCode does not only measure whether an agent can patch code. It measures **which runtime contracts must be visible** for bounded mutation to remain reliable.
 
-Methodology: [WHITEPAPER.md](WHITEPAPER.md) · Nightmare tier: [NIGHTMARE_RESULTS.md](NIGHTMARE_RESULTS.md)
+Methodology: [WHITEPAPER.md](WHITEPAPER.md) · Nightmare tier: [NIGHTMARE_RESULTS.md](NIGHTMARE_RESULTS.md) · Phase 3 orchestrator: [RESULTS_ORCHESTRATOR.md](RESULTS_ORCHESTRATOR.md)
 
 ---
 

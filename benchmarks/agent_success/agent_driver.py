@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import Any, TYPE_CHECKING
 
 from contract_ladder import AGENT_PROFILES, contract_coverage, profile_allows
+from contracts import contracts_allow
 
 if TYPE_CHECKING:
     from run_benchmark import BridgeSession, RpcSession, WorkflowContext
@@ -106,22 +107,20 @@ def parse_verify_script(verify_text: str, *, include_shell: bool) -> AgentPlan:
     )
 
 
-def build_plan(task_id: str, profile: str = "grep_only") -> AgentPlan:
-    if profile not in AGENT_PROFILES:
-        raise ValueError(f"unknown agent profile: {profile}")
-
+def build_plan_from_contracts(task_id: str, visible: set[str]) -> AgentPlan:
+    """Build agent plan from dynamically granted contract visibility."""
     task_dir = TASKS_DIR / task_id
     readme = _strip_readme((task_dir / "README.md").read_text(encoding="utf-8"))
     verify = (task_dir / "verify.sh").read_text(encoding="utf-8")
 
-    include_shell = profile_allows(profile, "verify_exec")
+    include_shell = contracts_allow(visible, "verify_exec")
     plan = parse_verify_script(verify, include_shell=include_shell)
     plan.instruction = readme
 
-    if not profile_allows(profile, "trace"):
+    if not contracts_allow(visible, "trace"):
         plan.trace_scripts = []
 
-    if profile_allows(profile, "invariant"):
+    if contracts_allow(visible, "invariant"):
         inv_path = task_dir / "verify_invariant.sh"
         if inv_path.is_file():
             inv_text = inv_path.read_text(encoding="utf-8")
@@ -132,10 +131,35 @@ def build_plan(task_id: str, profile: str = "grep_only") -> AgentPlan:
                 plan.shell_checks.extend(inv_plan.shell_checks)
             _enrich_invariant_goals(task_id, inv_text, plan)
 
-    if profile_allows(profile, "contract_full"):
+    if contracts_allow(visible, "behavior_check") or contracts_allow(visible, "verify_exec"):
         _enrich_contract_full_goals(task_id, plan)
 
     return plan
+
+
+def build_plan(task_id: str, profile: str = "grep_only") -> AgentPlan:
+    if profile not in AGENT_PROFILES:
+        raise ValueError(f"unknown agent profile: {profile}")
+
+    visible = set(contract_coverage(profile).get("visibleChecks", ["readme", "verify_grep"]))
+    # Map legacy profile flags to contract names for unified plan builder
+    caps = contract_coverage(profile)
+    if caps.get("executableChecks"):
+        visible.add("verify_exec")
+        visible.add("behavior_check")
+    if caps.get("invariantChecks"):
+        visible.add("hidden_invariant")
+    if caps.get("traceScripts"):
+        visible.add("execution_trace")
+    if caps.get("destructiveCommandPolicy"):
+        visible.add("destructive_policy")
+    if caps.get("staleReadProtocol"):
+        visible.add("stale_read_protocol")
+    if caps.get("rollbackProtocol"):
+        visible.add("rollback_protocol")
+    if profile in ("contract_full", "recovery_aware"):
+        visible.update({"verify_exec", "behavior_check", "hidden_invariant", "execution_trace", "destructive_policy"})
+    return build_plan_from_contracts(task_id, visible)
 
 
 def _enrich_invariant_goals(task_id: str, inv_text: str, plan: AgentPlan) -> None:
@@ -507,7 +531,13 @@ def _target_paths(plan: AgentPlan) -> list[str]:
     return seen
 
 
-def _apply_grep_patches_bridge(workspace: Path, ctx: WorkflowContext, plan: AgentPlan) -> None:
+def _apply_grep_patches_bridge(
+    workspace: Path,
+    ctx: WorkflowContext,
+    plan: AgentPlan,
+    *,
+    authoritative_read: bool = False,
+) -> None:
     from run_benchmark import BridgeSession, ensure_workspace_open
 
     ensure_workspace_open(workspace)
@@ -519,6 +549,9 @@ def _apply_grep_patches_bridge(workspace: Path, ctx: WorkflowContext, plan: Agen
             bridge.run(["search", "literal", key])
 
         for rel_path in _target_paths(plan):
+            if authoritative_read:
+                bridge.run(["stat", rel_path])
+                _read_file_bridge(bridge, rel_path)
             bridge.run(["stat", rel_path])
             before = _read_file_bridge(bridge, rel_path)
             after = before
@@ -549,15 +582,20 @@ def _apply_grep_patches_rpc(workspace: Path, ctx: WorkflowContext, plan: AgentPl
                 _apply_patch_rpc(session, ctx, rel_path, diff, goals=plan.positive_goals)
 
 
-def _post_patch_contract_checks(workspace: Path, task_id: str, plan: AgentPlan, profile: str) -> None:
-    if profile_allows(profile, "verify_exec") and plan.shell_checks:
+def _post_patch_contract_checks(
+    workspace: Path,
+    task_id: str,
+    plan: AgentPlan,
+    visible: set[str],
+) -> None:
+    if contracts_allow(visible, "verify_exec") and plan.shell_checks:
         failed = _run_shell_checks(workspace, plan.shell_checks)
         if failed and failed.returncode != 0:
             raise RuntimeError(
                 f"verify shell check failed (exit {failed.returncode}): {failed.stderr or failed.stdout}"
             )
 
-    if profile_allows(profile, "invariant"):
+    if contracts_allow(visible, "invariant"):
         inv = TASKS_DIR / task_id / "verify_invariant.sh"
         if inv.is_file():
             completed = _run_verify_script(workspace, inv)
@@ -568,19 +606,26 @@ def _post_patch_contract_checks(workspace: Path, task_id: str, plan: AgentPlan, 
                 )
 
 
-def _execute_plan(workspace: Path, task_id: str, mode: str, ctx: WorkflowContext, plan: AgentPlan) -> None:
-    profile = ctx.agent_profile
+def execute_plan_with_contracts(
+    workspace: Path,
+    task_id: str,
+    mode: str,
+    ctx: WorkflowContext,
+    plan: AgentPlan,
+    visible: set[str],
+) -> None:
+    """Single mutation attempt under the current visible contract set."""
+    if contracts_allow(visible, "destructive_policy"):
+        _check_destructive_temptation(plan, ctx)
 
-    _check_destructive_temptation(plan, ctx)
-
-    if profile_allows(profile, "verify_exec"):
+    if contracts_allow(visible, "verify_exec") or contracts_allow(visible, "behavior_check"):
         _infer_behavior_targets(workspace, plan)
 
-    if profile_allows(profile, "trace"):
+    if contracts_allow(visible, "trace"):
         _discover_paths_from_trace(workspace, plan)
 
-    max_attempts = 3 if profile_allows(profile, "recovery") else 1
-    snap = _snapshot_workspace(workspace) if profile_allows(profile, "recovery") else {}
+    max_attempts = 3 if contracts_allow(visible, "recovery") else 1
+    snap = _snapshot_workspace(workspace) if contracts_allow(visible, "recovery") else {}
 
     for attempt in range(max_attempts):
         if attempt > 0 and snap:
@@ -589,15 +634,15 @@ def _execute_plan(workspace: Path, task_id: str, mode: str, ctx: WorkflowContext
             ctx.metrics.rollback_succeeded = True
 
         if mode == "bridge":
-            _apply_grep_patches_bridge(workspace, ctx, plan)
+            _apply_grep_patches_bridge(workspace, ctx, plan, authoritative_read=contracts_allow(visible, "authoritative_read"))
         elif mode == "raw_rpc":
             _apply_grep_patches_rpc(workspace, ctx, plan)
         else:
             raise ValueError(f"unknown mode: {mode}")
 
         try:
-            _post_patch_contract_checks(workspace, task_id, plan, profile)
-            if profile_allows(profile, "verify_exec"):
+            _post_patch_contract_checks(workspace, task_id, plan, visible)
+            if contracts_allow(visible, "verify_exec"):
                 verify = TASKS_DIR / task_id / "verify.sh"
                 completed = _run_verify_script(workspace, verify)
                 if completed.returncode != 0:
@@ -609,6 +654,27 @@ def _execute_plan(workspace: Path, task_id: str, mode: str, ctx: WorkflowContext
         except RuntimeError:
             if attempt + 1 >= max_attempts:
                 raise
+
+
+def _execute_plan(workspace: Path, task_id: str, mode: str, ctx: WorkflowContext, plan: AgentPlan) -> None:
+    profile = ctx.agent_profile
+    visible = set(contract_coverage(profile).get("visibleChecks", ["readme", "verify_grep"]))
+    caps = contract_coverage(profile)
+    if caps.get("executableChecks"):
+        visible.update({"verify_exec", "behavior_check"})
+    if caps.get("invariantChecks"):
+        visible.add("hidden_invariant")
+    if caps.get("traceScripts"):
+        visible.add("execution_trace")
+    if caps.get("destructiveCommandPolicy"):
+        visible.add("destructive_policy")
+    if caps.get("staleReadProtocol"):
+        visible.add("stale_read_protocol")
+    if caps.get("rollbackProtocol"):
+        visible.add("rollback_protocol")
+    if profile in ("contract_full", "recovery_aware"):
+        visible.update({"verify_exec", "behavior_check", "hidden_invariant", "execution_trace", "destructive_policy"})
+    execute_plan_with_contracts(workspace, task_id, mode, ctx, plan, visible)
 
 
 def _run_external_agent(workspace: Path, task_id: str, mode: str, script: Path) -> None:
@@ -632,6 +698,12 @@ def run_agent_task(
     external = os.environ.get("AGENT_BENCHMARK_AGENT_SCRIPT")
     if external:
         _run_external_agent(workspace, task_id, mode, Path(external))
+        return
+
+    if profile == "orchestrated":
+        from contract_orchestrator import run_orchestrated_agent
+
+        run_orchestrated_agent(workspace, task_id, mode, ctx)
         return
 
     plan = build_plan(task_id, profile)

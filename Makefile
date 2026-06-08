@@ -327,6 +327,12 @@ benchmark-contract-ladder: agent-bridge-fast
 test-contract-ladder:
 	python3 benchmarks/agent_success/test_contract_ladder.py
 
+test-contract-orchestrator:
+	python3 benchmarks/agent_success/test_contracts.py
+
+benchmark-contract-orchestrator: agent-bridge-fast
+	DIETCODE_REPO_ROOT=$(CURDIR) python3 benchmarks/agent_success/run_orchestrator_benchmark.py --assume-server-ready
+
 # Agent success benchmark: fast iteration — assumes server/binary/bridge already match HEAD.
 benchmark-agent-success-fast: agent-bridge-fast
 	DIETCODE_REPO_ROOT=$(CURDIR) python3 benchmarks/agent_success/run_benchmark.py --assume-server-ready

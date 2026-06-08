@@ -9,10 +9,13 @@ End-to-end benchmark harness for DietCode agent workflows — **mutation safety,
 | [RESULTS.md](RESULTS.md) | Normal + adversarial (001–030) | Reference **60/60** · Agent **30/30** |
 | [NIGHTMARE_RESULTS.md](NIGHTMARE_RESULTS.md) | Runtime contract tier (051–060) | Reference **20/20** · Agent **6/10** (`grep_only`) |
 | [RESULTS_CONTRACT_LADDER.md](RESULTS_CONTRACT_LADDER.md) | Profile sweep on nightmare tier | Best: **`contract_full` 9/10** (avg CRI 95) |
+| [RESULTS_ORCHESTRATOR.md](RESULTS_ORCHESTRATOR.md) | Adaptive escalation (Phase 3) | MCS per task — see live run |
 
 > Which runtime contract must be visible to the agent before bounded mutation becomes reliable?
 
-**Corpus:** 40 tasks in three tiers (tasks 031–050 reserved). DietCode **1.6.5**, benchmark **v1.1**.
+**Phase 3 claim:** Reliable bounded autonomy emerges through **adaptive runtime contract escalation**, not static maximal visibility.
+
+**Corpus:** 40 tasks in three tiers (tasks 031–050 reserved). DietCode **1.6.5**, benchmark **v1.2** (Phase 3 orchestrator).
 
 ## Layout
 
@@ -22,9 +25,12 @@ benchmarks/agent_success/
   nightmare_tasks_defs.py   # nightmare-tier definitions
   run_benchmark.py          # runner: modes × executors × agent profiles
   agent_driver.py           # README + verify-driven agent (6 contract profiles)
-  contract_ladder.py        # profile caps, CRI, required-contract map
-  run_contract_ladder.py    # nightmare × profile orchestrator
-  render_contract_ladder.py # RESULTS_CONTRACT_LADDER.md generator
+  contract_ladder.py        # profile caps, CRI, required-contract map (Phase 2)
+  contracts.py              # contract registry, escalation graph, MCS (Phase 3)
+  contract_orchestrator.py  # adaptive contract broker
+  run_contract_ladder.py    # nightmare × profile sweep (Phase 2)
+  run_orchestrator_benchmark.py  # orchestrated agent → RESULTS_ORCHESTRATOR.md
+  render_contract_ladder.py # ladder report generator
   report_results.py         # summary.md / summary.json from JSONL
   tasks/task_NNN/           # README, before/, verify.sh, metadata.json, expected.patch
   results/                  # JSONL + summaries (gitignored)
@@ -54,10 +60,16 @@ benchmarks/agent_success/
 | `trace_aware` | + declared trace scripts |
 | `contract_full` | + all executable checks (no metadata) |
 | `recovery_aware` | + rollback/retry transactional loop |
+| **`orchestrated`** | **Phase 3: start minimal → classify failure → escalate → retry** |
 
 ```bash
+# Phase 2: static profile ladder
 python3 benchmarks/agent_success/run_benchmark.py --executor agent --agent-profile invariant_aware --mode bridge
-make benchmark-contract-ladder   # nightmare tasks × all profiles → RESULTS_CONTRACT_LADDER.md
+make benchmark-contract-ladder
+
+# Phase 3: adaptive contract broker
+python3 benchmarks/agent_success/run_benchmark.py --executor agent --agent-profile orchestrated --mode bridge
+make benchmark-contract-orchestrator
 ```
 
 Override the built-in agent with an external script:
@@ -97,17 +109,17 @@ make test-contract-ladder
 ```text
 benchmark corpus (40 tasks)
   → executors (reference / agent)
-  → agent profiles (grep_only … recovery_aware)   # Phase 2: contract ladder
-  → mutation telemetry (JSONL)
-  → reports (pass, wrong-file, recovery, CRI, attribution matrix)
-  → CI gate (reference solvability + contract metric regression)
+  → Phase 2: static profiles (grep_only … recovery_aware)
+  → Phase 3: orchestrated escalation (failure → grant contract → retry)
+  → mutation telemetry + MCS (JSONL)
+  → reports / CI gate
 ```
 
-| Layer | Question |
+| Phase | Question |
 |-------|----------|
-| Reference executor | Is the tool surface mechanically solvable? |
-| Agent + `grep_only` | Can bounded autonomy pass with minimal contract visibility? |
-| Agent + profiles | **Which contract** unlocks each trap? |
+| Reference | Is the tool surface mechanically solvable? |
+| Phase 2 ladder | **Which static contract** unlocks each trap? |
+| Phase 3 orchestrator | **What is the Minimum Contract Set (MCS)** per task? |
 | Nightmare tier | Does mutation stay bounded under adversarial runtime state? |
 
 ## Metrics (JSONL)
@@ -195,7 +207,7 @@ adversarial trap metadata. Tasks 052+ may ship `verify_invariant.sh` for a secon
 **Current findings (live runs, DietCode 1.6.5):**
 
 - Reference passes **100%** on all 40 tasks (80 rows across `raw_rpc` + `bridge`).
-- Agent passes **100%** on base corpus (`grep_only`) but drops to **60%** on nightmare tier.
-- **`invariant_aware`** unlocks task 052 (`hidden_invariant`); **`verify_exec`** unlocks 055/059.
-- Task **057** (`concurrent_agent_conflict`) fails on all profiles — needs organic stale recovery, not grep planning.
-- **`contract_full`** reaches **9/10** nightmare with avg CRI **95** and zero wrong-file edits.
+- Phase 2: `grep_only` **6/10** nightmare → `contract_full` **9/10** (static maximal visibility).
+- Phase 3: **`orchestrated` 8/10** nightmare with **MCS telemetry** — e.g. task 052 escalates `hidden_invariant` on failure, then passes.
+- Task **057** fails all modes — needs organic multi-writer stale recovery, not contract visibility alone.
+- Zero wrong-file edits across all live runs.

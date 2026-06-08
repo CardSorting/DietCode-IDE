@@ -5,7 +5,7 @@ Run date: **8 June 2026**
 DietCode runtime: **1.6.5** (control socket)  
 Benchmark version: **1.1** (nightmare extension)
 
-Methodology: [WHITEPAPER.md](WHITEPAPER.md) §6.3 · Base corpus results: [RESULTS.md](RESULTS.md) · Contract ladder: [RESULTS_CONTRACT_LADDER.md](RESULTS_CONTRACT_LADDER.md)
+Methodology: [WHITEPAPER.md](WHITEPAPER.md) §6.3 · Base corpus: [RESULTS.md](RESULTS.md) · Phase 2 ladder: [RESULTS_CONTRACT_LADDER.md](RESULTS_CONTRACT_LADDER.md) · Phase 3 orchestrator: [RESULTS_ORCHESTRATOR.md](RESULTS_ORCHESTRATOR.md)
 
 ---
 
