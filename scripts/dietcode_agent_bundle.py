@@ -431,6 +431,43 @@ def bridge_search_literal(
     return payload
 
 
+def fetch_bridge_timeline(
+    ctx: BundleContext,
+    workspace: Path,
+    *,
+    limit: int = 50,
+    since_revision: int | None = None,
+    timeout: int = 45,
+) -> dict[str, Any]:
+    if not ctx.bridge_cli or not ctx.app_path:
+        return {"ok": False, "error": "bridge_unavailable"}
+    tail = ["timeline", "recent", "--limit", str(limit)]
+    if since_revision and since_revision > 0:
+        tail.extend(["--since-revision", str(since_revision)])
+    prefix = _bridge_launch_prefix(ctx)
+    cmd = [
+        *prefix,
+        "--compact",
+        "--wait-ready",
+        "--workspace",
+        str(workspace),
+        "--app",
+        str(ctx.app_path),
+        *tail,
+    ]
+    completed = subprocess.run(cmd, cwd=str(workspace), capture_output=True, text=True, check=False, timeout=timeout)
+    raw = (completed.stdout or completed.stderr).strip()
+    line = raw.splitlines()[-1] if raw else ""
+    try:
+        payload = json.loads(line) if line else {"ok": False, "error": raw[:500]}
+    except json.JSONDecodeError:
+        payload = {"ok": False, "error": raw[:500]}
+    payload["exit_code"] = completed.returncode
+    if payload.get("ok") is None:
+        payload["ok"] = completed.returncode == 0
+    return payload
+
+
 def run_bridge_verify(ctx: BundleContext, workspace: Path | None = None) -> dict[str, Any]:
     if not ctx.bridge_cli:
         return {"ok": False, "error": "bridge_cli_missing", "code": "bridge_missing"}
@@ -612,6 +649,7 @@ def run_hermes_chat(
     max_turns: int = 25,
     timeout: int = 600,
     yolo: bool = False,
+    mutation_event_log: Path | None = None,
 ) -> tuple[int, str]:
     hermes_bin = find_hermes_binary()
     if not hermes_bin:
@@ -630,6 +668,9 @@ def run_hermes_chat(
     if ctx.bridge_cli:
         env["DIETCODE_BRIDGE_CLI"] = str(ctx.bridge_cli)
     env["DIETCODE_IDE_ROOT"] = str(ctx.ide_root)
+    if mutation_event_log is not None:
+        mutation_event_log.parent.mkdir(parents=True, exist_ok=True)
+        env["DIETCODE_MUTATION_EVENT_LOG"] = str(mutation_event_log)
     cmd = [
         str(hermes_bin),
         "chat",

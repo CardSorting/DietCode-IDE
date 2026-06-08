@@ -77,14 +77,69 @@ runtime:   <path>
 Refusing to start agent chat against the wrong workspace.
 ```
 
+## Mutation authority
+
+Approved mutation path:
+
+```text
+DietCode sidebar → dietcode-agent-chat → Hermes → dietcode_ide.patch → agent bridge → DietCode runtime safe patch/apply
+```
+
+After each chat run, `dietcode-agent-chat` audits workspace file hashes against bridge patch telemetry (`mutation.patch.applied` events). Telemetry is written outside the workspace (`~/.dietcode/agent-chat/events/<run-id>.jsonl`).
+
+```json
+{
+  "mutationAuthority": {
+    "mode": "bridge_only",
+    "bridgePatchCount": 1,
+    "rawWriteSuspected": false,
+    "mutatedFiles": ["smoke_probe.py"],
+    "evidence": []
+  }
+}
+```
+
+Modes:
+
+| `mode` | Meaning |
+|--------|---------|
+| `bridge_only` | Every changed file is explained by bridge patch telemetry |
+| `no_mutation` | No file changes observed |
+| `unknown` | Files changed but bridge telemetry is incomplete |
+| `violated` | Changes outside the approved bridge path |
+
+Enforcement (smoke / CI):
+
+```bash
+dietcode-agent-chat --workspace /path --prompt "..." --enforce-mutation-authority
+```
+
+Exits nonzero when `mode` is `unknown` or `violated`.
+
+**Trust guarantees**
+
+- Workspace authority enforced before chat
+- Mutation authority audited after chat
+- Live smoke proves real bridge-mediated mutation
+
+**Limitations**
+
+- Not full OS-level sandboxing
+- Raw-write detection is best-effort unless Hermes tool permissions are locked down
+- Bridge telemetry is authoritative only for DietCode-mediated patches
+
+**Invariant:** a successful agent edit is not trusted unless changed files are explained by bridge patch telemetry.
+
 ## Sidebar UX (v1)
 
-- Status: runtime · bridge · Hermes · workspace requested/active · last exit
+- Status: runtime · bridge · Hermes · workspace requested/active · mutation path · last exit
 - Transcript: `You:` / `Hermes:` plain text
 - Send runs `dietcode-agent-chat` off the main thread
 - Stop cancels the active subprocess
 - No workspace → “Open a folder first.”
 - Workspace mismatch → “Workspace mismatch — agent disabled” (Send disabled)
+- Mutation path: Bridge verified / No mutation / Unknown — review run / Violation — agent disabled
+- Mutation violation → Send disabled until workspace changes or status refresh clears state; changed files and evidence appear in transcript
 
 Not in v1: streaming UI, markdown, model picker, persisted history, diff viewer.
 
@@ -93,6 +148,7 @@ Not in v1: streaming UI, markdown, model picker, persisted history, diff viewer.
 ```bash
 make test-dietcode-agent-chat
 make test-agent-chat-workspace-switch
+make test-mutation-authority
 make verify-agent-chat-sidebar
 make verify-hermes-bridge
 ```
@@ -113,7 +169,8 @@ The smoke harness:
 2. Runs `dietcode-agent-chat --prompt "fix VALUE to 2"`
 3. Verifies disk + bridge read show `VALUE = 2`
 4. Checks runtime timeline for patch activity
-5. Prints a compact transcript and cleans up
+5. Asserts `mutationAuthority.mode == bridge_only`, `bridgePatchCount >= 1`, `smoke_probe.py` in `mutatedFiles`, `rawWriteSuspected == false`
+6. Prints a compact transcript and cleans up
 
 Skip live Hermes (CI / offline): `AGENT_CHAT_LIVE=0 make smoke-agent-chat-live` or `--skip-live`.
 
@@ -126,4 +183,6 @@ The smoke harness forces `workspace.openFolder` on the temp directory (bridge sw
 | `src/platform/macos/MacAgentSidebar.mm` | Sidebar UI |
 | `scripts/dietcode_agent_chat.py` | Chat CLI |
 | `scripts/dietcode_agent_bundle.py` | Shared bundle resolution |
+| `scripts/dietcode_mutation_authority.py` | Post-run mutation audit |
+| `agent-bridge/src/telemetry/mutationTelemetry.ts` | Bridge patch event log |
 | `resources/bin/dietcode-agent-chat` | App launcher |

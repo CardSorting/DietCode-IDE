@@ -27,5 +27,10 @@ if [[ -f "${DIR}/dietcode_agent_bundle.py" ]]; then
 elif [[ -n "${REPO_ROOT:-}" && -f "${REPO_ROOT}/scripts/dietcode_agent_bundle.py" ]]; then
   export PYTHONPATH="${REPO_ROOT}/scripts:${PYTHONPATH}"
 fi
+if [[ -f "${DIR}/dietcode_mutation_authority.py" ]]; then
+  export PYTHONPATH="${DIR}:${PYTHONPATH}"
+elif [[ -n "${REPO_ROOT:-}" && -f "${REPO_ROOT}/scripts/dietcode_mutation_authority.py" ]]; then
+  export PYTHONPATH="${REPO_ROOT}/scripts:${PYTHONPATH}"
+fi
 
 exec python3 "${PY_SCRIPT}" "$@"

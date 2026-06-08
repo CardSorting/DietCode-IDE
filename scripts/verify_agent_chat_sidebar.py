@@ -45,7 +45,7 @@ def main() -> int:
     rec.record("bundle.module", (REPO_ROOT / "scripts/dietcode_agent_bundle.py").is_file())
     rec.record("smoke.live_script", (REPO_ROOT / "scripts/smoke_agent_chat_live.py").is_file())
 
-    for name in ("dietcode-agent-chat", "dietcode-agent-chat.py", "dietcode_agent_bundle.py"):
+    for name in ("dietcode-agent-chat", "dietcode-agent-chat.py", "dietcode_agent_bundle.py", "dietcode_mutation_authority.py"):
         rec.record(f"bundled.{name}", (BIN / name).is_file(), str(BIN / name))
 
     text = SIDEBAR_MM.read_text(encoding="utf-8") if SIDEBAR_MM.is_file() else ""
@@ -56,6 +56,10 @@ def main() -> int:
     rec.record("sidebar.workspace_requested_label", "Workspace requested:" in text)
     rec.record("sidebar.workspace_active_label", "Workspace active:" in text)
     rec.record("sidebar.workspace_mismatch_guard", "Workspace mismatch" in text)
+    rec.record("sidebar.mutation_path_label", "Mutation path:" in text)
+    rec.record("sidebar.mutation_violation_guard", "Violation" in text and "mutationAuthority" in text)
+    rec.record("mutation.authority_module", (REPO_ROOT / "scripts/dietcode_mutation_authority.py").is_file())
+    rec.record("mutation.authority_test", (REPO_ROOT / "scripts/test_mutation_authority.py").is_file())
     rec.record("workspace.switch_test", (REPO_ROOT / "scripts/test_agent_chat_workspace_switch.py").is_file())
     rec.record("sidebar.async_dispatch", "dispatch_get_global_queue" in text)
 

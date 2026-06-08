@@ -6,6 +6,7 @@ import { isBridgeError } from '../contracts/BridgeError.js';
 import { bridgeError } from '../contracts/errors.js';
 import type { RpcCaller } from '../client/RpcTransport.js';
 import type { MutationReceipt, PatchOptions, SafePatchResult } from '../contracts/types.js';
+import { recordMutationPatchApplied } from '../telemetry/mutationTelemetry.js';
 import { buildStaleRecoveryResponse } from './stalePatchRecovery.js';
 import { verifyAfterMutation } from './verifyAfterMutation.js';
 
@@ -33,6 +34,16 @@ export async function safePatchFile(
 
     const receipt = applied.result.mutationReceipt as MutationReceipt;
     const verified = await verifyAfterMutation(transport, revisionBefore, receipt);
+
+    recordMutationPatchApplied({
+      workspace: process.env.DIETCODE_WORKSPACE ?? process.env.HERMES_KANBAN_WORKSPACE ?? '',
+      path: receipt.path,
+      beforeHash: receipt.beforeContentHash,
+      afterHash: receipt.postContentHash,
+      tool: 'dietcode_ide.patch',
+      protocol: 'safePatchFile',
+      idempotencyKey,
+    });
 
     return {
       applied: true,

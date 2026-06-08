@@ -69,6 +69,8 @@ Trust + update safety:
 
 Agent Chat sidebar (native UI): [Agent Chat Sidebar](agent-chat-sidebar.md)
 
+`safePatchFile` emits `mutation.patch.applied` telemetry (stderr marker + optional `DIETCODE_MUTATION_EVENT_LOG` JSONL outside the workspace). Agent Chat audits changed files against these events after each run.
+
 ```bash
 build/DietCode.app/Contents/Resources/bin/dietcode-agent-chat \
   --workspace /path/to/project \

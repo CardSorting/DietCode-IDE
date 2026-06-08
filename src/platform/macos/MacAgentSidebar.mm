@@ -42,6 +42,8 @@ static NSColor* AgentSidebarBackgroundColor(void) {
     BOOL _runningCommand;
     BOOL _cancelRequested;
     BOOL _workspaceAuthorityMatch;
+    BOOL _mutationAuthorityViolated;
+    NSString* _lastWorkspaceForAuthority;
     NSTask* _activeTask;
     NSInteger _lastExitCode;
 }
@@ -51,6 +53,7 @@ static NSColor* AgentSidebarBackgroundColor(void) {
     if (self) {
         _lastExitCode = 0;
         _workspaceAuthorityMatch = YES;
+        _mutationAuthorityViolated = NO;
         [self buildInterface];
         [self appendTranscriptWithSpeaker:kAgentSpeakerHermes
                                   message:@"Agent chat ready. Open a folder, then send a prompt."];
@@ -73,7 +76,7 @@ static NSColor* AgentSidebarBackgroundColor(void) {
     [_statusLabel setFont:[NSFont systemFontOfSize:11 weight:NSFontWeightRegular]];
     [_statusLabel setTextColor:[NSColor secondaryLabelColor]];
     [_statusLabel setLineBreakMode:NSLineBreakByWordWrapping];
-    [_statusLabel setMaximumNumberOfLines:6];
+    [_statusLabel setMaximumNumberOfLines:8];
     [_statusLabel setTranslatesAutoresizingMaskIntoConstraints:NO];
     [self addSubview:_statusLabel];
 
@@ -163,6 +166,38 @@ static NSColor* AgentSidebarBackgroundColor(void) {
     return @"";
 }
 
+- (NSString*)mutationPathLabelFromMode:(NSString*)mode {
+    if ([mode isEqualToString:@"bridge_only"]) {
+        return @"Bridge verified";
+    }
+    if ([mode isEqualToString:@"no_mutation"]) {
+        return @"No mutation";
+    }
+    if ([mode isEqualToString:@"violated"]) {
+        return @"Violation — agent disabled";
+    }
+    return @"Unknown — review run";
+}
+
+- (BOOL)updateMutationAuthorityFromPayload:(NSDictionary*)payload {
+    NSDictionary* authority = payload[@"mutationAuthority"];
+    if (![authority isKindOfClass:[NSDictionary class]]) {
+        authority = [payload valueForKeyPath:@"status.mutationAuthority"];
+    }
+    if (![authority isKindOfClass:[NSDictionary class]]) {
+        return !_mutationAuthorityViolated;
+    }
+    NSString* mode = authority[@"mode"];
+    if ([mode isKindOfClass:[NSString class]] && [mode isEqualToString:@"violated"]) {
+        _mutationAuthorityViolated = YES;
+        return NO;
+    }
+    if ([mode isKindOfClass:[NSString class]] && ![mode isEqualToString:@"violated"]) {
+        _mutationAuthorityViolated = NO;
+    }
+    return !_mutationAuthorityViolated;
+}
+
 - (BOOL)updateWorkspaceAuthorityFromPayload:(NSDictionary*)payload requested:(NSString*)requested {
     NSDictionary* authority = payload[@"workspaceAuthority"];
     if (![authority isKindOfClass:[NSDictionary class]]) {
@@ -233,6 +268,31 @@ static NSColor* AgentSidebarBackgroundColor(void) {
     }
     if (workspace.length > 0 && !_workspaceAuthorityMatch) {
         [lines insertObject:@"Workspace mismatch — agent disabled" atIndex:2];
+    }
+
+    NSDictionary* mutationAuthority = payload[@"mutationAuthority"];
+    if (![mutationAuthority isKindOfClass:[NSDictionary class]]) {
+        mutationAuthority = [payload valueForKeyPath:@"status.mutationAuthority"];
+    }
+    NSString* mutationMode = @"no_mutation";
+    if ([mutationAuthority isKindOfClass:[NSDictionary class]]) {
+        NSString* modeValue = mutationAuthority[@"mode"];
+        if ([modeValue isKindOfClass:[NSString class]]) {
+            mutationMode = modeValue;
+        }
+        [self updateMutationAuthorityFromPayload:payload];
+    }
+    NSString* mutationLabel = [self mutationPathLabelFromMode:mutationMode];
+    [lines addObject:[NSString stringWithFormat:@"Mutation path: %@", mutationLabel]];
+    if ([mutationMode isEqualToString:@"violated"]) {
+        NSArray* mutatedFiles = mutationAuthority[@"mutatedFiles"];
+        NSArray* evidence = mutationAuthority[@"evidence"];
+        if ([mutatedFiles isKindOfClass:[NSArray class]] && mutatedFiles.count > 0) {
+            [lines addObject:[NSString stringWithFormat:@"Changed files: %@", [mutatedFiles componentsJoinedByString:@", "]]];
+        }
+        if ([evidence isKindOfClass:[NSArray class]] && evidence.count > 0) {
+            [lines addObject:[NSString stringWithFormat:@"Evidence: %@", [evidence componentsJoinedByString:@"; "]]];
+        }
     }
 
     NSDictionary* status = payload[@"status"];
@@ -330,6 +390,10 @@ static NSColor* AgentSidebarBackgroundColor(void) {
 
 - (void)refreshStatus {
     NSString* workspace = [self workspacePath];
+    if (_lastWorkspaceForAuthority.length > 0 && ![workspace isEqualToString:_lastWorkspaceForAuthority]) {
+        _mutationAuthorityViolated = NO;
+    }
+    _lastWorkspaceForAuthority = workspace ?: @"";
     [_statusLabel setStringValue:@"Status: Checking…"];
     dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
         [self runDoctorWithCompletion:^(NSString* output, int exitCode) {
@@ -339,7 +403,10 @@ static NSColor* AgentSidebarBackgroundColor(void) {
                     summary = [NSString stringWithFormat:@"Doctor exit %d\n%@", exitCode, summary];
                 }
                 [self->_statusLabel setStringValue:summary];
-                BOOL canSend = workspace.length > 0 && self->_workspaceAuthorityMatch && !self->_runningCommand;
+                BOOL canSend = workspace.length > 0
+                    && self->_workspaceAuthorityMatch
+                    && !self->_mutationAuthorityViolated
+                    && !self->_runningCommand;
                 [self->_sendButton setEnabled:canSend];
             });
         }];
@@ -361,6 +428,11 @@ static NSColor* AgentSidebarBackgroundColor(void) {
     if (!_workspaceAuthorityMatch) {
         [self appendTranscriptWithSpeaker:kAgentSpeakerHermes
                                   message:@"Workspace mismatch — agent disabled. Re-open the folder or check runtime workspace."];
+        return;
+    }
+    if (_mutationAuthorityViolated) {
+        [self appendTranscriptWithSpeaker:kAgentSpeakerHermes
+                                  message:@"Mutation authority violation — agent disabled. Refresh status after reviewing the last run."];
         return;
     }
 
@@ -386,7 +458,7 @@ static NSColor* AgentSidebarBackgroundColor(void) {
     NSArray<NSString*>* args = @[
         @"--workspace", workspace,
         @"--prompt", prompt,
-        @"--format", @"text",
+        @"--format", @"json",
     ];
 
     dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
@@ -398,7 +470,59 @@ static NSColor* AgentSidebarBackgroundColor(void) {
                 if (cancelled) {
                     [self appendTranscriptWithSpeaker:kAgentSpeakerHermes message:@"Request cancelled."];
                 } else if (output.length > 0) {
-                    NSString* response = [output stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+                    NSString* line = output;
+                    NSRange newline = [output rangeOfString:@"\n"];
+                    if (newline.location != NSNotFound) {
+                        line = [output substringToIndex:newline.location];
+                    }
+                    NSData* data = [line dataUsingEncoding:NSUTF8StringEncoding];
+                    id json = data ? [NSJSONSerialization JSONObjectWithData:data options:0 error:nil] : nil;
+                    NSString* response = @"";
+                    if ([json isKindOfClass:[NSDictionary class]]) {
+                        NSDictionary* payload = (NSDictionary*)json;
+                        NSString* transcript = payload[@"transcript"];
+                        if ([transcript isKindOfClass:[NSString class]] && transcript.length > 0) {
+                            response = transcript;
+                        }
+                        NSDictionary* mutationAuthority = payload[@"mutationAuthority"];
+                        if ([mutationAuthority isKindOfClass:[NSDictionary class]]) {
+                            NSString* mode = mutationAuthority[@"mode"];
+                            if ([mode isKindOfClass:[NSString class]]) {
+                                NSString* label = [self mutationPathLabelFromMode:mode];
+                                response = [response stringByAppendingFormat:@"%@%@Mutation path: %@",
+                                    response.length > 0 ? @"\n\n" : @"",
+                                    @"",
+                                    label];
+                                if ([mode isEqualToString:@"violated"]) {
+                                    self->_mutationAuthorityViolated = YES;
+                                    NSArray* mutatedFiles = mutationAuthority[@"mutatedFiles"];
+                                    NSArray* evidence = mutationAuthority[@"evidence"];
+                                    if ([mutatedFiles isKindOfClass:[NSArray class]] && mutatedFiles.count > 0) {
+                                        response = [response stringByAppendingFormat:@"\nChanged files: %@",
+                                            [mutatedFiles componentsJoinedByString:@", "]];
+                                    }
+                                    if ([evidence isKindOfClass:[NSArray class]] && evidence.count > 0) {
+                                        response = [response stringByAppendingFormat:@"\nEvidence: %@",
+                                            [evidence componentsJoinedByString:@"; "]];
+                                    }
+                                } else {
+                                    self->_mutationAuthorityViolated = NO;
+                                }
+                            }
+                        }
+                        NSDictionary* err = payload[@"error"];
+                        if ([err isKindOfClass:[NSDictionary class]]) {
+                            NSString* message = err[@"message"];
+                            if ([message isKindOfClass:[NSString class]] && message.length > 0) {
+                                response = [response stringByAppendingFormat:@"%@%@",
+                                    response.length > 0 ? @"\n\n" : @"",
+                                    message];
+                            }
+                        }
+                    }
+                    if (response.length == 0) {
+                        response = [output stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+                    }
                     if (response.length > 8000) {
                         response = [[response substringToIndex:8000] stringByAppendingString:@"\n…"];
                     }
@@ -412,9 +536,14 @@ static NSColor* AgentSidebarBackgroundColor(void) {
                 }
                 self->_runningCommand = NO;
                 self->_activeTask = nil;
-                [self->_sendButton setEnabled:YES];
                 [self->_stopButton setEnabled:NO];
-                [self refreshStatus];
+                if (self->_mutationAuthorityViolated) {
+                    [self->_sendButton setEnabled:NO];
+                    NSString* status = [self statusTextFromDoctorJSON:output workspace:workspace exitCode:exitCode running:NO];
+                    [self->_statusLabel setStringValue:status];
+                } else {
+                    [self refreshStatus];
+                }
             });
         }];
     });

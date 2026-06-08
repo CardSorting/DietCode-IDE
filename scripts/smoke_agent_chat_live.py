@@ -28,12 +28,18 @@ from dietcode_agent_bundle import (  # noqa: E402
     run_enable_doctor,
     run_hermes_chat,
 )
+from dietcode_mutation_authority import (  # noqa: E402
+    audit_mutation_authority,
+    collect_bridge_patch_events,
+    mutation_event_log_path,
+    workspace_manifest,
+)
 
 PROBE_REL = "smoke_probe.py"
 PROBE_BROKEN = "VALUE = 1\n"
 PROBE_FIXED_RE = re.compile(r"VALUE\s*=\s*2\b")
 DEFAULT_TIMEOUT = int(os.environ.get("AGENT_CHAT_SMOKE_TIMEOUT", "180"))
-DEFAULT_MAX_TURNS = int(os.environ.get("AGENT_CHAT_SMOKE_MAX_TURNS", "10"))
+DEFAULT_MAX_TURNS = int(os.environ.get("AGENT_CHAT_SMOKE_MAX_TURNS", "15"))
 
 
 def _smoke_prompt(workspace: Path) -> str:
@@ -139,6 +145,7 @@ def _run_hermes_with_heartbeat(
     *,
     max_turns: int,
     timeout: int,
+    mutation_event_log: Path,
 ) -> tuple[int, str]:
     stop = threading.Event()
     started = time.monotonic()
@@ -166,6 +173,7 @@ def _run_hermes_with_heartbeat(
             max_turns=max_turns,
             timeout=timeout,
             yolo=True,
+            mutation_event_log=mutation_event_log,
         )
     finally:
         stop.set()
@@ -188,6 +196,7 @@ def run_smoke(*, app_bundle: str | None, compact: bool, max_turns: int, timeout:
     workspace_dir = tempfile.mkdtemp(prefix="dietcode-agent-chat-smoke-")
     workspace = Path(workspace_dir)
     probe_path = workspace / PROBE_REL
+    event_log = mutation_event_log_path()
 
     try:
         probe_path.write_text(PROBE_BROKEN, encoding="utf-8")
@@ -203,13 +212,15 @@ def run_smoke(*, app_bundle: str | None, compact: bool, max_turns: int, timeout:
 
         rec.record(
             "smoke.workspace_authority",
-            bool(authority.get("workspaceMatch")),
+            bool(authority.get("workspaceMatch"))
+            and authority.get("requestedWorkspace") == authority.get("workspaceRootObserved"),
             authority,
         )
 
         ok_verify, verify_payload = _run_bridge(ctx, workspace, ["verify", "fast"])
         rec.record("smoke.bridge_verify", ok_verify, verify_payload)
 
+        before_manifest = workspace_manifest(workspace)
         rec.record(
             "smoke.chat_start",
             True,
@@ -223,6 +234,7 @@ def run_smoke(*, app_bundle: str | None, compact: bool, max_turns: int, timeout:
             authority,
             max_turns=max_turns,
             timeout=timeout,
+            mutation_event_log=event_log,
         )
         rec.set_transcript(transcript)
         rec.record(
@@ -230,6 +242,17 @@ def run_smoke(*, app_bundle: str | None, compact: bool, max_turns: int, timeout:
             chat_exit == 0,
             {"chatExit": chat_exit},
         )
+
+        after_manifest = workspace_manifest(workspace)
+        bridge_events = collect_bridge_patch_events(ctx, workspace, event_log)
+        mutation = audit_mutation_authority(
+            workspace,
+            before_manifest=before_manifest,
+            after_manifest=after_manifest,
+            bridge_events=bridge_events,
+            transcript=transcript,
+        )
+        rec.record("smoke.mutation_authority", mutation["mode"] == "bridge_only", mutation)
 
         disk_text = probe_path.read_text(encoding="utf-8") if probe_path.is_file() else ""
         rec.record(
@@ -267,11 +290,32 @@ def run_smoke(*, app_bundle: str | None, compact: bool, max_turns: int, timeout:
             {"timelineOk": ok_timeline, "diskFixed": disk_fixed},
         )
 
+        rec.record(
+            "smoke.mutation_probe_file",
+            PROBE_REL in mutation.get("mutatedFiles", []),
+            {"mutatedFiles": mutation.get("mutatedFiles")},
+        )
+        rec.record(
+            "smoke.mutation_bridge_patch_count",
+            int(mutation.get("bridgePatchCount") or 0) >= 1,
+            {"bridgePatchCount": mutation.get("bridgePatchCount")},
+        )
+        rec.record(
+            "smoke.mutation_raw_write_suspected",
+            not bool(mutation.get("rawWriteSuspected")),
+            {"rawWriteSuspected": mutation.get("rawWriteSuspected")},
+        )
+
         shutil.rmtree(workspace_dir, ignore_errors=True)
         rec.record("smoke.cleanup", not workspace.exists())
         return rec.finish(suite="smoke_agent_chat_live")
     finally:
         shutil.rmtree(workspace_dir, ignore_errors=True)
+        if event_log.is_file():
+            try:
+                event_log.unlink()
+            except OSError:
+                pass
 
 
 def main() -> int:

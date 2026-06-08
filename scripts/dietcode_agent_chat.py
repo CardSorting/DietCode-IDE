@@ -25,6 +25,14 @@ from dietcode_agent_bundle import (
     validate_workspace,
     workspace_authority_report,
 )
+from dietcode_mutation_authority import (
+    audit_mutation_authority,
+    collect_bridge_patch_events,
+    empty_mutation_authority,
+    mutation_authority_label,
+    mutation_event_log_path,
+    workspace_manifest,
+)
 
 
 def _emit(payload: dict[str, Any], *, fmt: str) -> None:
@@ -35,6 +43,9 @@ def _emit(payload: dict[str, Any], *, fmt: str) -> None:
             transcript = payload.get("transcript") or payload.get("message", "")
             if transcript:
                 print(transcript)
+            mutation = payload.get("mutationAuthority")
+            if isinstance(mutation, dict):
+                print(f"Mutation path: {mutation_authority_label(str(mutation.get('mode') or 'unknown'))}")
         else:
             err = payload.get("error")
             if isinstance(err, dict):
@@ -81,12 +92,14 @@ def cmd_doctor(repo_root: Path, ctx, *, fmt: str, workspace: Path | None) -> int
     ok = bool(status["runtime"]["ready"]) and bool(status["bridge"]["ready"]) and bool(status["hermes"]["ready"])
     if authority and workspace is not None:
         ok = ok and bool(authority.get("workspaceMatch"))
+    mutation = empty_mutation_authority()
     payload: dict[str, Any] = {
         "ok": ok,
         "action": "doctor",
         "summary": ctx.manifest.get("summary"),
         "status": status,
         "workspaceAuthority": authority,
+        "mutationAuthority": mutation,
     }
     if fmt == "json":
         print(json.dumps(payload, indent=2))
@@ -101,18 +114,45 @@ def cmd_doctor(repo_root: Path, ctx, *, fmt: str, workspace: Path | None) -> int
             parts.append(f"Workspace active: {authority.get('workspaceRootObserved') or '(unknown)'}")
             if not authority.get("workspaceMatch", True):
                 parts.append("Workspace mismatch — agent disabled")
-        elif status.get("workspace"):
-            parts.append(f"Workspace: {status['workspace']}")
+        parts.append(f"Mutation path: {mutation_authority_label(mutation['mode'])}")
         print("\n".join(parts))
     return 0 if ok else 1
 
 
-def cmd_chat(repo_root: Path, ctx, *, workspace: Path, prompt: str, fmt: str, max_turns: int) -> int:
+def cmd_chat(
+    repo_root: Path,
+    ctx,
+    *,
+    workspace: Path,
+    prompt: str,
+    fmt: str,
+    max_turns: int,
+    enforce_mutation_authority: bool,
+) -> int:
+    event_log = mutation_event_log_path()
+    before_manifest = workspace_manifest(workspace)
     try:
         status = assert_chat_ready(ctx, repo_root, workspace)
-        authority = status.get("workspaceAuthority")
-        exit_code, transcript = run_hermes_chat(ctx, workspace, prompt, max_turns=max_turns)
+        workspace_authority = status.get("workspaceAuthority")
+        exit_code, transcript = run_hermes_chat(
+            ctx,
+            workspace,
+            prompt,
+            max_turns=max_turns,
+            mutation_event_log=event_log,
+        )
+        after_manifest = workspace_manifest(workspace)
+        bridge_events = collect_bridge_patch_events(ctx, workspace, event_log)
+        mutation = audit_mutation_authority(
+            workspace,
+            before_manifest=before_manifest,
+            after_manifest=after_manifest,
+            bridge_events=bridge_events,
+            transcript=transcript,
+        )
         ok = exit_code == 0
+        if enforce_mutation_authority and mutation["mode"] in {"unknown", "violated"}:
+            ok = False
         payload: dict[str, Any] = {
             "ok": ok,
             "action": "chat",
@@ -120,15 +160,35 @@ def cmd_chat(repo_root: Path, ctx, *, workspace: Path, prompt: str, fmt: str, ma
             "exitCode": exit_code,
             "transcript": transcript,
             "status": status,
-            "workspaceAuthority": authority,
+            "workspaceAuthority": workspace_authority,
+            "mutationAuthority": mutation,
         }
+        if enforce_mutation_authority and mutation["mode"] in {"unknown", "violated"}:
+            payload["error"] = {
+                "code": "mutation_authority_violation",
+                "message": (
+                    "Mutation authority violation: files changed without bridge patch telemetry."
+                    if mutation["mode"] == "violated"
+                    else "Mutation authority uncertain: changed files not fully explained by bridge telemetry."
+                ),
+                "recoveryHint": "review_mutation_authority",
+            }
         _emit(payload, fmt=fmt)
-        return 0 if ok else 10
+        if enforce_mutation_authority and mutation["mode"] in {"unknown", "violated"}:
+            return 11
+        return 0 if exit_code == 0 else 10
     except AgentChatError as exc:
         payload = exc.to_dict()
         payload["action"] = "chat"
+        payload["mutationAuthority"] = empty_mutation_authority()
         _emit(payload, fmt=fmt)
         return exc.exit_code
+    finally:
+        if event_log.is_file():
+            try:
+                event_log.unlink()
+            except OSError:
+                pass
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -140,6 +200,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--version", action="store_true", help="Print chat + bundle versions")
     parser.add_argument("--app-bundle", help="Explicit DietCode.app path")
     parser.add_argument("--max-turns", type=int, default=25)
+    parser.add_argument(
+        "--enforce-mutation-authority",
+        action="store_true",
+        help="Exit nonzero when mutation authority is unknown or violated",
+    )
     if argv is None:
         script_file = Path(sys.argv[0])
         parsed_argv = sys.argv[1:]
@@ -193,6 +258,7 @@ def main(argv: list[str] | None = None) -> int:
         prompt=args.prompt,
         fmt=args.format,
         max_turns=max(1, args.max_turns),
+        enforce_mutation_authority=args.enforce_mutation_authority,
     )
 
 

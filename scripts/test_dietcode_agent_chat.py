@@ -125,7 +125,15 @@ class DietcodeAgentChatTests(unittest.TestCase):
             status = {"runtime": {"ready": True}, "bridge": {"ready": True}, "hermes": {"ready": True}}
             with mock.patch.object(chat, "assert_chat_ready", return_value=status):
                 with mock.patch.object(chat, "run_hermes_chat", return_value=(0, "Hermes: done")):
-                    code = chat.cmd_chat(REPO_ROOT, ctx, workspace=Path(tmp), prompt="hello", fmt="json", max_turns=5)
+                    code = chat.cmd_chat(
+                        REPO_ROOT,
+                        ctx,
+                        workspace=Path(tmp),
+                        prompt="hello",
+                        fmt="json",
+                        max_turns=5,
+                        enforce_mutation_authority=False,
+                    )
             self.assertEqual(code, 0)
 
     def test_installed_app_bundle_resolution(self) -> None:
