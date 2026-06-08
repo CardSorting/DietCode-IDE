@@ -1,0 +1,30 @@
+{
+  "id": "task_010",
+  "title": "Large file read avoidance",
+  "category": "large_file_avoidance",
+  "workflow": "large_file_read_avoidance",
+  "modes": [
+    "raw_rpc",
+    "bridge"
+  ],
+  "expectedTools": [
+    "file.read",
+    "shell.head",
+    "patch.validate",
+    "patch.apply"
+  ],
+  "failureModes": [
+    "partial_result",
+    "shell_file_too_large"
+  ],
+  "largePath": "logs/big.log",
+  "headerPath": "logs/header.txt",
+  "targetFiles": [
+    "logs/header.txt"
+  ],
+  "expectsStaleRecovery": false,
+  "expectsRollback": false,
+  "expectsSymlinkRejection": false,
+  "expectsPartialResult": true,
+  "expectsVerify": false
+}

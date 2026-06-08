@@ -1,0 +1,30 @@
+{
+  "id": "task_015",
+  "title": "Semantic search recovery to literal",
+  "category": "semantic_recovery",
+  "workflow": "semantic_recovery",
+  "modes": [
+    "raw_rpc",
+    "bridge"
+  ],
+  "expectedTools": [
+    "search.semantic",
+    "search.literal",
+    "patch.validate",
+    "patch.apply"
+  ],
+  "failureModes": [
+    "semantic_disabled",
+    "search_empty"
+  ],
+  "semanticQuery": "task_015",
+  "literalQuery": "task_015_marker",
+  "targetFiles": [
+    "semantic_target.py"
+  ],
+  "expectsStaleRecovery": false,
+  "expectsRollback": false,
+  "expectsSymlinkRejection": false,
+  "expectsPartialResult": false,
+  "expectsVerify": false
+}

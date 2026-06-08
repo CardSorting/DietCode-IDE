@@ -1,0 +1,5 @@
+--- many/c.py
++++ many/c.py
+@@ -1 +1 @@
+-MARK = 'task_017_target'
++MARK = 'task_017_done'

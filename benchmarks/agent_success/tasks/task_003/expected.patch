@@ -1,0 +1,12 @@
+--- pkg/a.py
++++ pkg/a.py
+@@ -1,2 +1,2 @@
+ # task_003_a
+-VALUE = 1
++VALUE = 2
+--- pkg/b.py
++++ pkg/b.py
+@@ -1,2 +1,2 @@
+ # task_003_b
+-VALUE = 1
++VALUE = 2

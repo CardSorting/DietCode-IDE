@@ -1,0 +1,29 @@
+{
+  "id": "task_008",
+  "title": "Symlink escape read rejection",
+  "category": "symlink_rejection",
+  "workflow": "symlink_escape_read",
+  "modes": [
+    "raw_rpc",
+    "bridge"
+  ],
+  "expectedTools": [
+    "file.stat",
+    "patch.validate",
+    "patch.apply"
+  ],
+  "failureModes": [
+    "symlink_escape",
+    "outside_workspace"
+  ],
+  "escapeLink": "escape_link",
+  "realPath": "safe/note.txt",
+  "targetFiles": [
+    "safe/note.txt"
+  ],
+  "expectsStaleRecovery": false,
+  "expectsRollback": false,
+  "expectsSymlinkRejection": true,
+  "expectsPartialResult": false,
+  "expectsVerify": false
+}

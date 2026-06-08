@@ -1,0 +1,27 @@
+{
+  "id": "task_019",
+  "title": "Verify after single-file mutation",
+  "category": "verify_after_mutation",
+  "workflow": "verify_after_mutation",
+  "modes": [
+    "raw_rpc",
+    "bridge"
+  ],
+  "expectedTools": [
+    "patch.validate",
+    "patch.apply",
+    "verify.status"
+  ],
+  "failureModes": [
+    "patch_failed",
+    "verify_failed"
+  ],
+  "targetFiles": [
+    "verify/single.py"
+  ],
+  "expectsStaleRecovery": false,
+  "expectsRollback": false,
+  "expectsSymlinkRejection": false,
+  "expectsPartialResult": false,
+  "expectsVerify": true
+}

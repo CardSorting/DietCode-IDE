@@ -1,0 +1,6 @@
+--- lib/utils.py
++++ lib/utils.py
+@@ -1,2 +1,2 @@
+ def helper():
+-    return 'TASK_002_TOKEN'
++    return 'task_002_done'

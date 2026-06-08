@@ -1,0 +1,5 @@
+--- stale.py
++++ stale.py
+@@ -1 +1 @@
+-counter = 1
++counter = 2

@@ -1,0 +1,30 @@
+{
+  "id": "task_017",
+  "title": "Truncated search literal pagination",
+  "category": "partial_truncated",
+  "workflow": "partial_search_pagination",
+  "modes": [
+    "raw_rpc",
+    "bridge"
+  ],
+  "expectedTools": [
+    "search.literal",
+    "patch.validate",
+    "patch.apply"
+  ],
+  "failureModes": [
+    "results_truncated",
+    "partial_result"
+  ],
+  "searchQuery": "task_017",
+  "targetPath": "many/c.py",
+  "maxResults": 2,
+  "targetFiles": [
+    "many/c.py"
+  ],
+  "expectsStaleRecovery": false,
+  "expectsRollback": false,
+  "expectsSymlinkRejection": false,
+  "expectsPartialResult": true,
+  "expectsVerify": false
+}

@@ -1,0 +1,29 @@
+{
+  "id": "task_014",
+  "title": "Batch validation failure rollback",
+  "category": "batch_rollback",
+  "workflow": "batch_validation_rollback",
+  "modes": [
+    "raw_rpc",
+    "bridge"
+  ],
+  "expectedTools": [
+    "patch.validate",
+    "patch.applyBatch"
+  ],
+  "failureModes": [
+    "stale_content",
+    "batch_rollback",
+    "patch_failed"
+  ],
+  "targetFiles": [
+    "roll/x.py",
+    "roll/y.py"
+  ],
+  "badPatchFile": "roll/y.py",
+  "expectsStaleRecovery": false,
+  "expectsRollback": true,
+  "expectsSymlinkRejection": false,
+  "expectsPartialResult": false,
+  "expectsVerify": false
+}

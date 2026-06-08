@@ -1,0 +1,5 @@
+--- verify/single.py
++++ verify/single.py
+@@ -1 +1 @@
+-status = 'pending'
++status = 'verified'

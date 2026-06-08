@@ -1,0 +1,30 @@
+{
+  "id": "task_001",
+  "title": "Literal search to single-file patch",
+  "category": "literal_search_patch",
+  "workflow": "literal_search_patch",
+  "modes": [
+    "raw_rpc",
+    "bridge"
+  ],
+  "expectedTools": [
+    "search.literal",
+    "file.stat",
+    "patch.validate",
+    "patch.apply"
+  ],
+  "failureModes": [
+    "search_empty",
+    "patch_failed",
+    "outside_workspace"
+  ],
+  "searchQuery": "TASK_001_MARKER",
+  "targetFiles": [
+    "src/config.py"
+  ],
+  "expectsStaleRecovery": false,
+  "expectsRollback": false,
+  "expectsSymlinkRejection": false,
+  "expectsPartialResult": false,
+  "expectsVerify": false
+}

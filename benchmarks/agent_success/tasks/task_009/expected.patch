@@ -1,0 +1,5 @@
+--- data/small_anchor.txt
++++ data/small_anchor.txt
+@@ -1 +1 @@
+-ANCHOR_TASK_009=here
++ANCHOR_TASK_009=done

@@ -1,0 +1,15 @@
+--- mods/one.py
++++ mods/one.py
+@@ -1 +1 @@
+-ONE = 'task_004'
++ONE = 'done'
+--- mods/two.py
++++ mods/two.py
+@@ -1 +1 @@
+-TWO = 'task_004'
++TWO = 'done'
+--- mods/three.py
++++ mods/three.py
+@@ -1 +1 @@
+-THREE = 'task_004'
++THREE = 'done'

@@ -1,0 +1,30 @@
+{
+  "id": "task_013",
+  "title": "Batch patch rollback on stale file",
+  "category": "batch_rollback",
+  "workflow": "batch_rollback",
+  "modes": [
+    "raw_rpc",
+    "bridge"
+  ],
+  "expectedTools": [
+    "patch.validate",
+    "patch.applyBatch"
+  ],
+  "failureModes": [
+    "stale_content",
+    "batch_rollback",
+    "patch_failed"
+  ],
+  "targetFiles": [
+    "batch/a.py",
+    "batch/b.py"
+  ],
+  "staleFile": "batch/b.py",
+  "staleMutation": "b = 99\n",
+  "expectsStaleRecovery": true,
+  "expectsRollback": true,
+  "expectsSymlinkRejection": false,
+  "expectsPartialResult": false,
+  "expectsVerify": false
+}

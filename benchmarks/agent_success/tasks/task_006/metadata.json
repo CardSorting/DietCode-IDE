@@ -1,0 +1,27 @@
+{
+  "id": "task_006",
+  "title": "Stale content recovery (bridge safe patch)",
+  "category": "stale_content_recovery",
+  "workflow": "stale_content_recovery",
+  "modes": [
+    "raw_rpc",
+    "bridge"
+  ],
+  "expectedTools": [
+    "patch.validate",
+    "patch.apply"
+  ],
+  "failureModes": [
+    "stale_content",
+    "patch_failed"
+  ],
+  "targetFiles": [
+    "bridge_stale.py"
+  ],
+  "staleMutation": "flag = 'mutated'\n",
+  "expectsStaleRecovery": true,
+  "expectsRollback": false,
+  "expectsSymlinkRejection": false,
+  "expectsPartialResult": false,
+  "expectsVerify": false
+}

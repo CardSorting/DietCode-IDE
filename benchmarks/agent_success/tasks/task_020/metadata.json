@@ -1,0 +1,30 @@
+{
+  "id": "task_020",
+  "title": "Verify after multi-file mutation",
+  "category": "verify_after_mutation",
+  "workflow": "verify_after_mutation_batch",
+  "modes": [
+    "raw_rpc",
+    "bridge"
+  ],
+  "expectedTools": [
+    "patch.validate",
+    "patch.applyBatch",
+    "verify.status"
+  ],
+  "failureModes": [
+    "patch_failed",
+    "batch_partial_failure",
+    "verify_failed"
+  ],
+  "targetFiles": [
+    "verify/multi_a.py",
+    "verify/multi_b.py"
+  ],
+  "batch": true,
+  "expectsStaleRecovery": false,
+  "expectsRollback": false,
+  "expectsSymlinkRejection": false,
+  "expectsPartialResult": false,
+  "expectsVerify": true
+}

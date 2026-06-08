@@ -1,0 +1,5 @@
+--- src/config.py
++++ src/config.py
+@@ -1 +1 @@
+-SETTING = "TASK_001_MARKER"
++SETTING = "task_001_done"

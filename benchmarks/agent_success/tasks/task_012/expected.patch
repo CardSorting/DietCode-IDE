@@ -1,0 +1,5 @@
+--- candidates/b.py
++++ candidates/b.py
+@@ -1 +1 @@
+-X = 'TASK_012_B'
++X = 'task_012_done'

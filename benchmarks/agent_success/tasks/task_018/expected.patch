@@ -1,0 +1,5 @@
+--- grep/z.py
++++ grep/z.py
+@@ -1 +1 @@
+-GREP_018_TARGET = 3
++GREP_018_TARGET = 99

@@ -1,0 +1,32 @@
+{
+  "id": "task_016",
+  "title": "Semantic recovery with paths fallback",
+  "category": "semantic_recovery",
+  "workflow": "semantic_paths_recovery",
+  "modes": [
+    "raw_rpc",
+    "bridge"
+  ],
+  "expectedTools": [
+    "search.semantic",
+    "search.paths",
+    "search.literal",
+    "patch.validate",
+    "patch.apply"
+  ],
+  "failureModes": [
+    "semantic_disabled",
+    "search_empty"
+  ],
+  "semanticQuery": "TOKEN",
+  "pathsQuery": "me.py",
+  "literalQuery": "TOKEN_016",
+  "targetFiles": [
+    "find/me.py"
+  ],
+  "expectsStaleRecovery": false,
+  "expectsRollback": false,
+  "expectsSymlinkRejection": false,
+  "expectsPartialResult": false,
+  "expectsVerify": false
+}

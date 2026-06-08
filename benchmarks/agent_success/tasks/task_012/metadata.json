@@ -1,0 +1,30 @@
+{
+  "id": "task_012",
+  "title": "Shell rg pagination context",
+  "category": "shell_rg_sed",
+  "workflow": "shell_rg_sed_patch",
+  "modes": [
+    "raw_rpc",
+    "bridge"
+  ],
+  "expectedTools": [
+    "shell.rg",
+    "shell.sedRange",
+    "patch.validate",
+    "patch.apply"
+  ],
+  "failureModes": [
+    "shell_rg_failed",
+    "patch_failed"
+  ],
+  "pattern": "TASK_012_B",
+  "targetPath": "candidates/b.py",
+  "targetFiles": [
+    "candidates/b.py"
+  ],
+  "expectsStaleRecovery": false,
+  "expectsRollback": false,
+  "expectsSymlinkRejection": false,
+  "expectsPartialResult": false,
+  "expectsVerify": false
+}

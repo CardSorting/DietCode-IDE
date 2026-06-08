@@ -1,0 +1,29 @@
+{
+  "id": "task_007",
+  "title": "Symlink patch rejection",
+  "category": "symlink_rejection",
+  "workflow": "symlink_rejection",
+  "modes": [
+    "raw_rpc",
+    "bridge"
+  ],
+  "expectedTools": [
+    "patch.apply",
+    "file.stat",
+    "patch.validate"
+  ],
+  "failureModes": [
+    "symlink_target",
+    "permission_denied"
+  ],
+  "symlinkPath": "link.txt",
+  "realPath": "real.txt",
+  "targetFiles": [
+    "real.txt"
+  ],
+  "expectsStaleRecovery": false,
+  "expectsRollback": false,
+  "expectsSymlinkRejection": true,
+  "expectsPartialResult": false,
+  "expectsVerify": false
+}

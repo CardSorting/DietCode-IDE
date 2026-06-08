@@ -1,0 +1,30 @@
+{
+  "id": "task_004",
+  "title": "Three-file batch patch",
+  "category": "multi_file_patch",
+  "workflow": "multi_file_batch_patch",
+  "modes": [
+    "raw_rpc",
+    "bridge"
+  ],
+  "expectedTools": [
+    "patch.validate",
+    "patch.applyBatch"
+  ],
+  "failureModes": [
+    "patch_failed",
+    "batch_partial_failure"
+  ],
+  "searchQuery": "task_004",
+  "targetFiles": [
+    "mods/one.py",
+    "mods/two.py",
+    "mods/three.py"
+  ],
+  "batch": true,
+  "expectsStaleRecovery": false,
+  "expectsRollback": false,
+  "expectsSymlinkRejection": false,
+  "expectsPartialResult": false,
+  "expectsVerify": false
+}

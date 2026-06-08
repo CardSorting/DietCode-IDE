@@ -1,0 +1,5 @@
+--- semantic_target.py
++++ semantic_target.py
+@@ -1 +1 @@
+-LABEL = 'task_015_marker'
++LABEL = 'task_015_done'

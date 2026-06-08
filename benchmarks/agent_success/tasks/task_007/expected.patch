@@ -1,0 +1,5 @@
+--- real.txt
++++ real.txt
+@@ -1 +1 @@
+-task_007 content
++task_007 patched

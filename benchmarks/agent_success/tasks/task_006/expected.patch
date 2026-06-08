@@ -1,0 +1,5 @@
+--- bridge_stale.py
++++ bridge_stale.py
+@@ -1 +1 @@
+-flag = 'task_006'
++flag = 'task_006_done'

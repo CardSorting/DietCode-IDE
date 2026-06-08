@@ -1,0 +1,10 @@
+--- verify/multi_a.py
++++ verify/multi_a.py
+@@ -1 +1 @@
+-a = 'open'
++a = 'closed'
+--- verify/multi_b.py
++++ verify/multi_b.py
+@@ -1 +1 @@
+-b = 'open'
++b = 'closed'

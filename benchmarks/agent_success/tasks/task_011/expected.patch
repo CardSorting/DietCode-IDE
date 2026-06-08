@@ -1,0 +1,6 @@
+--- src/module.py
++++ src/module.py
+@@ -1,2 +1,2 @@
+ def run():
+-    return 'TASK_011_MARKER'
++    return 'task_011_done'

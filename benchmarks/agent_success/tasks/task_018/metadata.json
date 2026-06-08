@@ -1,0 +1,30 @@
+{
+  "id": "task_018",
+  "title": "Truncated workspace grep handling",
+  "category": "partial_truncated",
+  "workflow": "partial_grep_truncation",
+  "modes": [
+    "raw_rpc",
+    "bridge"
+  ],
+  "expectedTools": [
+    "workspace.grep",
+    "patch.validate",
+    "patch.apply"
+  ],
+  "failureModes": [
+    "results_truncated",
+    "partial_result"
+  ],
+  "searchQuery": "GREP_018",
+  "targetPath": "grep/z.py",
+  "maxResults": 1,
+  "targetFiles": [
+    "grep/z.py"
+  ],
+  "expectsStaleRecovery": false,
+  "expectsRollback": false,
+  "expectsSymlinkRejection": false,
+  "expectsPartialResult": true,
+  "expectsVerify": false
+}

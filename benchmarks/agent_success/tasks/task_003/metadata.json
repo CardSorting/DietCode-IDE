@@ -1,0 +1,29 @@
+{
+  "id": "task_003",
+  "title": "Multi-file sequential patch",
+  "category": "multi_file_patch",
+  "workflow": "multi_file_patch",
+  "modes": [
+    "raw_rpc",
+    "bridge"
+  ],
+  "expectedTools": [
+    "search.literal",
+    "patch.validate",
+    "patch.apply"
+  ],
+  "failureModes": [
+    "patch_failed",
+    "stale_content"
+  ],
+  "searchQuery": "task_003",
+  "targetFiles": [
+    "pkg/a.py",
+    "pkg/b.py"
+  ],
+  "expectsStaleRecovery": false,
+  "expectsRollback": false,
+  "expectsSymlinkRejection": false,
+  "expectsPartialResult": false,
+  "expectsVerify": false
+}

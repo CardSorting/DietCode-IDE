@@ -1,0 +1,10 @@
+--- batch/a.py
++++ batch/a.py
+@@ -1 +1 @@
+-a = 1
++a = 2
+--- batch/b.py
++++ batch/b.py
+@@ -1 +1 @@
+-b = 1
++b = 2

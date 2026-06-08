@@ -1,0 +1,27 @@
+{
+  "id": "task_005",
+  "title": "Stale content recovery (raw RPC)",
+  "category": "stale_content_recovery",
+  "workflow": "stale_content_recovery",
+  "modes": [
+    "raw_rpc",
+    "bridge"
+  ],
+  "expectedTools": [
+    "patch.validate",
+    "patch.apply"
+  ],
+  "failureModes": [
+    "stale_content",
+    "patch_failed"
+  ],
+  "targetFiles": [
+    "stale.py"
+  ],
+  "staleMutation": "counter = 99\n",
+  "expectsStaleRecovery": true,
+  "expectsRollback": false,
+  "expectsSymlinkRejection": false,
+  "expectsPartialResult": false,
+  "expectsVerify": false
+}

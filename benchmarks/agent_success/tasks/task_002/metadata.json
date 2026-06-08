@@ -1,0 +1,31 @@
+{
+  "id": "task_002",
+  "title": "Token search to patch",
+  "category": "literal_search_patch",
+  "workflow": "token_search_patch",
+  "modes": [
+    "raw_rpc",
+    "bridge"
+  ],
+  "expectedTools": [
+    "search.tokens",
+    "patch.validate",
+    "patch.apply"
+  ],
+  "failureModes": [
+    "invalid_params",
+    "patch_failed"
+  ],
+  "searchTokens": [
+    "TASK_002",
+    "TOKEN"
+  ],
+  "targetFiles": [
+    "lib/utils.py"
+  ],
+  "expectsStaleRecovery": false,
+  "expectsRollback": false,
+  "expectsSymlinkRejection": false,
+  "expectsPartialResult": false,
+  "expectsVerify": false
+}
