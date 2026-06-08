@@ -5,7 +5,8 @@ Run date: **8 June 2026**
 DietCode runtime: **1.6.5** (control socket)  
 Benchmark version: **1.0** (30 tasks)
 
-Methodology: [WHITEPAPER.md](WHITEPAPER.md)
+Methodology: [WHITEPAPER.md](WHITEPAPER.md)  
+Nightmare tier (051–060): [NIGHTMARE_RESULTS.md](NIGHTMARE_RESULTS.md)
 
 ---
 

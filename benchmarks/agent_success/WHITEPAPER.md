@@ -231,6 +231,8 @@ Each nightmare task sets `nightmare: true`, `tier: "nightmare"`, and trap-specif
 
 Additional JSONL metrics: `destructiveCommandBlocked`, `sidecarRollbackClean`, `concurrentMutationDetected`, `searchReadMismatchDetected`, `apiShapePreserved`, `secondInvariantPassed`, `finalVerifyPassed`.
 
+Empirical results: [NIGHTMARE_RESULTS.md](NIGHTMARE_RESULTS.md)
+
 ---
 
 ## 7. Metrics

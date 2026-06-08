@@ -2,7 +2,9 @@
 
 End-to-end benchmark harness for DietCode agent workflows.
 
-**Whitepaper:** [WHITEPAPER.md](WHITEPAPER.md) · **Results:** [RESULTS.md](RESULTS.md) Each task exercises a
+**Whitepaper:** [WHITEPAPER.md](WHITEPAPER.md) · **Results:** [RESULTS.md](RESULTS.md) · **Nightmare results:** [NIGHTMARE_RESULTS.md](NIGHTMARE_RESULTS.md)
+
+Each task exercises a
 realistic agent pattern (search → inspect → patch, stale recovery, symlink safety,
 large-file avoidance, batch rollback, deprecated search recovery, partial results,
 verify-after-mutation) against an isolated fixture workspace.
