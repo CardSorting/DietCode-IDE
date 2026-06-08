@@ -355,6 +355,30 @@ failure → classify → grantContract + grantProtocol → retry with new mutati
 
 Implementation: `execution_protocols.py`, extended `ESCALATION_GRAPH` in `contracts.py`.
 
+### 6.7 Phase 3.2 — Semantic Repair Protocol
+
+The third control axis: **behavior-preserving repair** when visibility and execution protocol are insufficient (task 059).
+
+```text
+snapshot → capture API shape → run behavior check → derive implementation target
+  → patch implementation only → re-check behavior + API shape → verify
+  → rollback if shape changed or behavior still fails
+```
+
+**Protocol:** `semantic_repair_loop` (requires `verify_exec`, `behavior_check`, `api_shape_contract`)
+
+**Escalation:**
+
+| Failure class | Contract | Protocol |
+|---------------|----------|----------|
+| `behavior_check_failed` | `behavior_check` | `semantic_repair_loop` |
+| `api_shape_mismatch` | `api_shape_contract` | `semantic_repair_loop` |
+| `semantic_preservation_failed` | `api_shape_contract` | `semantic_repair_loop` |
+
+**Telemetry:** `semanticRepairAttempted`, `behaviorFailureCaptured`, `apiShapeBefore`/`apiShapeAfter`, `apiShapeChanged`, `semanticRepairSucceeded`, `semanticRollbackTriggered`
+
+**Claim (Phase 3.2):** Bounded mutation reliability requires three separable controls: **contract visibility**, **safe execution protocol**, and **semantic repair discipline**.
+
 ---
 
 ## 7. Metrics
@@ -388,6 +412,11 @@ Each run emits one JSONL `task_result` row:
 | `orchestrationSteps` | Broker iterations consumed |
 | `executionProtocolPath` | Protocols active across orchestration (`orchestrated` profile) |
 | `protocolEscalationSucceeded` | Task passed after execution-protocol escalation |
+| `semanticRepairAttempted` | `semantic_repair_loop` protocol ran |
+| `behaviorFailureCaptured` | Pre-repair behavior check failure recorded |
+| `apiShapeChanged` | Public `def` signatures differ after mutation |
+| `semanticRepairSucceeded` | Behavior + API shape + verify passed after repair |
+| `semanticRollbackTriggered` | Repair rolled back due to shape/behavior violation |
 | `mcsReferenceMatch` | Observed MCS vs diagnostic reference |
 | `executor` | `reference` or `agent` |
 | `mode` | `raw_rpc` or `bridge` |
@@ -646,3 +675,4 @@ DietCode does not only measure whether an agent can patch code. It measures **wh
 | 1.1 | June 2026 | +10 nightmare tasks (051–060), contract metrics, Runtime Contract Evaluation Ladder (6 profiles), CRI, failure attribution, three result papers |
 | 1.2 | June 2026 | Phase 3: Runtime Contract Orchestrator, adaptive escalation, MCS metric, `orchestrated` agent profile |
 | 1.3 | June 2026 | Phase 3.1: execution protocols (`lock_read_validate_apply`, etc.), dual-axis escalation, `executionProtocolPath` metric |
+| 1.4 | June 2026 | Phase 3.2: `semantic_repair_loop`, `api_shape_contract`, semantic repair telemetry, CRI semantic penalties |

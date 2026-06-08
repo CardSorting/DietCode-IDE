@@ -8,6 +8,7 @@ determine whether mutation remains safe under changing workspace state.
 from __future__ import annotations
 
 import json
+import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -48,6 +49,12 @@ EXECUTION_PROTOCOLS: dict[str, dict[str, Any]] = {
         "description": "Restore snapshot and remove sidecar residue before retry.",
         "capabilities": ["rollback", "sidecar_cleanup"],
         "layer": 3,
+    },
+    "semantic_repair_loop": {
+        "description": "Behavior-preserving repair loop with API-shape checks before and after mutation.",
+        "capabilities": ["semantic_repair", "api_shape_guard", "behavior_check"],
+        "layer": 4,
+        "requires": ["verify_exec", "behavior_check", "api_shape_contract"],
     },
 }
 
@@ -107,6 +114,172 @@ def reconcile_content_for_goals(
     return body
 
 
+def capture_api_shape(workspace: Path, rel_paths: list[str]) -> str:
+    """Extract public `def` signatures from target modules."""
+    lines_out: list[str] = []
+    for rel in sorted(set(rel_paths)):
+        path = workspace / rel
+        if not path.is_file():
+            continue
+        for line in path.read_text(encoding="utf-8").splitlines():
+            stripped = line.strip()
+            if stripped.startswith("def "):
+                lines_out.append(f"{rel}:{stripped}")
+    return "\n".join(lines_out)
+
+
+def _discover_behavior_scripts(workspace: Path) -> list[str]:
+    found: list[str] = []
+    for name in ("test_api.py", "check.py"):
+        if (workspace / name).is_file():
+            found.append(name)
+    return found
+
+
+def _run_behavior_checks(
+    workspace: Path,
+    plan: AgentPlan,
+) -> subprocess.CompletedProcess[str] | None:
+    import os
+    import subprocess
+
+    checks = list(plan.shell_checks)
+    if not checks:
+        for script in _discover_behavior_scripts(workspace):
+            checks.append(f'cd "$WORKSPACE_ROOT" && python3 {script}')
+    if not checks:
+        return None
+    env = {**os.environ, "WORKSPACE_ROOT": str(workspace)}
+    last: subprocess.CompletedProcess[str] | None = None
+    for check in checks:
+        cmd = check.replace("$WORKSPACE_ROOT", str(workspace)).replace("$ROOT", str(workspace))
+        last = subprocess.run(["bash", "-lc", cmd], env=env, capture_output=True, text=True, check=False)
+        if last.returncode != 0:
+            return last
+    return last
+
+
+def _filter_implementation_goals(plan: AgentPlan) -> AgentPlan:
+    """Drop signature grep goals — repair targets implementation lines only."""
+    from agent_driver import AgentPlan as Plan
+
+    filtered = [
+        g
+        for g in plan.positive_goals
+        if not g.pattern.strip().startswith("def ")
+    ]
+    return Plan(
+        instruction=plan.instruction,
+        positive_goals=filtered,
+        negative_goals=list(plan.negative_goals),
+        shell_checks=list(plan.shell_checks),
+        trace_scripts=list(plan.trace_scripts),
+        invariant_shell_checks=list(plan.invariant_shell_checks),
+    )
+
+
+def run_semantic_repair_loop(
+    workspace: Path,
+    task_id: str,
+    mode: str,
+    ctx: WorkflowContext,
+    plan: AgentPlan,
+    visible: set[str],
+) -> None:
+    """Behavior-preserving repair with API-shape guard and rollback on violation."""
+    from agent_driver import (
+        _enrich_contract_full_goals,
+        _infer_behavior_targets,
+        _post_patch_contract_checks,
+        _restore_workspace,
+        _run_verify_script,
+        _snapshot_workspace,
+        build_plan_from_contracts,
+    )
+
+    spec = EXECUTION_PROTOCOLS["semantic_repair_loop"]
+    required_caps = {
+        "verify_exec": "verify_exec",
+        "behavior_check": "behavior_check",
+        "api_shape_contract": "api_shape",
+    }
+    for required in spec.get("requires", []):
+        cap = required_caps.get(required, required)
+        if not contracts_allow(visible, cap):
+            raise RuntimeError(f"semantic_repair_loop missing contract: {required}")
+
+    metrics = ctx.metrics
+    metrics.semantic_repair_attempted = True
+    snap = _snapshot_workspace(workspace)
+    trap = load_trap_context(task_id)
+
+    repair_plan = _filter_implementation_goals(plan)
+    if contracts_allow(visible, "verify_exec") and not repair_plan.shell_checks:
+        enriched = build_plan_from_contracts(task_id, visible)
+        repair_plan.shell_checks = enriched.shell_checks
+
+    _infer_behavior_targets(workspace, repair_plan)
+    _enrich_contract_full_goals(task_id, repair_plan)
+    repair_plan = _filter_implementation_goals(repair_plan)
+
+    api_paths = sorted({g.rel_path for g in repair_plan.positive_goals})
+    if not api_paths:
+        api_paths = sorted({g.rel_path for g in plan.positive_goals if g.rel_path.endswith(".py")})
+
+    metrics.api_shape_before = capture_api_shape(workspace, api_paths)
+
+    before_behavior = _run_behavior_checks(workspace, repair_plan)
+    if before_behavior is not None and before_behavior.returncode != 0:
+        metrics.behavior_failure_captured = True
+    elif before_behavior is None and _discover_behavior_scripts(workspace):
+        metrics.behavior_failure_uncaptured = True
+
+    if mode == "bridge":
+        _apply_plan_bridge(workspace, ctx, repair_plan, visible, "single_shot_patch", trap)
+    elif mode == "raw_rpc":
+        _apply_plan_rpc(workspace, ctx, repair_plan, visible, "single_shot_patch", trap)
+    else:
+        raise ValueError(f"unknown mode: {mode}")
+
+    metrics.api_shape_after = capture_api_shape(workspace, api_paths)
+    metrics.api_shape_changed = metrics.api_shape_before != metrics.api_shape_after
+
+    after_behavior = _run_behavior_checks(workspace, repair_plan)
+    behavior_ok = after_behavior is None or after_behavior.returncode == 0
+
+    verify_ok = True
+    verify = TASKS_DIR / task_id / "verify.sh"
+    if verify.is_file():
+        completed = _run_verify_script(workspace, verify)
+        verify_ok = completed.returncode == 0
+
+    invariant_ok = True
+    inv = TASKS_DIR / task_id / "verify_invariant.sh"
+    if inv.is_file():
+        inv_run = _run_verify_script(workspace, inv)
+        invariant_ok = inv_run.returncode == 0
+
+    if metrics.api_shape_changed or not behavior_ok or not verify_ok or not invariant_ok:
+        _restore_workspace(workspace, snap)
+        _sync_workspace_to_runtime(workspace, mode, ctx)
+        ctx.retries += 1
+        metrics.semantic_rollback_triggered = True
+        metrics.rollback_succeeded = True
+        metrics.api_shape_preserved = False
+        detail = []
+        if metrics.api_shape_changed:
+            detail.append("api_shape_changed")
+        if not behavior_ok:
+            detail.append("behavior_still_failing")
+        if not verify_ok:
+            detail.append("verify_failed")
+        raise RuntimeError(f"semantic repair failed ({', '.join(detail)}); rolled back")
+
+    metrics.semantic_repair_succeeded = True
+    metrics.api_shape_preserved = True
+    _post_patch_contract_checks(workspace, task_id, repair_plan, visible)
+
+
 def execute_plan_with_protocol(
     workspace: Path,
     task_id: str,
@@ -130,6 +303,13 @@ def execute_plan_with_protocol(
     if protocol not in EXECUTION_PROTOCOLS:
         raise ValueError(f"unknown execution protocol: {protocol}")
 
+    if protocol == "semantic_repair_loop":
+        run_semantic_repair_loop(workspace, task_id, mode, ctx, plan, visible)
+        return
+
+    # Signature grep clauses are post-mutation constraints, not patch targets.
+    plan = _filter_implementation_goals(plan)
+
     trap = load_trap_context(task_id)
 
     if contracts_allow(visible, "destructive_policy"):
@@ -150,6 +330,7 @@ def execute_plan_with_protocol(
     for attempt in range(max_attempts):
         if attempt > 0 and snap:
             _restore_workspace(workspace, snap)
+            _sync_workspace_to_runtime(workspace, mode, ctx)
             ctx.retries += 1
             ctx.metrics.rollback_succeeded = True
             if protocol == "rollback_cleanup" or contracts_allow(visible, "recovery"):
@@ -176,6 +357,24 @@ def execute_plan_with_protocol(
         except RuntimeError:
             if attempt + 1 >= max_attempts:
                 raise
+
+
+def _sync_workspace_to_runtime(workspace: Path, mode: str, ctx: WorkflowContext) -> None:
+    if mode not in ("raw_rpc", "bridge"):
+        return
+    from run_benchmark import RpcSession, ensure_workspace_open
+
+    ensure_workspace_open(workspace)
+    if mode != "raw_rpc":
+        return
+    with RpcSession(workspace, ctx) as session:
+        from agent_driver import _skip_workspace_artifact
+
+        for path in sorted(workspace.rglob("*")):
+            if not path.is_file() or _skip_workspace_artifact(path):
+                continue
+            rel = path.relative_to(workspace).as_posix()
+            session.call("file.write", {"path": rel, "content": path.read_text(encoding="utf-8")})
 
 
 def _cleanup_sidecars(workspace: Path, sidecar_files: list[str]) -> None:
@@ -292,6 +491,16 @@ def _apply_plan_bridge(
             )
 
 
+def _mirror_rpc_file_to_disk(session: RpcSession, rel_path: str) -> None:
+    """Keep local workspace aligned with runtime after RPC patch (local verify uses disk)."""
+    from agent_driver import _read_file_rpc
+
+    content = _read_file_rpc(session, rel_path)
+    target = session.workspace / rel_path
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(content, encoding="utf-8")
+
+
 def _inject_trap_between_validate_and_apply(
     workspace: Path,
     rel_path: str,
@@ -337,6 +546,7 @@ def _apply_patch_rpc_protocol(
         {"path": rel_path, "patch": patch, "confirm": True, "expectBeforeHash": before_hash},
     )
     if _rpc_ok(applied):
+        _mirror_rpc_file_to_disk(session, rel_path)
         return
 
     err = applied.get("error", {})
@@ -381,6 +591,7 @@ def _apply_patch_rpc_protocol(
     )
     if not _rpc_ok(applied2):
         raise RuntimeError(f"stale re-apply failed: {applied2}")
+    _mirror_rpc_file_to_disk(session, rel_path)
     ctx.metrics.stale_recovery_succeeded = True
 
 

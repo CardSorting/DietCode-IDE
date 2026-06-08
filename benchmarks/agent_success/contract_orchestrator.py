@@ -25,6 +25,25 @@ TASKS_DIR = BENCHMARK_ROOT / "tasks"
 MAX_ORCHESTRATION_STEPS = 8
 
 
+def _sync_workspace_to_runtime(workspace: Path, mode: str, ctx: WorkflowContext) -> None:
+    """Push restored local files to the runtime (RPC patch reads server-side state)."""
+    if mode not in ("raw_rpc", "bridge"):
+        return
+    from run_benchmark import RpcSession, ensure_workspace_open
+
+    ensure_workspace_open(workspace)
+    if mode != "raw_rpc":
+        return
+    with RpcSession(workspace, ctx) as session:
+        from agent_driver import _skip_workspace_artifact
+
+        for path in sorted(workspace.rglob("*")):
+            if not path.is_file() or _skip_workspace_artifact(path):
+                continue
+            rel = path.relative_to(workspace).as_posix()
+            session.call("file.write", {"path": rel, "content": path.read_text(encoding="utf-8")})
+
+
 def run_orchestrated_agent(
     workspace: Path,
     task_id: str,
@@ -47,6 +66,7 @@ def run_orchestrated_agent(
     for step in range(MAX_ORCHESTRATION_STEPS):
         if step > 0:
             _restore_workspace(workspace, fixture_snap)
+            _sync_workspace_to_runtime(workspace, mode, ctx)
             ctx.retries += 1
 
         visible = set(broker.visible)
@@ -67,15 +87,25 @@ def run_orchestrated_agent(
             )
             outcome = measure_verify_outcome(workspace, task_id)
             outcome.concurrent_mutation_observed = ctx.metrics.concurrent_mutation_detected
+            outcome.semantic_preservation_failed = ctx.metrics.api_shape_changed
+            outcome.behavior_failure_uncaptured = ctx.metrics.behavior_failure_uncaptured
             if outcome.verify_rc == 0 and outcome.invariant_rc in (None, 0):
                 _finalize_orchestration(ctx, broker, task_id, succeeded=True)
                 return
+            last_error = (
+                f"verify failed (rc={outcome.verify_rc}): "
+                f"{outcome.verify_stderr or outcome.verify_stdout}".strip()
+            )
         except Exception as exc:
             last_error = str(exc)
             outcome.execution_error = last_error
             outcome.concurrent_mutation_observed = ctx.metrics.concurrent_mutation_detected
+            outcome.semantic_preservation_failed = ctx.metrics.api_shape_changed
+            outcome.behavior_failure_uncaptured = ctx.metrics.behavior_failure_uncaptured
             outcome = measure_verify_outcome(workspace, task_id)
             outcome.concurrent_mutation_observed = ctx.metrics.concurrent_mutation_detected
+            outcome.semantic_preservation_failed = ctx.metrics.api_shape_changed
+            outcome.behavior_failure_uncaptured = ctx.metrics.behavior_failure_uncaptured
             if outcome.execution_error is None:
                 outcome.execution_error = last_error
 

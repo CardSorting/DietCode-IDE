@@ -15,7 +15,7 @@ REPO_ROOT = BENCHMARK_ROOT.parents[1]
 RESULTS_DIR = BENCHMARK_ROOT / "results"
 
 from contract_ladder import NIGHTMARE_TASKS  # noqa: E402
-from contracts import MCS_REFERENCE, ORCHESTRATOR_CLAIM, PHASE_31_CLAIM  # noqa: E402
+from contracts import MCS_REFERENCE, ORCHESTRATOR_CLAIM, PHASE_31_CLAIM, PHASE_32_CLAIM  # noqa: E402
 
 
 def render_mcs_report(rows: list[dict], *, generated_at: str, input_file: str) -> str:
@@ -28,7 +28,9 @@ def render_mcs_report(rows: list[dict], *, generated_at: str, input_file: str) -
         "",
         f"> {PHASE_31_CLAIM}",
         "",
-        "Methodology: [WHITEPAPER.md](WHITEPAPER.md) §Phase 3–3.1",
+        f"> {PHASE_32_CLAIM}",
+        "",
+        "Methodology: [WHITEPAPER.md](WHITEPAPER.md) §Phase 3–3.2",
         "",
         "---",
         "",
@@ -61,16 +63,33 @@ def render_mcs_report(rows: list[dict], *, generated_at: str, input_file: str) -
             ),
             "",
             (
-                "**Phase 3.1:** task 057 escalates `concurrent_mutation_detected` → "
-                "`stale_read_protocol` + `lock_read_validate_apply` (strip concurrent `VERSION = 3`, reconcile, re-apply)."
-            ),
-            "",
-            (
-                "**Key result:** task 052 MCS = `readme` + `verify_grep` + `hidden_invariant` "
-                "(1 visibility escalation)."
+                "**Phase 3.1:** task 057 → `lock_read_validate_apply`. "
+                "**Phase 3.2:** task 059 → `semantic_repair_loop` (behavior-preserving API-shape repair)."
             ),
             "",
             f"**Orchestrated pass rate:** {passed}/{len(rows)}",
+            "",
+            "## Semantic Repair Matrix",
+            "",
+            "| task | behaviorFailureCaptured | apiShapeChanged | semanticRepairSucceeded | rollbackTriggered | finalVerifyPassed |",
+            "|------|----------------------:|----------------:|------------------------:|------------------:|------------------:|",
+        ]
+    )
+    for row in sorted(rows, key=lambda r: r.get("taskId", "")):
+        tid = row.get("taskId", "").replace("task_", "")
+        if not row.get("semanticRepairAttempted") and not row.get("behaviorFailureCaptured"):
+            continue
+        lines.append(
+            f"| {tid} | "
+            f"{'✓' if row.get('behaviorFailureCaptured') else '—'} | "
+            f"{'✓' if row.get('apiShapeChanged') else '—'} | "
+            f"{'✓' if row.get('semanticRepairSucceeded') else '—'} | "
+            f"{'✓' if row.get('semanticRollbackTriggered') else '—'} | "
+            f"{'✓' if row.get('finalVerifyPassed') else '—'} |"
+        )
+
+    lines.extend(
+        [
             "",
             "## Example escalations",
             "",
@@ -98,6 +117,23 @@ def render_mcs_report(rows: list[dict], *, generated_at: str, input_file: str) -
                     "grantedProtocol": "lock_read_validate_apply",
                     "executionProtocolPath": ["single_shot_patch", "lock_read_validate_apply"],
                     "protocolEscalationSucceeded": True,
+                },
+                indent=2,
+            ),
+            "```",
+            "",
+            "Task 059 (semantic repair):",
+            "",
+            "```json",
+            json.dumps(
+                {
+                    "failureClass": "behavior_check_failed",
+                    "grantedContract": "behavior_check",
+                    "grantedProtocol": "semantic_repair_loop",
+                    "semanticRepairAttempted": True,
+                    "behaviorFailureCaptured": True,
+                    "apiShapeChanged": False,
+                    "semanticRepairSucceeded": True,
                 },
                 indent=2,
             ),

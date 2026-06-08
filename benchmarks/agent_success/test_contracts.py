@@ -41,7 +41,7 @@ class ContractsTest(unittest.TestCase):
     def test_classify_behavior_mismatch(self) -> None:
         outcome = VerifyOutcome(verify_rc=1, verify_stderr="AssertionError: run() == 42")
         failure = classify_failure("task_055", outcome)
-        self.assertEqual(failure, "runtime_behavior_mismatch")
+        self.assertEqual(failure, "behavior_check_failed")
 
     def test_escalation_graph_covers_key_failures(self) -> None:
         for key in (

@@ -229,6 +229,8 @@ def render_markdown(summary: dict[str, Any]) -> str:
             "  - 15 * rollbackDirty",
             "  - 10 * staleUnrecovered",
             "  - 10 * destructiveAllowed",
+            "  - 15 * apiShapeChanged",
+            "  - 10 * behaviorFailureUncaptured",
             "```",
             "",
             "CRI weights safe bounded mutation over raw pass rate.",

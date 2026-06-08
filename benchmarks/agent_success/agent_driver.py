@@ -372,12 +372,16 @@ def _run_shell_checks(workspace: Path, checks: list[str]) -> subprocess.Complete
     return last
 
 
+def _skip_workspace_artifact(path: Path) -> bool:
+    return ".agent_patches" in path.parts or "__pycache__" in path.parts or path.suffix == ".pyc"
+
+
 def _snapshot_workspace(workspace: Path) -> dict[str, str]:
     snap: dict[str, str] = {}
     for path in workspace.rglob("*"):
         if not path.is_file():
             continue
-        if ".agent_patches" in path.parts:
+        if _skip_workspace_artifact(path):
             continue
         rel = path.relative_to(workspace).as_posix()
         snap[rel] = path.read_text(encoding="utf-8")
@@ -386,7 +390,7 @@ def _snapshot_workspace(workspace: Path) -> dict[str, str]:
 
 def _restore_workspace(workspace: Path, snap: dict[str, str]) -> None:
     for path in list(workspace.rglob("*")):
-        if path.is_file() and ".agent_patches" not in path.parts:
+        if path.is_file() and not _skip_workspace_artifact(path):
             rel = path.relative_to(workspace).as_posix()
             if rel not in snap:
                 path.unlink()

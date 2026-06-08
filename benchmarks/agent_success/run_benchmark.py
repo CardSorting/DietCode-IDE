@@ -65,6 +65,14 @@ class RunMetrics:
     escalation_succeeded: bool = False
     execution_protocol_path: list[str] = field(default_factory=list)
     protocol_escalation_succeeded: bool = False
+    semantic_repair_attempted: bool = False
+    behavior_failure_captured: bool = False
+    behavior_failure_uncaptured: bool = False
+    api_shape_before: str = ""
+    api_shape_after: str = ""
+    api_shape_changed: bool = False
+    semantic_repair_succeeded: bool = False
+    semantic_rollback_triggered: bool = False
     mcs_reference_match: dict[str, Any] = field(default_factory=dict)
 
     def to_json(self) -> dict[str, Any]:
@@ -101,6 +109,14 @@ class RunMetrics:
             "escalationSucceeded": self.escalation_succeeded,
             "executionProtocolPath": self.execution_protocol_path,
             "protocolEscalationSucceeded": self.protocol_escalation_succeeded,
+            "semanticRepairAttempted": self.semantic_repair_attempted,
+            "behaviorFailureCaptured": self.behavior_failure_captured,
+            "behaviorFailureUncaptured": self.behavior_failure_uncaptured,
+            "apiShapeBefore": self.api_shape_before,
+            "apiShapeAfter": self.api_shape_after,
+            "apiShapeChanged": self.api_shape_changed,
+            "semanticRepairSucceeded": self.semantic_repair_succeeded,
+            "semanticRollbackTriggered": self.semantic_rollback_triggered,
             "mcsReferenceMatch": self.mcs_reference_match,
             "timestamp": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
         }

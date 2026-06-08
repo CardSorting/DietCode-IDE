@@ -25,6 +25,11 @@ PHASE_31_CLAIM = (
     "execution protocols determine whether mutation remains safe under changing state."
 )
 
+PHASE_32_CLAIM = (
+    "Bounded mutation reliability requires three separable controls: contract visibility, "
+    "safe execution protocol, and semantic repair discipline."
+)
+
 # Canonical contract registry — what each layer exposes to the agent.
 CONTRACTS: dict[str, dict[str, Any]] = {
     "readme": {
@@ -77,6 +82,11 @@ CONTRACTS: dict[str, dict[str, Any]] = {
         "capabilities": ["recovery"],
         "layer": 3,
     },
+    "api_shape_contract": {
+        "description": "Public API signatures are observable and must be preserved across repair.",
+        "capabilities": ["api_shape"],
+        "layer": 3,
+    },
 }
 
 INITIAL_CONTRACTS: tuple[str, ...] = ("readme", "verify_grep")
@@ -114,7 +124,18 @@ ESCALATION_GRAPH: dict[str, ESCALATION_ACTION] = {
         "grantContract": "rollback_protocol",
         "grantProtocol": "rollback_cleanup",
     },
-    "api_shape_mismatch": {"grantContract": "behavior_check", "grantProtocol": None},
+    "api_shape_mismatch": {
+        "grantContract": "api_shape_contract",
+        "grantProtocol": "semantic_repair_loop",
+    },
+    "behavior_check_failed": {
+        "grantContract": "behavior_check",
+        "grantProtocol": "semantic_repair_loop",
+    },
+    "semantic_preservation_failed": {
+        "grantContract": "api_shape_contract",
+        "grantProtocol": "semantic_repair_loop",
+    },
     "unclassified_failure": {"grantContract": "verify_exec", "grantProtocol": "stale_safe_patch"},
 }
 
@@ -128,7 +149,7 @@ MCS_REFERENCE: dict[str, list[str]] = {
     "task_056": ["readme", "verify_grep", "stale_read_protocol"],
     "task_057": ["readme", "verify_grep", "stale_read_protocol", "authoritative_read"],
     "task_058": ["readme", "verify_grep", "authoritative_read"],
-    "task_059": ["readme", "verify_grep", "verify_exec", "behavior_check"],
+    "task_059": ["readme", "verify_grep", "verify_exec", "behavior_check", "api_shape_contract"],
     "task_060": ["readme", "verify_grep", "destructive_policy"],
 }
 
@@ -143,6 +164,8 @@ class VerifyOutcome:
     invariant_stderr: str = ""
     execution_error: str | None = None
     concurrent_mutation_observed: bool = False
+    semantic_preservation_failed: bool = False
+    behavior_failure_uncaptured: bool = False
 
 
 @dataclass
@@ -175,6 +198,10 @@ class ContractBroker:
             return False
         if protocol == self.active_protocol:
             return False
+        spec = EXECUTION_PROTOCOLS[protocol]
+        for required in spec.get("requires", []):
+            if required in CONTRACTS and required not in self.visible:
+                self.grant(required, failure_class=failure_class, step=step)
         self.active_protocol = protocol
         if protocol not in self.protocol_path:
             self.protocol_path.append(protocol)
@@ -268,6 +295,7 @@ class ContractBroker:
             "staleReadProtocol": "stale_read_protocol" in self.visible,
             "destructiveCommandPolicy": "destructive_policy" in self.visible,
             "authoritativeRead": "authoritative_read" in self.visible,
+            "apiShapeContract": "api_shape_contract" in self.visible,
         }
 
 
@@ -288,6 +316,9 @@ _CHAINED_PROTOCOL_ESCALATION: dict[str, list[str]] = {
     "concurrent_mutation": ["lock_read_validate_apply"],
     "partial_mutation_detected": ["transactional_batch_patch"],
     "sidecar_residue_detected": ["rollback_cleanup"],
+    "behavior_check_failed": ["semantic_repair_loop"],
+    "semantic_preservation_failed": ["semantic_repair_loop"],
+    "api_shape_mismatch": ["semantic_repair_loop"],
 }
 
 
@@ -311,6 +342,8 @@ def contracts_allow(visible: set[str], capability: str) -> bool:
     if capability == "stale_protocol" and "stale_read_protocol" in visible:
         return True
     if capability == "recovery" and "rollback_protocol" in visible:
+        return True
+    if capability == "api_shape" and "api_shape_contract" in visible:
         return True
     return False
 
@@ -362,6 +395,9 @@ def classify_failure(task_id: str, outcome: VerifyOutcome) -> str | None:
     if outcome.concurrent_mutation_observed:
         return "concurrent_mutation_detected"
 
+    if outcome.semantic_preservation_failed:
+        return "semantic_preservation_failed"
+
     signals = _verify_script_signals(task_id)
     combined = " ".join(
         filter(
@@ -390,8 +426,8 @@ def classify_failure(task_id: str, outcome: VerifyOutcome) -> str | None:
 
     if outcome.verify_rc != 0:
         lower = combined.lower()
-        if "assertionerror" in lower or "assert" in lower:
-            return "runtime_behavior_mismatch"
+        if "assertionerror" in lower or (signals["verify_has_python"] and "assert" in lower):
+            return "behavior_check_failed"
         if signals["verify_has_python"] or "python3" in lower:
             return "runtime_behavior_mismatch"
         if signals["verify_has_trace"]:
@@ -414,6 +450,11 @@ def classify_failure(task_id: str, outcome: VerifyOutcome) -> str | None:
             return "sidecar_residue_detected"
         if "partial" in err_lower and "batch" in err_lower:
             return "partial_mutation_detected"
+        if "semantic repair" in err_lower or "api shape" in err_lower:
+            return "semantic_preservation_failed"
+
+    if outcome.behavior_failure_uncaptured and outcome.verify_rc != 0:
+        return "behavior_check_failed"
 
     lower_all = combined.lower()
     if outcome.verify_rc != 0 and "version = 3" in lower_all:
