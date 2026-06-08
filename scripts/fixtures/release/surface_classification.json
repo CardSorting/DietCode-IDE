@@ -73,6 +73,9 @@
       "test-task-health",
       "test-operator-diagnostics",
       "test-runtime-safety",
+      "test-grep-diff-tooling",
+      "test-runtime-determinism",
+      "test-transaction-kernel",
       "verify-agent-runtime",
       "release-check-agent-runtime",
       "agent-integration"
@@ -88,6 +91,9 @@
       "scripts/fixtures/rpc/malformed_line.txt",
       "scripts/fixtures/rpc/envelope_success.schema.json",
       "scripts/fixtures/safety/destructive_methods.json",
+      "scripts/fixtures/tooling/sample_unified_diff.txt",
+      "scripts/fixtures/tooling/grep_anchor.json",
+      "scripts/fixtures/tooling/stale_content.json",
       "scripts/fixtures/release/surface_classification.json"
     ],
     "experimental": [],

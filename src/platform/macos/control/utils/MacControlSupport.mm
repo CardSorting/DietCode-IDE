@@ -17,6 +17,8 @@
 
 #include "domain/control/ControlRuntimeLimits.hpp"
 
+BOOL IsTextBinary(NSString* text);
+
 const NSUInteger kMaxRequestBytes = dietcode::domain::control::kMaxRequestBytes;
 const NSUInteger kMaxResponseBytes = dietcode::domain::control::kMaxResponseBytes;
 const NSInteger kMaxGrepResults = dietcode::domain::control::kMaxGrepResults;
@@ -140,6 +142,30 @@ BOOL FileIsWithinSearchReadCap(const std::filesystem::path& path) {
     std::error_code sizeEc;
     auto size = std::filesystem::file_size(path, sizeEc);
     return sizeEc || size <= kMaxSearchFileBytes;
+}
+
+NSString* ReadTextFileFromDisk(NSString* path) {
+    if (path.length == 0) return nil;
+    NSStringEncoding encoding = NSUTF8StringEncoding;
+    NSError* error = nil;
+    NSString* text = [NSString stringWithContentsOfFile:path usedEncoding:&encoding error:&error];
+    if (!text || IsTextBinary(text)) return nil;
+    return text;
+}
+
+NSString* TextForSearchAtPath(NSString* editorText, NSString* diskPath, NSString** readSourceOut) {
+    if (readSourceOut) *readSourceOut = nil;
+    if (editorText.length > 0) {
+        if (IsTextBinary(editorText)) return nil;
+        if (readSourceOut) *readSourceOut = @"editor";
+        return editorText;
+    }
+    NSString* diskText = ReadTextFileFromDisk(diskPath);
+    if (diskText) {
+        if (readSourceOut) *readSourceOut = @"disk";
+        return diskText;
+    }
+    return nil;
 }
 
 NSString* WordAtOffset(NSString* text, NSInteger offset) {

@@ -91,6 +91,9 @@ def build_bundle(command: list[str], *, cwd: Path, compact: bool) -> dict:
             "request_id": _rg("request_id", cwd),
             "runtime_diagnostic": _rg("runtime_diagnostic", cwd),
             "recovery_hint": _rg("recovery_hint", cwd),
+            "workspace_grep": _rg("workspace\\.grep|literal_substring", cwd),
+            "diff_hunks": _rg("diff\\.hunks|literal_unified_diff_hunks", cwd),
+            "agent_tooling": _rg("TOOLING:|agent_tooling", cwd),
         },
         "recoveryCommands": [
             "python3 scripts/dietcode_agent_client.py --diagnose --json",

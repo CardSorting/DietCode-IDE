@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 
+from agent_contracts import validate_diff_hunks_response, validate_grep_response
 from dietcode_agent_client import (
     call,
     connect,
@@ -66,13 +67,43 @@ def main() -> int:
             root = ensure_workspace_root(sock, token)
             record(checks, "workspace.getRoot", bool(root), {"path": root})
 
-            grep = call(sock, token, "workspace.grep", {"query": "DietCode", "maxResults": 1})
+            grep = call(sock, token, "workspace.grep", {
+                "query": "CONTRACT:",
+                "maxResults": 3,
+                "include": ["scripts/agent_contracts.py"],
+            })
+            grep_errors = validate_grep_response(grep)
             matches = grep.get("matches", [])
             record(
                 checks,
                 "workspace.grep",
-                isinstance(matches, list) and grep.get("mode") == "literal_substring",
-                {"matchCount": len(matches), "mode": grep.get("mode")},
+                not grep_errors and isinstance(matches, list) and len(matches) > 0 and grep.get("filesRead", 0) >= 1,
+                {
+                    "matchCount": len(matches),
+                    "filesRead": grep.get("filesRead"),
+                    "filesReadFromDisk": grep.get("filesReadFromDisk"),
+                    "mode": grep.get("mode"),
+                    "schemaErrors": grep_errors,
+                },
+            )
+
+            diff_hunks = call(
+                sock,
+                token,
+                "diff.hunks",
+                {"source": "file", "path": "scripts/agent_contracts.py", "maxHunks": 5},
+                request_timeout=30.0,
+            )
+            diff_errors = validate_diff_hunks_response(diff_hunks)
+            record(
+                checks,
+                "diff.hunks",
+                not diff_errors and diff_hunks.get("mode") == "literal_unified_diff_hunks",
+                {
+                    "totalHunks": diff_hunks.get("totalHunks"),
+                    "returnedHunks": diff_hunks.get("returnedHunks"),
+                    "schemaErrors": diff_errors,
+                },
             )
 
             git_status = call(sock, token, "git.status", {})

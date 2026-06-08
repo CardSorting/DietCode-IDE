@@ -24,6 +24,9 @@ LADDER: list[tuple[str, list[str], bool]] = [
     ("live_ergonomics", [sys.executable, "scripts/test_ergonomics.py", "--compact"], True),
     ("live_operator_diagnostics", [sys.executable, "scripts/test_operator_diagnostics.py", "--compact"], True),
     ("live_runtime_safety", [sys.executable, "scripts/test_runtime_safety.py", "--compact"], True),
+    ("live_grep_diff_tooling", [sys.executable, "scripts/test_grep_diff_tooling.py", "--compact"], True),
+    ("live_runtime_determinism", [sys.executable, "scripts/test_runtime_determinism.py", "--compact"], True),
+    ("live_transaction_kernel", [sys.executable, "scripts/test_transaction_kernel.py", "--compact"], True),
 ]
 
 

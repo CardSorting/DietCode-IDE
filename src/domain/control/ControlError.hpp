@@ -17,6 +17,7 @@ struct ControlError {
     static inline const std::string ResourceExhausted = "resource_exhausted";
     static inline const std::string OutsideWorkspace = "outside_workspace";
     static inline const std::string PatchFailed = "patch_failed";
+    static inline const std::string StaleContent = "stale_content";
     static inline const std::string ConfirmationRequired = "confirmation_required";
     static inline const std::string LockConflict = "lock_conflict";
     static inline const std::string CheckpointWriteFailed = "checkpoint_write_failed";

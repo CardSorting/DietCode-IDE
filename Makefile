@@ -70,6 +70,7 @@ MACOS_MM := \
 	src/platform/macos/control/services/MacControlRecoveryStore.mm \
 	src/platform/macos/control/services/MacControlSearchService.mm \
 	src/platform/macos/control/services/MacControlPatchService.mm \
+	src/platform/macos/control/services/MacControlWorkspaceState.mm \
 	src/platform/macos/control/services/MacControlTaskRuntime.mm \
 	src/platform/macos/control/services/MacControlComboRuntime.mm \
 	src/platform/macos/control/services/MacControlRoutingPolicy.mm \
@@ -84,7 +85,7 @@ MACOS_MM := \
 	src/filesystem/FileWatcher.mm \
 	src/core/LSPClient.mm
 
-.PHONY: all app run headless ensure-socket agent-ready agent-status agent-ping agent-methods agent-capabilities agent-self-test test-agent-offline control-smoke test-task-health test-rpc-transaction test-ergonomics test-agent-integration agent-integration verify-agent-runtime test clean
+.PHONY: all app run headless ensure-socket agent-ready agent-status agent-ping agent-methods agent-capabilities agent-self-test test-agent-offline control-smoke test-task-health test-rpc-transaction test-ergonomics test-grep-diff-tooling test-runtime-determinism test-transaction-kernel test-agent-integration agent-integration verify-agent-runtime test clean
 
 all: app test
 
@@ -151,6 +152,18 @@ test-operator-diagnostics: app
 test-runtime-safety: app
 	python3 scripts/dietcode_agent_client.py --wait-ready --compact --error-json --quiet
 	python3 scripts/test_runtime_safety.py --compact
+
+test-grep-diff-tooling: app
+	python3 scripts/dietcode_agent_client.py --wait-ready --compact --error-json --quiet
+	python3 scripts/test_grep_diff_tooling.py --compact
+
+test-runtime-determinism: app
+	python3 scripts/dietcode_agent_client.py --wait-ready --compact --error-json --quiet
+	python3 scripts/test_runtime_determinism.py --compact
+
+test-transaction-kernel: app
+	python3 scripts/dietcode_agent_client.py --wait-ready --compact --error-json --quiet
+	python3 scripts/test_transaction_kernel.py --compact
 
 test-ergonomics: app
 	python3 scripts/dietcode_agent_client.py --wait-ready --compact --error-json --quiet

@@ -14,6 +14,11 @@
 - [ ] `make test-operator-diagnostics` passes
 - [ ] `python3 scripts/dietcode_agent_client.py --diagnose --json` shows socket/RPC readiness
 - [ ] `make test-runtime-safety` passes
+- [ ] `make test-grep-diff-tooling` passes (literal grep/diff/patch contracts)
+- [ ] Grep/diff/patch contracts documented in [Agent Tooling](agent-tooling.md)
+- [ ] `make test-runtime-determinism` passes (state hashes, stale-write rejection)
+- [ ] `make test-transaction-kernel` passes (revision, batch atomicity, search parity)
+- [ ] Runtime invariants documented in [Runtime Invariants](runtime-invariants.md)
 - [ ] Runtime limits documented in [Runtime Safety](runtime-safety.md)
 - [ ] `make release-check-agent-runtime` passes before release
 - [ ] Contract versions documented in [Runtime Contracts](runtime-contracts.md)

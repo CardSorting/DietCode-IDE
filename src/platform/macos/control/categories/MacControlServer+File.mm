@@ -43,6 +43,25 @@ static const NSInteger kMaxBatchFilePaths = 100;
         *outResult = @{ @"path": root };
         return;
     }
+
+    if ([method isEqualToString:@"workspace.revision"]) {
+        *outResult = [_workspaceState revisionPayloadWithWorkspace:[self safeWorkspacePath] ?: @""];
+        return;
+    }
+
+    if ([method isEqualToString:@"workspace.snapshot"]) {
+        *outResult = [_workspaceState snapshotPayloadWithWorkspace:[self safeWorkspacePath] ?: @""
+                                                      sinceRevision:params[@"sinceRevision"]
+                                                              paths:params[@"paths"]
+                                                       windowBridge:_windowBridge];
+        return;
+    }
+
+    if ([method isEqualToString:@"operation.status"]) {
+        NSString* key = params[@"idempotencyKey"] ?: params[@"clientOperationId"];
+        *outResult = [_workspaceState operationStatusForKey:key];
+        return;
+    }
     
     if ([method isEqualToString:@"workspace.findFiles"]) {
         NSString* ws = [self safeWorkspacePath];
@@ -305,26 +324,35 @@ static const NSInteger kMaxBatchFilePaths = 100;
                 return;
             }
         }
-        NSString* text = [self safeTextForFileAtPath:targetPath];
+        NSString* readSource = nil;
+        NSString* text = TextForSearchAtPath([self.windowController textForFileAtPath:targetPath], targetPath, &readSource);
+        if (!text) text = [self safeTextForFileAtPath:targetPath];
         if (!text) {
             *outErrCode = @"invalid_request";
             *outErrMsg = @"File is not readable.";
             return;
         }
+        if (!readSource) readSource = @"disk";
         NSArray<NSString*>* lines = LinesFromText(text);
         NSDictionary* attrs = [[NSFileManager defaultManager] attributesOfItemAtPath:targetPath error:nil];
         NSUInteger sizeBytes = [text lengthOfBytesUsingEncoding:NSUTF8StringEncoding];
         BOOL open = [[self safeOpenFilePaths] containsObject:targetPath];
         BOOL dirty = [DirtyFilePathsFromTabs([self safeOpenTabs] ?: @[]) containsObject:targetPath];
         if ([method isEqualToString:@"file.stat"]) {
-            *outResult = @{
+            NSMutableDictionary* stat = [@{
                 @"path": targetPath,
                 @"sizeBytes": @(attrs.fileSize ?: sizeBytes),
                 @"lineCount": @(lines.count),
                 @"modified": @(attrs.fileModificationDate != nil),
                 @"open": @(open),
-                @"dirty": @(dirty)
-            };
+                @"dirty": @(dirty),
+                @"contentHash": StableHashForString(text),
+                @"readSource": readSource
+            } mutableCopy];
+            if (attrs.fileModificationDate) {
+                stat[@"modifiedAt"] = ISODateString(attrs.fileModificationDate);
+            }
+            *outResult = stat;
             return;
         }
         if ([method isEqualToString:@"file.read"]) {

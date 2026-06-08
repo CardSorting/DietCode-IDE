@@ -1,0 +1,6 @@
+{
+  "string_code": "stale_content",
+  "numeric_code": 4004,
+  "recovery_hint": "revalidate_patch_with_patch.validate",
+  "trigger": "expectBeforeHash mismatch on patch.apply"
+}

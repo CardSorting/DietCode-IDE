@@ -93,6 +93,9 @@ NSDictionary* MacControlRpcErrorDiagnosticMetadata(NSString* stringCode) {
     } else if ([code isEqualToString:@"outside_workspace"] || [code isEqualToString:@"outside_scope"]) {
         category = @"validation";
         recoveryHint = @"use_workspace_relative_path";
+    } else if ([code isEqualToString:@"stale_content"]) {
+        category = @"validation";
+        recoveryHint = @"revalidate_patch_with_patch.validate";
     } else if ([code isEqualToString:@"verification_failed"] || [code isEqualToString:@"verify_failed"] ||
                [code isEqualToString:@"patch_failed"]) {
         category = @"domain";

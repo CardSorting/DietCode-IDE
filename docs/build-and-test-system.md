@@ -77,6 +77,9 @@ make test-agent-integration
 
 # 5. Grep/diff CLI shortcuts (literal search, no semantic layer)
 python3 scripts/dietcode_agent_client.py --grep DietCode --max-results 3 --compact
+python3 scripts/dietcode_agent_client.py --grep DietCode --grep-format rg
+python3 scripts/dietcode_agent_client.py --diff-source unstaged --diff-hunks --diff-summary --compact
+make test-grep-diff-tooling
 python3 scripts/dietcode_agent_client.py --diff-source unstaged --diff-hunks --include-lines --compact
 ```
 

@@ -13,6 +13,9 @@ BOOL MacControlIsReadQueueMethod(NSString* method) {
         readMethods = [NSSet setWithArray:@[
             @"workspace.grep",
             @"workspace.getRoot",
+            @"workspace.revision",
+            @"workspace.snapshot",
+            @"operation.status",
             @"workspace.findFiles",
             @"workspace.getRecentFiles",
             @"search.text",

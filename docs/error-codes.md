@@ -116,6 +116,7 @@ See [Runtime Safety](runtime-safety.md).
 | `verification_failed` | 4004 | Post-change verification failed |
 | `verify_failed` | 4004 | Alias of verification failure |
 | `patch_failed` | 4004 | Patch could not be applied |
+| `stale_content` | 4004 | Target file changed since validation (`expectBeforeHash` mismatch) |
 | `rollback_conflict` | 4005 | Rollback state mismatch |
 | `rollback_failed` | 4005 | Rollback operation failed |
 | `permission_denied` | 4006 | Socket or sandbox permission denied |

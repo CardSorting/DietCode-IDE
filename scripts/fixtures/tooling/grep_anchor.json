@@ -1,0 +1,7 @@
+{
+  "query": "CONTRACT:",
+  "include": ["scripts/agent_contracts.py"],
+  "minMatches": 1,
+  "minFilesRead": 1,
+  "expectedMode": "literal_substring"
+}

@@ -106,7 +106,9 @@ static const void* kDietCodeReadQueueKey = &kDietCodeReadQueueKey;
         _windowBridge = [[DietCodeControlWindowBridge alloc] initWithWindowController:controller];
         _searchService = [[MacControlSearchService alloc] initWithWindowBridge:_windowBridge];
         _recoveryStore = [[MacControlRecoveryStore alloc] initWithWindowBridge:_windowBridge];
+        _workspaceState = [[MacControlWorkspaceState alloc] init];
         _patchService = [[MacControlPatchService alloc] initWithWindowBridge:_windowBridge];
+        _patchService.workspaceState = _workspaceState;
         
         __weak DietCodeControlServer* weakSelf = self;
         MacControlMethodExecutor nestedExecutor = ^(NSString* method, NSDictionary* params, NSDictionary** outResult, NSString** outErrCode, NSString** outErrMsg, NSString** outPaths) {
@@ -1275,7 +1277,7 @@ static const void* kDietCodeReadQueueKey = &kDietCodeReadQueueKey;
     }
 
     // Route based on namespace prefixes to respective categories
-    if ([method hasPrefix:@"workspace."] || [method hasPrefix:@"file."] || [method hasPrefix:@"search."]) {
+    if ([method hasPrefix:@"workspace."] || [method hasPrefix:@"file."] || [method hasPrefix:@"search."] || [method hasPrefix:@"operation."]) {
         [self executeFileMethod:method params:params outResult:outResult outErrCode:outErrCode outErrMsg:outErrMsg outPaths:outPaths];
     } else if ([method hasPrefix:@"editor."] || [method hasPrefix:@"buffers."] || [method hasPrefix:@"changes."] || [method hasPrefix:@"diff."] || [method hasPrefix:@"patch."]) {
         [self executeEditorMethod:method params:params outResult:outResult outErrCode:outErrCode outErrMsg:outErrMsg outPaths:outPaths];
@@ -1393,7 +1395,7 @@ static const void* kDietCodeReadQueueKey = &kDietCodeReadQueueKey;
         else if ([stringCode isEqualToString:@"outside_workspace"] || [stringCode isEqualToString:@"outside_scope"]) numericCode = @(4001);
         else if ([stringCode isEqualToString:@"lock_conflict"] || [stringCode isEqualToString:@"dirty_buffer_conflict"]) numericCode = @(4002);
         else if ([stringCode isEqualToString:@"budget_exceeded"]) numericCode = @(4003);
-        else if ([stringCode isEqualToString:@"verification_failed"] || [stringCode isEqualToString:@"verify_failed"] || [stringCode isEqualToString:@"patch_failed"]) numericCode = @(4004);
+        else if ([stringCode isEqualToString:@"verification_failed"] || [stringCode isEqualToString:@"verify_failed"] || [stringCode isEqualToString:@"patch_failed"] || [stringCode isEqualToString:@"stale_content"]) numericCode = @(4004);
         else if ([stringCode isEqualToString:@"rollback_conflict"] || [stringCode isEqualToString:@"rollback_failed"]) numericCode = @(4005);
         else if ([stringCode isEqualToString:@"permission_denied"]) numericCode = @(4006);
         else if ([stringCode isEqualToString:@"task_not_active"]) numericCode = @(4007);

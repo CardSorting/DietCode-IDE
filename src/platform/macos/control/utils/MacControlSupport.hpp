@@ -59,6 +59,8 @@ NSArray<NSDictionary*>* LiteralMatchSpans(const std::string& line, const std::st
 NSString* TextForLineRange(NSArray<NSString*>* lines, NSInteger startLine, NSInteger endLine);
 NSDictionary* TextChunkResponse(NSString* text, NSInteger offset, NSInteger maxBytes);
 BOOL FileIsWithinSearchReadCap(const std::filesystem::path& path);
+NSString* ReadTextFileFromDisk(NSString* path);
+NSString* TextForSearchAtPath(NSString* editorText, NSString* diskPath, NSString** readSourceOut);
 NSString* WordAtOffset(NSString* text, NSInteger offset);
 NSString* RunGitOutput(NSString* cwd, NSArray<NSString*>* args);
 BOOL IsTextBinary(NSString* text);

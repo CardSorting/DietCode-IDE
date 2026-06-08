@@ -19,6 +19,9 @@ SUITES: list[tuple[str, list[str]]] = [
     ("ergonomics", [sys.executable, "scripts/test_ergonomics.py", "--compact"]),
     ("operator_diagnostics", [sys.executable, "scripts/test_operator_diagnostics.py", "--compact"]),
     ("runtime_safety", [sys.executable, "scripts/test_runtime_safety.py", "--compact"]),
+    ("grep_diff_tooling", [sys.executable, "scripts/test_grep_diff_tooling.py", "--compact"]),
+    ("runtime_determinism", [sys.executable, "scripts/test_runtime_determinism.py", "--compact"]),
+    ("transaction_kernel", [sys.executable, "scripts/test_transaction_kernel.py", "--compact"]),
 ]
 
 

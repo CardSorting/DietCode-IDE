@@ -3,10 +3,13 @@
 #import <Foundation/Foundation.h>
 
 @class DietCodeControlWindowBridge;
+@class MacControlWorkspaceState;
 
 @interface MacControlPatchService : NSObject
 
 - (instancetype)initWithWindowBridge:(DietCodeControlWindowBridge*)bridge;
+
+@property (nonatomic, weak) MacControlWorkspaceState* workspaceState;
 
 - (NSDictionary*)applyPatch:(NSDictionary*)params 
                       error:(NSString**)errorOut 

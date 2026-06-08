@@ -374,6 +374,8 @@ DIAGNOSTIC_DOCS = {
     "operatorDiagnostics": "docs/operator-diagnostics.md",
     "runtimeSafety": "docs/runtime-safety.md",
     "operatorPolicy": "docs/operator-policy.md",
+    "agentTooling": "docs/agent-tooling.md",
+    "runtimeInvariants": "docs/runtime-invariants.md",
     "runtimeContracts": "docs/runtime-contracts.md",
     "errorCodes": "docs/error-codes.md",
     "queueContract": "docs/queue-contract.md",
@@ -449,6 +451,7 @@ def build_diagnostic_snapshot(
             "make release-check-agent-runtime",
             "make verify-agent-runtime",
             "make test-runtime-safety",
+            "make test-grep-diff-tooling",
             "make test-operator-diagnostics",
             "python3 scripts/dietcode_agent_client.py --diagnose --json",
             "rg 'RELEASE:|STABILITY:|CONTRACT_VERSION' src/ scripts/ docs/",
@@ -618,6 +621,8 @@ def load_params(args: argparse.Namespace) -> dict[str, Any]:
             params["includeLines"] = True
         if args.max_lines_per_hunk is not None:
             params["maxLinesPerHunk"] = args.max_lines_per_hunk
+        if args.expect_before_hash:
+            params["expectBeforeHash"] = args.expect_before_hash
         return params
 
     sources = [args.params_json is not None, args.params_file is not None, args.params_stdin]
@@ -1136,6 +1141,7 @@ def run_self_test() -> dict[str, Any]:
         hunk_offset=None,
         include_lines=False,
         max_lines_per_hunk=None,
+        expect_before_hash=None,
     )
     patch_args.params_json = "{}"
     try:
@@ -1358,6 +1364,42 @@ def run_self_test() -> dict[str, Any]:
     except Exception:
         versions_ok = False
     checks.append({"name": "release.versions_synced", "ok": versions_ok})
+    try:
+        from agent_contracts import GREP_RESPONSE_KEYS, validate_grep_response
+        from agent_tooling import format_grep_matches_rg, literal_match_spans, parse_unified_diff_hunks
+
+        grep_contract_ok = len(GREP_RESPONSE_KEYS) >= 20
+        spans_ok = len(literal_match_spans("abc", "b")) == 1
+        parse_ok = parse_unified_diff_hunks("").get("totalHunks") == 0
+        rg_fmt_ok = format_grep_matches_rg([{"path": "a", "line": 1, "column": 1, "preview": "x"}]) == "a:1:1:x"
+        schema_ok = not validate_grep_response({
+            "matches": [],
+            "query": "x",
+            "mode": "literal_substring",
+            "caseSensitive": False,
+            "maxResults": 1,
+            "resultOffset": 0,
+            "nextResultOffset": None,
+            "hasMore": False,
+            "truncated": False,
+            "scanLimitReached": False,
+            "scannedFiles": 0,
+            "filesRead": 0,
+            "filesSkippedUnreadable": 0,
+            "filesSkippedBinary": 0,
+            "filesReadFromDisk": 0,
+            "filesReadFromEditor": 0,
+            "filesSkippedOversize": 0,
+            "filesSkippedExcluded": 0,
+            "filesSkippedSymlink": 0,
+            "symlinkPolicy": "skip_never_follow",
+            "sortOrder": "path_line_column",
+            "scanDurationMs": 0,
+        })
+        tooling_ok = grep_contract_ok and spans_ok and parse_ok and rg_fmt_ok and schema_ok
+    except Exception:
+        tooling_ok = False
+    checks.append({"name": "tooling.grep_diff_imports", "ok": tooling_ok})
     configured_workspace = os.environ.get(TEST_WORKSPACE_ENV)
     if configured_workspace:
         checks.append({
@@ -1406,6 +1448,12 @@ def main() -> int:
     parser.add_argument("--params-stdin", action="store_true", help="Read RPC params JSON object from stdin.")
     parser.add_argument("--path", help="Path used with --patch-file or --patch-stdin.")
     parser.add_argument("--grep", help="Call workspace.grep with a literal query.")
+    parser.add_argument(
+        "--grep-format",
+        choices=["json", "rg"],
+        default="json",
+        help="With --grep: json prints RPC result; rg prints path:line:column:preview lines.",
+    )
     parser.add_argument("--search-text", help="Call search.text with a literal query.")
     parser.add_argument("--search-semantic", help="Call search.semantic with a symbol or conceptual query.")
     parser.add_argument("--result-offset", type=int, help="Zero-based result cursor for workspace.grep or search.text.")
@@ -1417,6 +1465,11 @@ def main() -> int:
     parser.add_argument("--exclude", action="append", help="Exclude glob for grep/text search. May be repeated.")
     parser.add_argument("--diff-source", choices=["unstaged", "staged", "file"], help="Call diff.chunk for unstaged, staged, or file diff.")
     parser.add_argument("--diff-hunks", action="store_true", help="Use diff.hunks with --diff-source instead of diff.chunk.")
+    parser.add_argument(
+        "--diff-summary",
+        action="store_true",
+        help="With --diff-hunks: print compact diff_summary JSON instead of full hunk payload.",
+    )
     parser.add_argument("--offset", type=int, help="Byte offset for diff.chunk or patch.chunk.")
     parser.add_argument("--max-bytes", type=int, help="Maximum bytes for diff.chunk or patch.chunk.")
     parser.add_argument("--max-hunks", type=int, help="Maximum hunk summaries for diff.hunks or patch.hunks.")
@@ -1426,6 +1479,15 @@ def main() -> int:
     parser.add_argument("--patch-file", help="Read unified diff patch text from a file.")
     parser.add_argument("--patch-stdin", action="store_true", help="Read unified diff patch text from stdin.")
     parser.add_argument("--patch-hunks", action="store_true", help="Default patch stdin/file calls to patch.hunks instead of patch.validate.")
+    parser.add_argument(
+        "--patch-summary",
+        action="store_true",
+        help="With patch.validate/patch.preview shortcuts: print compact patch_validation_summary JSON.",
+    )
+    parser.add_argument(
+        "--expect-before-hash",
+        help="Set expectBeforeHash on patch.apply (optimistic concurrency guard).",
+    )
     parser.add_argument("--confirm", action="store_true", help="Set confirm=true for patch apply calls.")
     parser.add_argument("--dry-run", dest="dry_run", action="store_true", default=None, help="Set dryRun=true for supported calls.")
     parser.add_argument("--no-dry-run", dest="dry_run", action="store_false", help="Set dryRun=false for supported calls.")
@@ -1631,14 +1693,53 @@ def main() -> int:
                     response = client.raw_call(shortcut_method, shortcut_params, args.request_id)
                 else:
                     response = client.call(shortcut_method, shortcut_params, args.request_id)
+            shortcut_ok = rpc_succeeded(response) if isinstance(response, dict) and "ok" in response else True
             log_rpc_client_diagnostic(
-                response,
+                response if isinstance(response, dict) and "ok" in response else {"ok": shortcut_ok, "id": args.request_id, "result": response},
                 method=shortcut_method,
                 request_id=args.request_id,
                 verbose=args.verbose,
-                error_json=args.error_json,
+                error_json=args.error_json and not shortcut_ok,
                 compact=args.compact,
             )
+            shortcut_result = response.get("result", response) if isinstance(response, dict) and "result" in response else response
+            if shortcut_method == "workspace.grep" and shortcut_ok and isinstance(shortcut_result, dict):
+                from agent_tooling import format_grep_matches_rg, grep_empty_result_hint
+
+                matches = shortcut_result.get("matches", [])
+                if args.grep_format == "rg":
+                    if matches:
+                        print(format_grep_matches_rg(matches))
+                    elif not quiet:
+                        hint = grep_empty_result_hint(shortcut_result)
+                        if hint:
+                            print(hint, file=sys.stderr)
+                    return 0 if matches else 1
+                if not matches and not quiet:
+                    hint = grep_empty_result_hint(shortcut_result)
+                    if hint:
+                        print(hint, file=sys.stderr)
+            if (
+                shortcut_method in ("patch.validate", "patch.preview")
+                and args.patch_summary
+                and shortcut_ok
+                and isinstance(shortcut_result, dict)
+            ):
+                from agent_tooling import format_patch_validation_summary
+
+                validation = shortcut_result.get("validation", shortcut_result)
+                print(json_text(format_patch_validation_summary(validation, path=args.path), compact=args.compact))
+                return 0
+            if (
+                shortcut_method == "diff.hunks"
+                and args.diff_summary
+                and shortcut_ok
+                and isinstance(shortcut_result, dict)
+            ):
+                from agent_tooling import format_diff_hunk_summary
+
+                print(json_text(format_diff_hunk_summary(shortcut_result), compact=args.compact))
+                return 0
             print(json_text(response_for_output(response), compact=args.compact))
             return rpc_exit_code(response, raw_response=args.raw_response)
 
@@ -1661,14 +1762,27 @@ def main() -> int:
                 response = client.raw_call(effective_method, params, args.request_id)
             else:
                 response = client.call(effective_method, params, args.request_id)
+        method_ok = rpc_succeeded(response) if isinstance(response, dict) and "ok" in response else True
         log_rpc_client_diagnostic(
-            response,
+            response if isinstance(response, dict) and "ok" in response else {"ok": method_ok, "id": args.request_id, "result": response},
             method=effective_method,
             request_id=args.request_id,
             verbose=args.verbose,
-            error_json=args.error_json,
+            error_json=args.error_json and not method_ok,
             compact=args.compact,
         )
+        method_result = response.get("result", response) if isinstance(response, dict) and "result" in response else response
+        if (
+            effective_method in ("patch.validate", "patch.preview")
+            and args.patch_summary
+            and method_ok
+            and isinstance(method_result, dict)
+        ):
+            from agent_tooling import format_patch_validation_summary
+
+            validation = method_result.get("validation", method_result)
+            print(json_text(format_patch_validation_summary(validation, path=args.path), compact=args.compact))
+            return 0
         print(json_text(response_for_output(response), compact=args.compact))
         return rpc_exit_code(response, raw_response=args.raw_response)
     except Exception as exc:

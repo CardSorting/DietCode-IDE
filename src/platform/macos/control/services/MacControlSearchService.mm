@@ -18,6 +18,77 @@ using namespace dietcode::platform::macos;
 static const NSInteger kMaxSearchContextLines = 20;
 static const NSInteger kMaxSearchSessionFilesPerPoll = 500;
 
+// POLICY: Symlinks are never followed during workspace search traversal (filesSkippedSymlink).
+static std::vector<std::filesystem::path> CollectSortedSearchFilePaths(
+    const std::string& folder,
+    NSArray* includePatterns,
+    NSArray* excludePatterns,
+    NSInteger* scannedFiles,
+    NSInteger* skippedOversize,
+    NSInteger* skippedExcluded,
+    NSInteger* skippedSymlink) {
+    std::vector<std::filesystem::path> paths;
+    std::error_code ec;
+    std::filesystem::recursive_directory_iterator it(folder, ec);
+    std::filesystem::recursive_directory_iterator end;
+    for (; it != end && !ec; it.increment(ec)) {
+        const auto& entry = *it;
+        std::filesystem::path p = entry.path();
+        std::string filename = p.filename().string();
+        std::string relForDir = std::filesystem::relative(p, folder, ec).string();
+        if (entry.is_symlink(ec)) {
+            (*skippedSymlink)++;
+            it.disable_recursion_pending();
+            continue;
+        }
+        if (entry.is_directory(ec)) {
+            if (it.depth() >= kMaxSearchDepth || ShouldPruneSearchDirectory(p, relForDir, excludePatterns)) {
+                it.disable_recursion_pending();
+            }
+            continue;
+        }
+        if (!entry.is_regular_file(ec)) continue;
+        (*scannedFiles)++;
+        if (*scannedFiles > kMaxSearchScanFiles) break;
+        BOOL skip = NO;
+        for (NSString* ex in excludePatterns) {
+            if (fnmatch([ex UTF8String], relForDir.c_str(), FNM_CASEFOLD) == 0 ||
+                fnmatch([ex UTF8String], filename.c_str(), FNM_CASEFOLD) == 0) {
+                skip = YES;
+                break;
+            }
+        }
+        if (filename == ".git" || filename == "node_modules" || filename == "build") skip = YES;
+        if (skip) {
+            (*skippedExcluded)++;
+            continue;
+        }
+        if (includePatterns.count > 0) {
+            BOOL matchesInclude = NO;
+            for (NSString* inc in includePatterns) {
+                if (fnmatch([inc UTF8String], relForDir.c_str(), FNM_CASEFOLD) == 0 ||
+                    fnmatch([inc UTF8String], filename.c_str(), FNM_CASEFOLD) == 0) {
+                    matchesInclude = YES;
+                    break;
+                }
+            }
+            if (!matchesInclude) {
+                (*skippedExcluded)++;
+                continue;
+            }
+        }
+        if (!FileIsWithinSearchReadCap(p)) {
+            (*skippedOversize)++;
+            continue;
+        }
+        paths.push_back(p);
+    }
+    std::sort(paths.begin(), paths.end(), [](const std::filesystem::path& a, const std::filesystem::path& b) {
+        return a.string() < b.string();
+    });
+    return paths;
+}
+
 @interface MacGrepSession : NSObject
 @property (nonatomic, copy) NSString* searchId;
 @property (nonatomic, copy) NSString* query;
@@ -135,7 +206,7 @@ static const NSInteger kMaxSearchSessionFilesPerPoll = 500;
         session.currentFileIndex++;
         filesProcessed++;
 
-        NSString* readRes = [_windowBridge textForFileAtPath:absPath];
+        NSString* readRes = TextForSearchAtPath([_windowBridge textForFileAtPath:absPath], absPath, nil);
         if (readRes) {
             std::string content = StdStringFromNSString(readRes);
             std::istringstream stream(content);
@@ -238,56 +309,42 @@ static const NSInteger kMaxSearchSessionFilesPerPoll = 500;
     BOOL scanLimitReached = NO;
     NSInteger totalMatchesSeen = 0;
     BOOL hasMore = NO;
+    NSInteger filesRead = 0;
+    NSInteger filesSkippedUnreadable = 0;
+    NSInteger filesSkippedBinary = 0;
+    NSInteger filesReadFromDisk = 0;
+    NSInteger filesReadFromEditor = 0;
+    NSInteger filesSkippedOversize = 0;
+    NSInteger filesSkippedExcluded = 0;
+    NSInteger filesSkippedSymlink = 0;
+    CFAbsoluteTime scanStarted = CFAbsoluteTimeGetCurrent();
     
-    std::error_code ec;
-    std::filesystem::recursive_directory_iterator it(folder, ec);
-    std::filesystem::recursive_directory_iterator end;
     NSInteger scannedFiles = 0;
-    for (; it != end && !ec; it.increment(ec)) {
-        const auto& entry = *it;
+    std::vector<std::filesystem::path> sortedPaths = CollectSortedSearchFilePaths(
+        folder, includePatterns, excludePatterns, &scannedFiles, &filesSkippedOversize, &filesSkippedExcluded, &filesSkippedSymlink);
+    if (scannedFiles > kMaxSearchScanFiles) scanLimitReached = YES;
+    std::error_code ec;
+    for (const auto& p : sortedPaths) {
         if (hasMore) break;
-        std::filesystem::path p = entry.path();
-        std::string filename = p.filename().string();
-        std::string relForDir = std::filesystem::relative(p, folder, ec).string();
-        if (entry.is_directory(ec)) {
-            if (it.depth() >= kMaxSearchDepth || ShouldPruneSearchDirectory(p, relForDir, excludePatterns)) {
-                it.disable_recursion_pending();
-            }
-            continue;
-        }
-        if (entry.is_regular_file()) {
-            if (++scannedFiles > kMaxSearchScanFiles) {
-                scanLimitReached = YES;
-                break;
-            }
-            std::string relPath = relForDir;
-            
-            BOOL skip = false;
-            for (NSString* ex in excludePatterns) {
-                if (fnmatch([ex UTF8String], relPath.c_str(), FNM_CASEFOLD) == 0 ||
-                    fnmatch([ex UTF8String], filename.c_str(), FNM_CASEFOLD) == 0) {
-                    skip = true;
-                    break;
+        std::string relPath = std::filesystem::relative(p, folder, ec).string();
+        if (ec) continue;
+        {
+            NSString* absPath = NSStringFromStdString(p.string());
+            NSString* readSource = nil;
+            NSString* readRes = TextForSearchAtPath([_windowBridge textForFileAtPath:absPath], absPath, &readSource);
+            if (!readRes) {
+                NSString* editorProbe = [_windowBridge textForFileAtPath:absPath];
+                if (editorProbe.length > 0 && IsTextBinary(editorProbe)) {
+                    filesSkippedBinary++;
+                } else {
+                    filesSkippedUnreadable++;
                 }
+                continue;
             }
-            if (filename == ".git" || filename == "node_modules" || filename == "build") skip = true;
-            if (skip) continue;
-            if (!FileIsWithinSearchReadCap(p)) continue;
-            
-            if (includePatterns.count > 0) {
-                BOOL matchesInclude = NO;
-                for (NSString* inc in includePatterns) {
-                    if (fnmatch([inc UTF8String], relPath.c_str(), FNM_CASEFOLD) == 0 ||
-                        fnmatch([inc UTF8String], filename.c_str(), FNM_CASEFOLD) == 0) {
-                        matchesInclude = YES;
-                        break;
-                    }
-                }
-                if (!matchesInclude) continue;
-            }
-            
-            NSString* readRes = [_windowBridge textForFileAtPath:NSStringFromStdString(p.string())];
-            if (readRes) {
+            filesRead++;
+            if ([readSource isEqualToString:@"disk"]) filesReadFromDisk++;
+            else if ([readSource isEqualToString:@"editor"]) filesReadFromEditor++;
+            {
                 NSUInteger currentOffset = 0;
                 std::string content = StdStringFromNSString(readRes);
                 std::istringstream stream(content);
@@ -354,7 +411,18 @@ static const NSInteger kMaxSearchSessionFilesPerPoll = 500;
         @"hasMore": @(hasMore),
         @"truncated": @(truncated || scanLimitReached),
         @"scanLimitReached": @(scanLimitReached),
-        @"scannedFiles": @(MIN(scannedFiles, kMaxSearchScanFiles))
+        @"scannedFiles": @(MIN(scannedFiles, kMaxSearchScanFiles)),
+        @"filesRead": @(filesRead),
+        @"filesSkippedUnreadable": @(filesSkippedUnreadable),
+        @"filesSkippedBinary": @(filesSkippedBinary),
+        @"filesReadFromDisk": @(filesReadFromDisk),
+        @"filesReadFromEditor": @(filesReadFromEditor),
+        @"filesSkippedOversize": @(filesSkippedOversize),
+        @"filesSkippedExcluded": @(filesSkippedExcluded),
+        @"filesSkippedSymlink": @(filesSkippedSymlink),
+        @"symlinkPolicy": @"skip_never_follow",
+        @"sortOrder": @"path_line_column",
+        @"scanDurationMs": @((NSInteger)round((CFAbsoluteTimeGetCurrent() - scanStarted) * 1000.0))
     };
 }
 
@@ -454,33 +522,39 @@ static const NSInteger kMaxSearchSessionFilesPerPoll = 500;
     std::string needle = StdStringFromNSString(query);
     NSMutableArray* results = [NSMutableArray array];
     std::error_code ec;
-    NSInteger scannedFiles = 0;
     BOOL truncated = NO;
     BOOL scanLimitReached = NO;
     NSInteger totalMatchesSeen = 0;
     BOOL hasMore = NO;
-    std::filesystem::recursive_directory_iterator it(folder, ec);
-    std::filesystem::recursive_directory_iterator end;
-    for (; it != end && !ec; it.increment(ec)) {
-        const auto& entry = *it;
+    NSInteger filesRead = 0;
+    NSInteger filesSkippedUnreadable = 0;
+    NSInteger filesSkippedBinary = 0;
+    NSInteger filesReadFromDisk = 0;
+    NSInteger filesReadFromEditor = 0;
+    NSInteger filesSkippedOversize = 0;
+    NSInteger filesSkippedExcluded = 0;
+    NSInteger filesSkippedSymlink = 0;
+    CFAbsoluteTime scanStarted = CFAbsoluteTimeGetCurrent();
+    NSInteger scannedFiles = 0;
+    std::vector<std::filesystem::path> sortedPaths = CollectSortedSearchFilePaths(
+        folder, includes, excludes, &scannedFiles, &filesSkippedOversize, &filesSkippedExcluded, &filesSkippedSymlink);
+    if (scannedFiles > kMaxSearchScanFiles) scanLimitReached = YES;
+    for (const auto& p : sortedPaths) {
         if (hasMore) break;
-        std::filesystem::path p = entry.path();
         std::string relPath = std::filesystem::relative(p, folder, ec).string();
-        if (entry.is_directory(ec)) {
-            if (it.depth() >= kMaxSearchDepth || ShouldPruneSearchDirectory(p, relPath, excludes)) {
-                it.disable_recursion_pending();
-            }
+        if (ec) continue;
+        NSString* absPath = NSStringFromStdString(p.string());
+        NSString* readSource = nil;
+        NSString* text = TextForSearchAtPath([_windowBridge textForFileAtPath:absPath], absPath, &readSource);
+        if (!text) {
+            NSString* editorProbe = [_windowBridge textForFileAtPath:absPath];
+            if (editorProbe.length > 0 && IsTextBinary(editorProbe)) filesSkippedBinary++;
+            else filesSkippedUnreadable++;
             continue;
         }
-        if (!entry.is_regular_file()) continue;
-        if (++scannedFiles > kMaxSearchScanFiles) {
-            scanLimitReached = YES;
-            break;
-        }
-        if (ShouldSkipSearchPath(p, relPath, includes, excludes)) continue;
-        if (!FileIsWithinSearchReadCap(p)) continue;
-        NSString* text = [_windowBridge textForFileAtPath:NSStringFromStdString(p.string())];
-        if (!text) continue;
+        filesRead++;
+        if ([readSource isEqualToString:@"disk"]) filesReadFromDisk++;
+        else if ([readSource isEqualToString:@"editor"]) filesReadFromEditor++;
         std::vector<std::string> lines;
         std::istringstream stream(StdStringFromNSString(text));
         std::string line;
@@ -523,7 +597,18 @@ static const NSInteger kMaxSearchSessionFilesPerPoll = 500;
         @"hasMore": @(hasMore),
         @"truncated": @(truncated || scanLimitReached),
         @"scanLimitReached": @(scanLimitReached),
-        @"scannedFiles": @(MIN(scannedFiles, kMaxSearchScanFiles))
+        @"scannedFiles": @(MIN(scannedFiles, kMaxSearchScanFiles)),
+        @"filesRead": @(filesRead),
+        @"filesSkippedUnreadable": @(filesSkippedUnreadable),
+        @"filesSkippedBinary": @(filesSkippedBinary),
+        @"filesReadFromDisk": @(filesReadFromDisk),
+        @"filesReadFromEditor": @(filesReadFromEditor),
+        @"filesSkippedOversize": @(filesSkippedOversize),
+        @"filesSkippedExcluded": @(filesSkippedExcluded),
+        @"filesSkippedSymlink": @(filesSkippedSymlink),
+        @"symlinkPolicy": @"skip_never_follow",
+        @"sortOrder": @"path_line_column",
+        @"scanDurationMs": @((NSInteger)round((CFAbsoluteTimeGetCurrent() - scanStarted) * 1000.0))
     };
 }
 
@@ -536,70 +621,103 @@ static const NSInteger kMaxSearchSessionFilesPerPoll = 500;
         *outErrMsg = @"No open workspace.";
         return nil;
     }
-    NSMutableDictionary* todoParams = [params mutableCopy] ?: [NSMutableDictionary dictionary];
-    todoParams[@"query"] = @"TODO";
     NSArray* markers = @[@"TODO", @"FIXME", @"HACK", @"NOTE"];
-    NSMutableArray* all = [NSMutableArray array];
-    NSInteger requestedMax = params[@"maxResults"] ? [params[@"maxResults"] integerValue] : 100;
-    if (requestedMax <= 0) {
+    NSInteger maxResults = params[@"maxResults"] ? [params[@"maxResults"] integerValue] : 100;
+    if (maxResults <= 0) {
         *outErrCode = @"invalid_params";
         *outErrMsg = @"maxResults must be greater than zero.";
         return nil;
     }
-    if (requestedMax > kMaxGrepResults) {
+    if (maxResults > kMaxGrepResults) {
         *outErrCode = @"too_many_results";
         *outErrMsg = [NSString stringWithFormat:@"maxResults exceeds limit of %ld.", (long)kMaxGrepResults];
         return nil;
     }
-    for (NSString* marker in markers) {
-        NSMutableDictionary* markerParams = [todoParams mutableCopy];
-        markerParams[@"query"] = marker;
-        markerParams[@"maxResults"] = @(requestedMax);
-        NSDictionary* subParams = markerParams;
-        NSString* ws = workspace;
-        NSInteger maxResults = [subParams[@"maxResults"] integerValue];
-        std::string folder = StdStringFromNSString(ws);
-        NSArray* includes = subParams[@"include"] ?: @[];
-        NSArray* excludes = subParams[@"exclude"] ?: @[];
-        std::string needle = StdStringFromNSString([marker lowercaseString]);
-        std::error_code ec;
-        NSInteger scannedFiles = 0;
-        std::filesystem::recursive_directory_iterator it(folder, ec);
-        std::filesystem::recursive_directory_iterator end;
-        for (; it != end && !ec; it.increment(ec)) {
-            const auto& entry = *it;
-            if (all.count >= (NSUInteger)maxResults) break;
-            std::filesystem::path p = entry.path();
-            std::string relPath = std::filesystem::relative(p, folder, ec).string();
-            if (entry.is_directory(ec)) {
-                if (it.depth() >= kMaxSearchDepth || ShouldPruneSearchDirectory(p, relPath, excludes)) {
-                    it.disable_recursion_pending();
-                }
-                continue;
+    NSArray* includes = params[@"include"] ?: @[];
+    NSArray* excludes = params[@"exclude"] ?: @[];
+    std::string folder = StdStringFromNSString(workspace);
+    NSMutableArray* all = [NSMutableArray array];
+    BOOL truncated = NO;
+    BOOL scanLimitReached = NO;
+    NSInteger filesRead = 0;
+    NSInteger filesSkippedUnreadable = 0;
+    NSInteger filesSkippedBinary = 0;
+    NSInteger filesReadFromDisk = 0;
+    NSInteger filesReadFromEditor = 0;
+    NSInteger filesSkippedOversize = 0;
+    NSInteger filesSkippedExcluded = 0;
+    NSInteger filesSkippedSymlink = 0;
+    CFAbsoluteTime scanStarted = CFAbsoluteTimeGetCurrent();
+    NSInteger scannedFiles = 0;
+    std::vector<std::filesystem::path> sortedPaths = CollectSortedSearchFilePaths(
+        folder, includes, excludes, &scannedFiles, &filesSkippedOversize, &filesSkippedExcluded, &filesSkippedSymlink);
+    if (scannedFiles > kMaxSearchScanFiles) scanLimitReached = YES;
+    std::error_code ec;
+    for (const auto& p : sortedPaths) {
+        if (all.count >= (NSUInteger)maxResults) {
+            truncated = YES;
+            break;
+        }
+        std::string relPath = std::filesystem::relative(p, folder, ec).string();
+        if (ec) continue;
+        NSString* absPath = NSStringFromStdString(p.string());
+        NSString* readSource = nil;
+        NSString* text = TextForSearchAtPath([_windowBridge textForFileAtPath:absPath], absPath, &readSource);
+        if (!text) {
+            NSString* editorProbe = [_windowBridge textForFileAtPath:absPath];
+            if (editorProbe.length > 0 && IsTextBinary(editorProbe)) filesSkippedBinary++;
+            else filesSkippedUnreadable++;
+            continue;
+        }
+        filesRead++;
+        if ([readSource isEqualToString:@"disk"]) filesReadFromDisk++;
+        else if ([readSource isEqualToString:@"editor"]) filesReadFromEditor++;
+        NSArray<NSString*>* lines = LinesFromText(text);
+        for (NSUInteger i = 0; i < lines.count; i++) {
+            if (all.count >= (NSUInteger)maxResults) {
+                truncated = YES;
+                break;
             }
-            if (!entry.is_regular_file()) continue;
-            if (++scannedFiles > kMaxSearchScanFiles) break;
-            if (ShouldSkipSearchPath(p, relPath, includes, excludes)) continue;
-            if (!FileIsWithinSearchReadCap(p)) continue;
-            NSString* text = [_windowBridge textForFileAtPath:NSStringFromStdString(p.string())];
-            if (!text) continue;
-            NSArray<NSString*>* lines = LinesFromText(text);
-            for (NSUInteger i = 0; i < lines.count; i++) {
-                NSString* lower = [lines[i] lowercaseString];
-                NSRange r = [lower rangeOfString:NSStringFromStdString(needle)];
+            NSString* lower = [lines[i] lowercaseString];
+            for (NSString* marker in markers) {
+                NSRange r = [lower rangeOfString:[marker lowercaseString]];
                 if (r.location == NSNotFound) continue;
                 [all addObject:@{
+                    @"resultIndex": @(all.count),
                     @"path": NSStringFromStdString(relPath),
                     @"line": @(i + 1),
                     @"column": @(r.location + 1),
                     @"marker": marker,
-                    @"preview": lines[i]
+                    @"preview": lines[i],
+                    @"lineSha256": StableHashForString(lines[i])
                 }];
-                if (all.count >= (NSUInteger)maxResults) break;
+                if (all.count >= (NSUInteger)maxResults) {
+                    truncated = YES;
+                    break;
+                }
             }
         }
     }
-    return @{ @"results": all };
+    return @{
+        @"results": all,
+        @"mode": @"literal_marker_scan",
+        @"markers": markers,
+        @"maxResults": @(maxResults),
+        @"truncated": @(truncated || scanLimitReached),
+        @"scanLimitReached": @(scanLimitReached),
+        @"scannedFiles": @(MIN(scannedFiles, kMaxSearchScanFiles)),
+        @"filesRead": @(filesRead),
+        @"filesSkippedUnreadable": @(filesSkippedUnreadable),
+        @"filesSkippedBinary": @(filesSkippedBinary),
+        @"filesReadFromDisk": @(filesReadFromDisk),
+        @"filesReadFromEditor": @(filesReadFromEditor),
+        @"filesSkippedOversize": @(filesSkippedOversize),
+        @"filesSkippedExcluded": @(filesSkippedExcluded),
+        @"filesSkippedSymlink": @(filesSkippedSymlink),
+        @"symlinkPolicy": @"skip_never_follow",
+        @"sortOrder": @"path_line_column",
+        @"scanDurationMs": @((NSInteger)round((CFAbsoluteTimeGetCurrent() - scanStarted) * 1000.0))
+    };
 }
 
 - (NSDictionary*)searchSemantic:(NSDictionary*)params 

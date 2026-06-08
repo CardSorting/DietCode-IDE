@@ -1,0 +1,4 @@
+--- broken.py
++++ broken.py
+this is not a valid unified diff hunk header
++line without context

@@ -219,6 +219,9 @@ Integration scripts resolve the workspace from `DIETCODE_TEST_WORKSPACE`, then t
 | Flag | Purpose |
 |------|---------|
 | `--grep QUERY` | `workspace.grep` literal substring scan |
+| `--grep-format rg` | ripgrep-style `path:line:column:preview` lines (exit 1 when no matches) |
+| `--diff-summary` | Compact `diff_summary` JSON with `--diff-hunks` |
+| `--patch-summary` | Compact `patch_validation_summary` JSON for patch.validate/preview |
 | `--search-text QUERY` | `search.text` with optional `--before` / `--after` |
 | `--diff-source` + `--diff-hunks` | Structured unified diff hunks |
 | `--patch-stdin` / `--patch-file` | Route to `patch.validate` or `patch.hunks` |

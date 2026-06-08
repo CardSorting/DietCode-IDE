@@ -5,6 +5,7 @@
 #import "MacControlRecoveryStore.hpp"
 #import "MacControlSearchService.hpp"
 #import "MacControlPatchService.hpp"
+#import "MacControlWorkspaceState.hpp"
 #import "MacControlTaskRuntime.hpp"
 #import "MacControlComboRuntime.hpp"
 
@@ -16,6 +17,7 @@
     MacControlRecoveryStore* _recoveryStore;
     MacControlSearchService* _searchService;
     MacControlPatchService* _patchService;
+    MacControlWorkspaceState* _workspaceState;
     MacControlTaskRuntime* _taskRuntime;
     MacControlComboRuntime* _comboRuntime;
     int _serverFd;

@@ -1,4 +1,5 @@
 #import "MacControlPatchService.hpp"
+#import "MacControlWorkspaceState.hpp"
 #import "MacControlWindowBridge.hpp"
 #import "MacControlSupport.hpp"
 #import "MacControlPathSecurity.hpp"
@@ -6,10 +7,12 @@
 #import "MacControlDiffParsing.hpp"
 #import "SymbolIndexService.hpp"
 #import "DiffAnalysisService.hpp"
+#import "SubprocessRunner.hpp"
 
 #include <filesystem>
 #include <string>
 #include <vector>
+#include <unistd.h>
 
 static NSString* DietCodeReadTextFileForPatchService(NSString* path) {
     if (path.length == 0) return nil;
@@ -17,6 +20,48 @@ static NSString* DietCodeReadTextFileForPatchService(NSString* path) {
     NSError* error = nil;
     NSString* text = [NSString stringWithContentsOfFile:path usedEncoding:&encoding error:&error];
     return text;
+}
+
+static BOOL ApplyUnifiedPatchToDisk(NSString* absPath, NSString* beforeText, NSString* patchStr, NSString** errorOut) {
+    if (absPath.length == 0 || beforeText == nil || patchStr.length == 0) {
+        if (errorOut) *errorOut = @"Invalid patch apply inputs.";
+        return NO;
+    }
+    NSString* tempDir = NSTemporaryDirectory() ?: @"/tmp";
+    NSString* uuidStr = [[NSUUID UUID] UUIDString];
+    NSString* tempSrcPath = [tempDir stringByAppendingPathComponent:[NSString stringWithFormat:@"dietcode_apply_src_%@.txt", uuidStr]];
+    NSString* tempDiffPath = [tempDir stringByAppendingPathComponent:[NSString stringWithFormat:@"dietcode_apply_diff_%@.diff", uuidStr]];
+    NSError* err = nil;
+    unlink([tempSrcPath UTF8String]);
+    [beforeText writeToFile:tempSrcPath atomically:YES encoding:NSUTF8StringEncoding error:&err];
+    if (err) {
+        if (errorOut) *errorOut = [NSString stringWithFormat:@"Failed to write temp source: %@", err.localizedDescription];
+        return NO;
+    }
+    unlink([tempDiffPath UTF8String]);
+    [patchStr writeToFile:tempDiffPath atomically:YES encoding:NSUTF8StringEncoding error:&err];
+    if (err) {
+        [[NSFileManager defaultManager] removeItemAtPath:tempSrcPath error:nil];
+        if (errorOut) *errorOut = [NSString stringWithFormat:@"Failed to write temp patch: %@", err.localizedDescription];
+        return NO;
+    }
+    std::vector<std::string> patchArgs = {"--silent", [tempSrcPath UTF8String], [tempDiffPath UTF8String]};
+    dietcode::platform::macos::SubprocessResult patchRes = dietcode::platform::macos::SubprocessRunner::run("/usr/bin/patch", patchArgs, "", 10.0);
+    NSString* patchedText = [NSString stringWithContentsOfFile:tempSrcPath encoding:NSUTF8StringEncoding error:nil];
+    [[NSFileManager defaultManager] removeItemAtPath:tempSrcPath error:nil];
+    [[NSFileManager defaultManager] removeItemAtPath:tempDiffPath error:nil];
+    if (patchRes.exitCode != 0 || !patchedText) {
+        if (errorOut) {
+            *errorOut = [NSString stringWithFormat:@"Disk patch failed: %s", patchRes.stdErr.c_str()];
+        }
+        return NO;
+    }
+    [patchedText writeToFile:absPath atomically:YES encoding:NSUTF8StringEncoding error:&err];
+    if (err) {
+        if (errorOut) *errorOut = [NSString stringWithFormat:@"Failed to write patched file: %@", err.localizedDescription];
+        return NO;
+    }
+    return YES;
 }
 
 @implementation MacControlPatchService {
@@ -79,14 +124,22 @@ static NSString* DietCodeReadTextFileForPatchService(NSString* path) {
         return result;
     }
 
-    NSString* currentText = currentTextOverride ?: [_windowBridge textForFileAtPath:targetPath];
+    NSString* readSource = nil;
+    NSString* currentText = currentTextOverride;
+    if (!currentText) {
+        currentText = TextForSearchAtPath([_windowBridge textForFileAtPath:targetPath], targetPath, &readSource);
+    }
     if (!currentText) {
         currentText = DietCodeReadTextFileForPatchService(targetPath);
+        if (currentText) readSource = @"disk";
     }
     if (!currentText) {
         result[@"rejectedReason"] = @"Target file is not readable.";
         return result;
     }
+    result[@"beforeContentHash"] = StableHashForString(currentText);
+    result[@"patchFingerprint"] = StableHashForString(patch ?: @"");
+    result[@"readSource"] = readSource ?: @"disk";
 
     NSArray* symbols = [DietCodeSymbolIndexService symbolsForFileContent:currentText extension:[[targetPath pathExtension] lowercaseString]];
     NSDictionary* preview = [DietCodeDiffAnalysisService previewPatchAtPath:targetPath patch:patch currentText:currentText symbols:symbols];
@@ -134,34 +187,67 @@ static NSString* DietCodeReadTextFileForPatchService(NSString* path) {
         if (errorOut) *errorOut = @"path and patch parameters required.";
         return nil;
     }
-    
-    NSDictionary* validation = [self validatePatchAtPath:targetPath patch:patchStr currentText:nil options:params];
+
+    NSString* ws = [_windowBridge workspacePath];
+    NSString* absPath = AbsolutePathForRPCPath(targetPath, ws);
+    NSString* idempotencyKey = params[@"idempotencyKey"];
+    if (_workspaceState && idempotencyKey.length > 0) {
+        NSDictionary* prior = [_workspaceState operationStatusForKey:idempotencyKey];
+        if ([prior[@"status"] isEqualToString:@"completed"]) {
+            return @{
+                @"patched": @YES,
+                @"path": absPath,
+                @"mutationReceipt": prior[@"mutationReceipt"] ?: @{},
+                @"revisionBefore": prior[@"revisionBefore"] ?: @(_workspaceState.revisionId),
+                @"revisionAfter": prior[@"revisionAfter"] ?: @(_workspaceState.revisionId),
+                @"idempotentReplay": @YES
+            };
+        }
+    }
+    NSString* expectBeforeHash = params[@"expectBeforeHash"];
+    NSString* readSourceBefore = nil;
+    NSString* beforeText = TextForSearchAtPath([_windowBridge textForFileAtPath:absPath], absPath, &readSourceBefore);
+    if (!beforeText) beforeText = DietCodeReadTextFileForPatchService(absPath);
+    NSString* beforeHash = StableHashForString(beforeText ?: @"");
+    if (expectBeforeHash.length > 0 && ![expectBeforeHash isEqualToString:beforeHash]) {
+        if (errorCodeOut) *errorCodeOut = @"stale_content";
+        if (errorOut) *errorOut = @"Target file content changed since validation (expectBeforeHash mismatch).";
+        return nil;
+    }
+
+    NSDictionary* validation = [self validatePatchAtPath:targetPath patch:patchStr currentText:beforeText options:params];
     if (![validation[@"ok"] boolValue]) {
         if (errorCodeOut) *errorCodeOut = @"patch_failed";
         if (errorOut) *errorOut = validation[@"rejectedReason"] ?: @"Patch validation failed.";
         return nil;
     }
-    
+
     if ([validation[@"requiresConfirmation"] boolValue] && ![params[@"confirm"] boolValue]) {
         if (errorCodeOut) *errorCodeOut = @"confirmation_required";
         if (errorOut) *errorOut = @"Patch requires confirmation.";
         return nil;
     }
-    
-    NSString* ws = [_windowBridge workspacePath];
-    NSString* absPath = AbsolutePathForRPCPath(targetPath, ws);
-    NSString* beforeText = [_windowBridge textForFileAtPath:absPath];
-    if (!beforeText) beforeText = DietCodeReadTextFileForPatchService(absPath);
-    
-    NSString* errStr = nil;
-    BOOL ok = [_windowBridge applyPatchAtPath:absPath patchString:patchStr errorOut:&errStr];
-    if (!ok) {
-        if (errorCodeOut) *errorCodeOut = @"patch_failed";
-        if (errorOut) *errorOut = errStr ?: @"Unknown patch application error.";
+
+    NSString* validationBeforeHash = validation[@"beforeContentHash"];
+    if (validationBeforeHash.length > 0 && ![validationBeforeHash isEqualToString:beforeHash]) {
+        if (errorCodeOut) *errorCodeOut = @"stale_content";
+        if (errorOut) *errorOut = @"Target file content drifted between validation and apply.";
         return nil;
     }
     
-    NSString* afterText = [_windowBridge textForFileAtPath:absPath];
+    NSString* errStr = nil;
+    BOOL appliedViaEditor = [_windowBridge applyPatchAtPath:absPath patchString:patchStr errorOut:&errStr];
+    NSString* applyChannel = @"editor";
+    if (!appliedViaEditor) {
+        if (!ApplyUnifiedPatchToDisk(absPath, beforeText, patchStr, &errStr)) {
+            if (errorCodeOut) *errorCodeOut = @"patch_failed";
+            if (errorOut) *errorOut = errStr ?: @"Unknown patch application error.";
+            return nil;
+        }
+        applyChannel = @"disk";
+    }
+    
+    NSString* afterText = TextForSearchAtPath([_windowBridge textForFileAtPath:absPath], absPath, nil);
     if (!afterText) afterText = DietCodeReadTextFileForPatchService(absPath);
     if (!afterText) afterText = @"";
     [_lastPatchRecords removeAllObjects];
@@ -172,7 +258,38 @@ static NSString* DietCodeReadTextFileForPatchService(NSString* path) {
         @"postHash": StableHashForString(afterText)
     }];
     
-    return @{ @"patched": @YES, @"path": absPath, @"validation": validation };
+    NSString* postHash = StableHashForString(afterText);
+    NSDictionary* mutationReceipt = @{
+        @"path": absPath,
+        @"beforeContentHash": beforeHash,
+        @"postContentHash": postHash,
+        @"patchFingerprint": StableHashForString(patchStr ?: @""),
+        @"readSourceBefore": readSourceBefore ?: @"disk",
+        @"applyChannel": applyChannel,
+        @"atomic": @YES
+    };
+    if (_workspaceState) {
+        NSInteger revisionBefore = _workspaceState.revisionId;
+        [_workspaceState recordAgentMutationWithReceipt:mutationReceipt
+                                           changedPaths:@[targetPath]
+                                         idempotencyKey:idempotencyKey
+                                         revisionBefore:revisionBefore];
+        [_workspaceState trackHashesForPaths:@[targetPath] workspace:ws windowBridge:_windowBridge];
+        return @{
+            @"patched": @YES,
+            @"path": absPath,
+            @"validation": validation,
+            @"mutationReceipt": mutationReceipt,
+            @"revisionBefore": @(revisionBefore),
+            @"revisionAfter": @(_workspaceState.revisionId)
+        };
+    }
+    return @{
+        @"patched": @YES,
+        @"path": absPath,
+        @"validation": validation,
+        @"mutationReceipt": mutationReceipt
+    };
 }
 
 - (NSDictionary*)applyPatchBatch:(NSDictionary*)params 
@@ -180,10 +297,26 @@ static NSString* DietCodeReadTextFileForPatchService(NSString* path) {
                        errorCode:(NSString**)errorCodeOut {
     NSArray* patches = params[@"patches"];
     BOOL dryRun = params[@"dryRun"] ? [params[@"dryRun"] boolValue] : YES;
+    NSString* idempotencyKey = params[@"idempotencyKey"];
     if (![patches isKindOfClass:[NSArray class]] || patches.count == 0) {
         if (errorCodeOut) *errorCodeOut = @"invalid_params";
         if (errorOut) *errorOut = @"patches array required.";
         return nil;
+    }
+
+    if (_workspaceState && idempotencyKey.length > 0) {
+        NSDictionary* prior = [_workspaceState operationStatusForKey:idempotencyKey];
+        if ([prior[@"status"] isEqualToString:@"completed"]) {
+            return @{
+                @"dryRun": @NO,
+                @"applied": @YES,
+                @"results": @[],
+                @"batchMutationReceipt": prior[@"batchMutationReceipt"] ?: @{},
+                @"revisionBefore": prior[@"revisionBefore"] ?: @(_workspaceState.revisionId),
+                @"revisionAfter": prior[@"revisionAfter"] ?: @(_workspaceState.revisionId),
+                @"idempotentReplay": @YES
+            };
+        }
     }
     
     if (patches.count > (NSUInteger)kMaxBatchPatchCount) {
@@ -206,6 +339,7 @@ static NSString* DietCodeReadTextFileForPatchService(NSString* path) {
         }
         NSString* relPath = item[@"path"];
         NSString* patchStr = item[@"patch"];
+        NSString* expectBeforeHash = item[@"expectBeforeHash"];
         if (relPath.length == 0 || patchStr.length == 0) {
             if (errorCodeOut) *errorCodeOut = @"invalid_params";
             if (errorOut) *errorOut = @"Each batch patch requires path and patch.";
@@ -213,15 +347,36 @@ static NSString* DietCodeReadTextFileForPatchService(NSString* path) {
         }
         NSString* absPath = AbsolutePathForRPCPath(relPath, ws);
         combinedBytes += [patchStr lengthOfBytesUsingEncoding:NSUTF8StringEncoding];
-        NSDictionary* validation = [self validatePatchAtPath:absPath patch:patchStr currentText:nil options:params];
-        if ([validation[@"requiresConfirmation"] boolValue]) needsConfirm = YES;
-        [results addObject:@{ @"path": absPath ?: @"", @"validation": validation }];
-        if (![validation[@"ok"] boolValue]) {
-            return @{ @"dryRun": @(dryRun), @"applied": @NO, @"results": results };
-        }
-        NSString* beforeText = [_windowBridge textForFileAtPath:absPath];
+        NSString* readSourceBefore = nil;
+        NSString* beforeText = TextForSearchAtPath([_windowBridge textForFileAtPath:absPath], absPath, &readSourceBefore);
         if (!beforeText) beforeText = DietCodeReadTextFileForPatchService(absPath);
-        [records addObject:@{ @"path": absPath ?: @"", @"beforeText": beforeText ?: @"", @"beforeHash": StableHashForString(beforeText ?: @""), @"patch": patchStr ?: @"" }];
+        NSString* beforeHash = StableHashForString(beforeText ?: @"");
+        if (expectBeforeHash.length > 0 && ![expectBeforeHash isEqualToString:beforeHash]) {
+            if (errorCodeOut) *errorCodeOut = @"stale_content";
+            if (errorOut) *errorOut = [NSString stringWithFormat:@"Stale content for %@ (expectBeforeHash mismatch).", relPath];
+            return nil;
+        }
+        NSDictionary* validation = [self validatePatchAtPath:relPath patch:patchStr currentText:beforeText options:params];
+        if ([validation[@"requiresConfirmation"] boolValue]) needsConfirm = YES;
+        [results addObject:@{ @"path": relPath, @"validation": validation }];
+        if (![validation[@"ok"] boolValue]) {
+            return @{
+                @"dryRun": @(dryRun),
+                @"applied": @NO,
+                @"atomic": @YES,
+                @"mutationAttempted": @NO,
+                @"results": results
+            };
+        }
+        [records addObject:@{
+            @"relPath": relPath,
+            @"path": absPath ?: @"",
+            @"beforeText": beforeText ?: @"",
+            @"beforeHash": beforeHash,
+            @"patch": patchStr ?: @"",
+            @"readSourceBefore": readSourceBefore ?: @"disk",
+            @"patchFingerprint": StableHashForString(patchStr ?: @"")
+        }];
     }
     
     if ((combinedBytes > kMaxPatchBytesBeforeConfirmation || needsConfirm) && ![params[@"confirm"] boolValue]) {
@@ -231,32 +386,88 @@ static NSString* DietCodeReadTextFileForPatchService(NSString* path) {
     }
     
     if (dryRun) {
-        return @{ @"dryRun": @YES, @"applied": @NO, @"results": results };
+        return @{
+            @"dryRun": @YES,
+            @"applied": @NO,
+            @"atomic": @YES,
+            @"mutationAttempted": @NO,
+            @"results": results
+        };
     }
     
     NSMutableArray* applied = [NSMutableArray array];
+    NSMutableArray* fileReceipts = [NSMutableArray array];
+    NSMutableArray* changedRelPaths = [NSMutableArray array];
+    NSInteger revisionBefore = _workspaceState ? _workspaceState.revisionId : 0;
     for (NSDictionary* record in records) {
         NSString* errStr = nil;
+        NSString* applyChannel = @"editor";
         BOOL ok = [_windowBridge applyPatchAtPath:record[@"path"] patchString:record[@"patch"] errorOut:&errStr];
         if (!ok) {
-            NSString* restoreErr = nil;
-            [self restorePatchRecords:applied error:&restoreErr];
-            if (errorCodeOut) *errorCodeOut = @"patch_failed";
-            if (errorOut) *errorOut = errStr ?: restoreErr ?: @"Batch patch failed.";
-            return nil;
+            if (!ApplyUnifiedPatchToDisk(record[@"path"], record[@"beforeText"], record[@"patch"], &errStr)) {
+                NSString* restoreErr = nil;
+                BOOL rolledBack = [self restorePatchRecords:applied error:&restoreErr];
+                if (errorCodeOut) *errorCodeOut = @"patch_failed";
+                if (errorOut) {
+                    NSString* detail = rolledBack ? @"Batch patch failed; prior files rolled back." : @"Batch patch failed; rollback incomplete.";
+                    *errorOut = errStr ?: restoreErr ?: detail;
+                }
+                return nil;
+            }
+            applyChannel = @"disk";
         }
         NSMutableDictionary* appliedRecord = [record mutableCopy];
-        NSString* afterText = [_windowBridge textForFileAtPath:record[@"path"]];
+        NSString* afterText = TextForSearchAtPath([_windowBridge textForFileAtPath:record[@"path"]], record[@"path"], nil);
         if (!afterText) afterText = DietCodeReadTextFileForPatchService(record[@"path"]);
         if (!afterText) afterText = @"";
-        appliedRecord[@"postHash"] = StableHashForString(afterText);
+        NSString* postHash = StableHashForString(afterText);
+        appliedRecord[@"postHash"] = postHash;
         [applied addObject:appliedRecord];
+        [changedRelPaths addObject:record[@"relPath"]];
+        [fileReceipts addObject:@{
+            @"path": record[@"path"],
+            @"beforeContentHash": record[@"beforeHash"],
+            @"postContentHash": postHash,
+            @"patchFingerprint": record[@"patchFingerprint"],
+            @"readSourceBefore": record[@"readSourceBefore"],
+            @"applyChannel": applyChannel,
+            @"atomic": @YES
+        }];
     }
     
     [_lastPatchRecords removeAllObjects];
     [_lastPatchRecords addObjectsFromArray:applied];
-    
-    return @{ @"dryRun": @NO, @"applied": @YES, @"results": results };
+
+    NSDictionary* batchReceipt = @{
+        @"atomic": @YES,
+        @"appliedCount": @(applied.count),
+        @"rolledBack": @NO,
+        @"fileReceipts": fileReceipts,
+        @"rollbackProof": @{ @"verified": @YES, @"restoredFileCount": @0 }
+    };
+    if (_workspaceState) {
+        [_workspaceState recordBatchMutationWithReceipt:batchReceipt
+                                          changedPaths:changedRelPaths
+                                        idempotencyKey:idempotencyKey
+                                        revisionBefore:revisionBefore];
+        [_workspaceState trackHashesForPaths:changedRelPaths workspace:ws windowBridge:_windowBridge];
+    }
+
+    NSMutableDictionary* response = [@{
+        @"dryRun": @NO,
+        @"applied": @YES,
+        @"atomic": @YES,
+        @"mutationAttempted": @YES,
+        @"partialApply": @NO,
+        @"rolledBack": @NO,
+        @"results": results,
+        @"batchMutationReceipt": batchReceipt
+    } mutableCopy];
+    if (_workspaceState) {
+        response[@"revisionBefore"] = @(revisionBefore);
+        response[@"revisionAfter"] = @(_workspaceState.revisionId);
+    }
+    return response;
 }
 
 - (NSDictionary*)revertLastPatchWithError:(NSString**)errorOut 
