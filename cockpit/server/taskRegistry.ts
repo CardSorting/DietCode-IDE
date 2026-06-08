@@ -1,6 +1,6 @@
 import { nextSessionTaskId, persistActiveTasks } from './sessionStore.js';
 
-export type TaskMode = 'supervised' | 'trusted';
+export type TaskMode = 'supervised' | 'trusted' | 'smoke';
 
 export type VerificationState =
   | 'none'

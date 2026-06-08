@@ -39,6 +39,14 @@ export function noteWorkspaceMutated(
     lastVerifyCommand: task.lastVerifyCommand ?? suggestedVerify,
   });
 
+  if (incoming.length > 0) {
+    emitBridgeEvent('workspace.mutated', `Mutated ${incoming.join(', ')}`, {
+      taskId: resolvedId,
+      changedPaths: incoming,
+      method: payload.method ?? 'patch.apply',
+    });
+  }
+
   if (next && next.status !== 'verification_required') {
     emitBridgeEvent('task.verification_required', 'Workspace mutated — verification required', {
       taskId: resolvedId,

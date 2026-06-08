@@ -2,7 +2,7 @@ import { createServer, type IncomingMessage, type ServerResponse } from 'node:ht
 import { readFile } from 'node:fs/promises';
 import net from 'node:net';
 import { homedir } from 'node:os';
-import { join } from 'node:path';
+import { join, relative, resolve, sep } from 'node:path';
 import { randomUUID } from 'node:crypto';
 
 import {
@@ -57,11 +57,19 @@ const PORT = Number(process.env.COCKPIT_BRIDGE_PORT ?? 9477);
 const SOCKET_PATH = process.env.DIETCODE_SOCKET_PATH ?? join(homedir(), '.dietcode', 'control.sock');
 const TOKEN_PATH = process.env.DIETCODE_TOKEN_PATH ?? join(homedir(), '.dietcode', 'session.token');
 
-interface RpcRequest {
-  jsonrpc: string;
+interface KernelRpcRequest {
   id: string;
+  schemaVersion: string;
   method: string;
   params?: Record<string, unknown>;
+  token: string;
+}
+
+interface KernelRpcResponse {
+  id?: string;
+  ok?: boolean;
+  result?: unknown;
+  error?: { message?: string };
 }
 
 let pollTimer: NodeJS.Timeout | null = null;
@@ -72,11 +80,13 @@ async function readToken(): Promise<string> {
 
 async function rpcCall(method: string, params: Record<string, unknown> = {}): Promise<unknown> {
   const token = await readToken();
-  const request: RpcRequest = {
-    jsonrpc: '2.0',
-    id: randomUUID(),
+  const requestId = randomUUID();
+  const request: KernelRpcRequest = {
+    id: requestId,
+    schemaVersion: '1.6.2',
     method,
-    params: { ...params, token },
+    params,
+    token,
   };
   const payload = JSON.stringify(request) + '\n';
 
@@ -96,11 +106,12 @@ async function rpcCall(method: string, params: Record<string, unknown> = {}): Pr
       for (const line of lines) {
         if (!line.trim()) continue;
         try {
-          const envelope = JSON.parse(line) as { result?: unknown; error?: { message: string } };
+          const envelope = JSON.parse(line) as KernelRpcResponse;
+          if (envelope.id !== requestId) continue;
           clearTimeout(timer);
           socket.end();
-          if (envelope.error) {
-            reject(new Error(envelope.error.message));
+          if (!envelope.ok) {
+            reject(new Error(envelope.error?.message ?? `RPC failed: ${method}`));
             return;
           }
           resolve(envelope.result);
@@ -448,7 +459,21 @@ const server = createServer(async (req, res) => {
           );
           return;
         }
-        const verify = (await rpcCall('verify.run', { command, taskId })) as Record<string, unknown>;
+        const rootResp = (await rpcCall('workspace.getRoot')) as { path?: string };
+        const kernelRoot = rootResp.path?.trim();
+        let cwd: string | undefined;
+        if (kernelRoot && task.workspace.trim()) {
+          const taskWs = resolve(task.workspace.trim());
+          const kr = resolve(kernelRoot);
+          if (taskWs !== kr && taskWs.startsWith(`${kr}${sep}`)) {
+            cwd = relative(kr, taskWs);
+          }
+        }
+        const verify = (await rpcCall('verify.run', {
+          command,
+          taskId,
+          ...(cwd ? { cwd } : {}),
+        })) as Record<string, unknown>;
         handleVerifyCompleted(taskId, verify);
         const updated = getTask(taskId);
         res.writeHead(200, { 'Content-Type': 'application/json' });
@@ -517,7 +542,7 @@ const server = createServer(async (req, res) => {
       const parsed = JSON.parse(body || '{}') as {
         message?: string;
         workspace?: string;
-        mode?: 'supervised' | 'trusted';
+        mode?: 'supervised' | 'trusted' | 'smoke';
       };
       if (!parsed.message?.trim()) {
         res.writeHead(400, { 'Content-Type': 'application/json' });
@@ -540,14 +565,24 @@ const server = createServer(async (req, res) => {
         return;
       }
 
-      const mode = parsed.mode === 'trusted' ? 'trusted' : 'supervised';
+      const mode =
+        parsed.mode === 'trusted'
+          ? 'trusted'
+          : parsed.mode === 'smoke'
+            ? 'smoke'
+            : 'supervised';
       const task = createTask({
         message: parsed.message.trim(),
         workspace,
         mode,
       });
 
-      setSessionAnchorWorkspace(workspace);
+      try {
+        const root = (await rpcCall('workspace.getRoot')) as { path?: string };
+        setSessionAnchorWorkspace(root.path ?? workspace);
+      } catch {
+        setSessionAnchorWorkspace(workspace);
+      }
       startGovernedTask(task);
 
       res.writeHead(202, { 'Content-Type': 'application/json' });
@@ -639,6 +674,28 @@ const server = createServer(async (req, res) => {
           reason: parsed.reason,
           resolvedBy: parsed.resolvedBy ?? 'cockpit',
         })) as Record<string, unknown>;
+        if (parsed.decision !== 'rejected') {
+          const resolution = result.resolution as Record<string, unknown> | undefined;
+          const approval = result.approval as Record<string, unknown> | undefined;
+          const execution = (resolution?.executionResult ?? approval?.executionResult) as
+            | Record<string, unknown>
+            | undefined;
+          const taskId =
+            (typeof resolution?.taskId === 'string' && resolution.taskId) ||
+            (typeof approval?.taskId === 'string' && approval.taskId) ||
+            undefined;
+          if (execution?.patched === true && taskId) {
+            const path = typeof execution.path === 'string' ? execution.path : undefined;
+            const changedPaths = path
+              ? [path.split('/').pop() ?? path]
+              : typeof execution.preview === 'object' &&
+                  execution.preview &&
+                  typeof (execution.preview as Record<string, unknown>).path === 'string'
+                ? [(execution.preview as Record<string, unknown>).path as string]
+                : [];
+            noteWorkspaceMutated(taskId, { changedPaths });
+          }
+        }
         await syncPendingApprovalsFromKernel(rpcCall);
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify(result));

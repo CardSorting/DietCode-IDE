@@ -14,7 +14,19 @@ const REPO_ROOT = resolve(BRIDGE_DIR, '../..');
 const runningTasks = new Set<string>();
 const taskProcesses = new Map<string, ChildProcess>();
 
-function resolveGovernedTaskScript(): string {
+function resolveSmokeTaskScript(): string {
+  const candidates = [
+    join(REPO_ROOT, 'scripts', 'cockpit_smoke_task.py'),
+    join(REPO_ROOT, 'build', 'resources', 'bin', 'cockpit_smoke_task.py'),
+  ];
+  for (const candidate of candidates) {
+    if (existsSync(candidate)) return candidate;
+  }
+  return candidates[0];
+}
+
+function resolveGovernedTaskScript(mode: GovernedTask['mode']): string {
+  if (mode === 'smoke') return resolveSmokeTaskScript();
   const candidates = [
     join(REPO_ROOT, 'scripts', 'cockpit_governed_task.py'),
     join(REPO_ROOT, 'build', 'resources', 'bin', 'cockpit_governed_task.py'),
@@ -146,7 +158,7 @@ export function startGovernedTask(task: GovernedTask): void {
     finishedAt: undefined,
   });
 
-  const script = resolveGovernedTaskScript();
+  const script = resolveGovernedTaskScript(task.mode);
   const kernel = resolveKernelBinary();
   const env = {
     ...process.env,

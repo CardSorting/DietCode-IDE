@@ -463,6 +463,9 @@ verify-agent-chat-sidebar: agent-chat-bundle
 smoke-agent-chat-live: agent-bridge-fast $(PACKAGED_BRIDGE) $(KERNEL_BINARY) $(PACKAGED_AGENT_CHAT) $(PACKAGED_AGENT_CHAT_PY) $(PACKAGED_AGENT_BUNDLE_PY) $(PACKAGED_MUTATION_AUTHORITY_PY) $(PACKAGED_DIFF_AUTHORITY_PY) $(PACKAGED_VERIFICATION_AUTHORITY_PY) $(PACKAGED_ENABLE_AGENT_PY) $(PACKAGED_BUNDLE_MANIFEST) $(PACKAGED_BRIDGE_CLI)
 	PYTHONUNBUFFERED=1 python3 scripts/smoke_agent_chat_live.py --compact
 
+cockpit-smoke: kernel restart-agent-server-fast agent-bridge-fast cockpit
+	DIETCODE_REPO_ROOT=$(CURDIR) DIETCODE_SESSION_DIR=$(CURDIR)/build/cockpit-smoke-session PYTHONUNBUFFERED=1 python3 scripts/cockpit_vertical_slice.py --compact
+
 test-agent-chat-workspace-switch: agent-bridge-fast $(PACKAGED_BRIDGE) $(KERNEL_BINARY) $(PACKAGED_AGENT_BUNDLE_PY) $(PACKAGED_BRIDGE_CLI)
 	python3 scripts/test_agent_chat_workspace_switch.py
 
