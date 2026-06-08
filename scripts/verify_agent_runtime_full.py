@@ -26,6 +26,7 @@ NEXT_COMMANDS = {
     "live_partial_success_closure": "make test-partial-success-closure",
     "live_broccoliq_runtime_memory": "make test-broccoliq-runtime-memory",
     "live_runtime_native_integration": "make test-runtime-native-integration",
+    "live_agent_bridge": "make test-agent-bridge",
     "live_verify_agent_runtime": "make verify-agent-runtime",
 }
 
@@ -39,6 +40,7 @@ LADDER: list[tuple[str, list[str], bool, bool]] = [
     ("live_partial_success_closure", [sys.executable, "scripts/test_partial_success_closure.py", "--compact"], True, False),
     ("live_broccoliq_runtime_memory", [sys.executable, "scripts/test_broccoliq_runtime_memory.py", "--compact"], True, False),
     ("live_runtime_native_integration", [sys.executable, "scripts/test_runtime_native_integration.py", "--compact"], True, False),
+    ("live_agent_bridge", ["make", "test-agent-bridge"], True, False),
     ("live_release_readiness", [sys.executable, "scripts/test_release_readiness.py", "--compact"], True, False),
 ]
 

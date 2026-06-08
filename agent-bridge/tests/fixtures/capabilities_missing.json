@@ -1,0 +1,12 @@
+{
+  "mode": "tool_capabilities",
+  "contractVersion": "0.9.0",
+  "agentSafeMethods": ["search.literal"],
+  "deprecatedMethods": [],
+  "deterministicSearchMethods": ["search.literal"],
+  "mutatingMethods": [],
+  "internalNamespaces": [],
+  "semanticSearchDisabled": false,
+  "rankingPolicy": "none",
+  "scoringDisabled": false
+}

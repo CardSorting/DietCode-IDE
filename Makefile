@@ -23,6 +23,11 @@ APP_BUNDLE := $(BUILD_DIR)/$(APP_NAME).app
 APP_CONTENTS := $(APP_BUNDLE)/Contents
 APP_MACOS := $(APP_CONTENTS)/MacOS
 APP_RESOURCES := $(APP_CONTENTS)/Resources
+APP_BIN := $(APP_RESOURCES)/bin
+AGENT_BRIDGE_DIR := agent-bridge
+AGENT_BRIDGE_DIST := $(AGENT_BRIDGE_DIR)/dist
+PACKAGED_BRIDGE := $(APP_RESOURCES)/agent-bridge
+PACKAGED_BRIDGE_CLI := $(APP_BIN)/dietcode-agent-client
 TEST_BIN := $(BUILD_DIR)/test_editor
 
 CORE_CPP := \
@@ -89,7 +94,7 @@ MACOS_MM := \
 	src/filesystem/FileWatcher.mm \
 	src/core/LSPClient.mm
 
-.PHONY: all app run headless ensure-socket restart-agent-server restart-agent-server-fast agent-ready agent-status agent-ping agent-methods agent-capabilities agent-self-test test-agent-offline control-smoke test-task-health test-rpc-transaction test-ergonomics test-grep-diff-tooling test-runtime-determinism test-transaction-kernel test-harness-realism test-deterministic-retrieval test-agent-workflow-smoke test-cli-agent-failures test-docs-code-drift test-partial-success-closure test-broccoliq-runtime-memory test-broccoliq-runtime-memory-fast test-runtime-native-integration test-runtime-native-integration-fast test-agent-integration agent-integration verify-agent-runtime verify-agent-runtime-fast verify-agent-runtime-full verify-agent-runtime-full-fast test clean
+.PHONY: all app agent-bridge agent-bridge-fast run headless ensure-socket restart-agent-server restart-agent-server-fast agent-ready agent-status agent-ping agent-methods agent-capabilities agent-self-test test-agent-offline control-smoke test-task-health test-rpc-transaction test-ergonomics test-grep-diff-tooling test-runtime-determinism test-transaction-kernel test-harness-realism test-deterministic-retrieval test-agent-workflow-smoke test-cli-agent-failures test-docs-code-drift test-partial-success-closure test-broccoliq-runtime-memory test-broccoliq-runtime-memory-fast test-runtime-native-integration test-runtime-native-integration-fast test-agent-bridge test-agent-bridge-fast test-agent-integration agent-integration verify-agent-runtime verify-agent-runtime-fast verify-agent-runtime-full verify-agent-runtime-full-fast test clean
 
 all: app test
 
@@ -102,7 +107,25 @@ $(APP_MACOS):
 $(APP_RESOURCES):
 	mkdir -p $(APP_RESOURCES)
 
-app: $(APP_MACOS) $(APP_RESOURCES)
+$(APP_BIN):
+	mkdir -p $(APP_BIN)
+
+agent-bridge-fast:
+	cd $(AGENT_BRIDGE_DIR) && npm install --silent && npm run build
+
+agent-bridge: agent-bridge-fast
+
+$(PACKAGED_BRIDGE): agent-bridge-fast
+	rm -rf $(PACKAGED_BRIDGE)
+	mkdir -p $(PACKAGED_BRIDGE)
+	cp -R $(AGENT_BRIDGE_DIR)/dist $(PACKAGED_BRIDGE)/
+	cp $(AGENT_BRIDGE_DIR)/package.json $(PACKAGED_BRIDGE)/
+
+$(PACKAGED_BRIDGE_CLI): $(APP_BIN) resources/bin/dietcode-agent-client
+	cp resources/bin/dietcode-agent-client $(PACKAGED_BRIDGE_CLI)
+	chmod +x $(PACKAGED_BRIDGE_CLI)
+
+app: $(APP_MACOS) $(APP_RESOURCES) $(APP_BIN) $(PACKAGED_BRIDGE) $(PACKAGED_BRIDGE_CLI)
 	cp resources/Info.plist $(APP_CONTENTS)/Info.plist
 	if [ -f resources/AppIcon.icns ]; then cp resources/AppIcon.icns $(APP_RESOURCES)/AppIcon.icns; fi
 	$(CXX) $(OBJCXXFLAGS) $(CORE_CPP) $(MACOS_MM) -framework Cocoa -lsqlite3 -o $(APP_MACOS)/$(APP_NAME)
@@ -224,6 +247,13 @@ test-runtime-native-integration-fast:
 test-ergonomics: app
 	python3 scripts/dietcode_agent_client.py --wait-ready --compact --error-json --quiet
 	python3 scripts/test_ergonomics.py --compact
+
+test-agent-bridge-fast: agent-bridge-fast
+	cd $(AGENT_BRIDGE_DIR) && npm run test:fast
+
+test-agent-bridge: restart-agent-server
+	cd $(AGENT_BRIDGE_DIR) && npm test
+	BRIDGE_LIVE=1 cd $(AGENT_BRIDGE_DIR) && npm run test:live
 
 agent-integration: app
 	python3 scripts/dietcode_agent_client.py --wait-ready --compact --error-json --quiet

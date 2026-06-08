@@ -1,0 +1,1 @@
+{"version":3,"file":"RuntimeProfile.d.ts","sourceRoot":"","sources":["../../src/client/RuntimeProfile.ts"],"names":[],"mappings":"AAAA,OAAO,KAAK,EAAuB,cAAc,EAAE,MAAM,uBAAuB,CAAC;AAEjF,wBAAgB,mBAAmB,CAAC,KAAK,EAAE;IACzC,eAAe,EAAE,MAAM,CAAC,MAAM,EAAE,OAAO,CAAC,CAAC;IACzC,cAAc,EAAE,MAAM,CAAC,MAAM,EAAE,OAAO,CAAC,CAAC;IACxC,aAAa,EAAE,MAAM,CAAC;CACvB,GAAG,cAAc,CA0CjB"}

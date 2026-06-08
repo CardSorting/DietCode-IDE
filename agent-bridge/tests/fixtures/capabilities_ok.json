@@ -1,0 +1,22 @@
+{
+  "mode": "tool_capabilities",
+  "contractVersion": "1.0.0",
+  "agentSafeMethods": [
+    "file.stat",
+    "operation.status",
+    "patch.apply",
+    "patch.applyBatch",
+    "runtime.diagnostics",
+    "runtime.timeline",
+    "search.literal",
+    "search.paths",
+    "search.tokens"
+  ],
+  "deprecatedMethods": ["search.semantic"],
+  "deterministicSearchMethods": ["search.literal", "search.paths", "search.tokens"],
+  "mutatingMethods": ["patch.apply", "patch.applyBatch"],
+  "internalNamespaces": ["analysis.", "language."],
+  "semanticSearchDisabled": true,
+  "rankingPolicy": "none",
+  "scoringDisabled": true
+}

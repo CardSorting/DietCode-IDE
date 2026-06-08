@@ -1,4 +1,5 @@
 build/
+agent-bridge/node_modules/
 .DS_Store
 *.o
 *.dSYM/

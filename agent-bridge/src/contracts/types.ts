@@ -1,0 +1,214 @@
+/** Public bridge types — no raw RPC method names in agent-facing surfaces. */
+
+export type BridgeErrorCode =
+  | 'stale_content'
+  | 'semantic_disabled'
+  | 'ranked_search_disabled'
+  | 'symlink_target'
+  | 'patch_failed'
+  | 'nested_call_timeout'
+  | 'runtime_unavailable'
+  | 'unsupported_runtime_capability'
+  | 'transport_error'
+  | 'invalid_params'
+  | 'unknown';
+
+export interface BridgeError {
+  code: BridgeErrorCode;
+  message: string;
+  recoveryHint: string;
+  nextRecommendedCommand: string;
+  retrySafe: boolean;
+  rawError?: Record<string, unknown>;
+}
+
+export interface BridgeEnvelope<T> {
+  ok: boolean;
+  data?: T;
+  error?: BridgeError;
+}
+
+export interface PartialResultMeta {
+  complete: boolean;
+  partial: boolean;
+  warnings: string[];
+  fallbackUsed: boolean;
+  truncated: boolean;
+  recoveryHint?: string;
+  nextRecommendedCommand?: string;
+  raw?: Record<string, unknown>;
+}
+
+export interface BridgeResult<T> extends PartialResultMeta {
+  result: T;
+}
+
+export interface RuntimeCapabilities {
+  deterministicSearch: boolean;
+  patchReceipts: boolean;
+  batchReceipts: boolean;
+  runtimeTimeline: boolean;
+  broccoliqJournal: boolean;
+  operationStatus: boolean;
+  partialSuccessEnvelopes: boolean;
+}
+
+export interface RuntimeProfile {
+  connected: boolean;
+  contractVersion: string;
+  schemaVersion: string;
+  capabilities: RuntimeCapabilities;
+  agentSafeMethodCount: number;
+  semanticSearchDisabled: boolean;
+  rankingPolicy: string;
+  diagnosticsAvailable: boolean;
+  workspacePath?: string;
+  mutationAuthority?: string;
+  recordAuthority?: string;
+}
+
+export interface MutationReceipt {
+  path: string;
+  beforeContentHash: string;
+  postContentHash: string;
+  patchFingerprint: string;
+  readSourceBefore: string;
+  applyChannel: string;
+  atomic: boolean;
+}
+
+export interface BatchMutationReceipt {
+  atomic: boolean;
+  appliedCount: number;
+  rolledBack: boolean;
+  fileReceipts: MutationReceipt[];
+  rollbackProof?: Record<string, unknown>;
+}
+
+export interface SafePatchSuccess {
+  applied: true;
+  mutationReceipt: MutationReceipt;
+  revisionBefore?: number;
+  revisionAfter?: number;
+  idempotencyKey: string;
+  nextRecommendedCommand?: string;
+}
+
+export interface StalePatchRecovery {
+  applied: false;
+  stale: true;
+  path: string;
+  expectedBeforeHash: string;
+  currentContentHash?: string;
+  recoveryHint: string;
+  nextRecommendedCommand: string;
+  idempotencyKey: string;
+}
+
+export type SafePatchResult = SafePatchSuccess | StalePatchRecovery;
+
+export interface SafeBatchPatchSuccess {
+  applied: true;
+  atomic: true;
+  batchMutationReceipt: BatchMutationReceipt;
+  idempotencyKey: string;
+  revisionBefore?: number;
+  revisionAfter?: number;
+  nextRecommendedCommand?: string;
+}
+
+export interface SafeBatchPatchFailure {
+  applied: false;
+  atomic: true;
+  rolledBack: true;
+  failedPath?: string;
+  idempotencyKey: string;
+  recoveryHint: string;
+  nextRecommendedCommand: string;
+  filesVerifiedUnchanged: boolean;
+}
+
+export type SafeBatchPatchResult = SafeBatchPatchSuccess | SafeBatchPatchFailure;
+
+export interface PatchBatchEntry {
+  path: string;
+  unifiedDiff: string;
+}
+
+export interface SearchOptions {
+  maxResults?: number;
+  caseSensitive?: boolean;
+  include?: string[];
+  exclude?: string[];
+  includeRaw?: boolean;
+}
+
+export interface PatchOptions {
+  dryRun?: boolean;
+  idempotencyKey?: string;
+  requestTimeoutMs?: number;
+  includeRaw?: boolean;
+}
+
+export interface BatchPatchOptions extends PatchOptions {
+  confirm?: boolean;
+}
+
+export interface TimelineOptions {
+  limit?: number;
+  offset?: number;
+  sinceRevision?: number;
+  errorsOnly?: boolean;
+  includeRaw?: boolean;
+}
+
+export interface ActivityOptions {
+  limit?: number;
+  sinceRevision?: number;
+  includeRaw?: boolean;
+}
+
+export interface OperationStatusResult {
+  status: 'completed' | 'unknown' | 'pending';
+  idempotencyKey: string;
+  revisionBefore?: number;
+  revisionAfter?: number;
+  changedFiles?: string[];
+  mutationReceipt?: MutationReceipt;
+  batchMutationReceipt?: BatchMutationReceipt;
+  completedAt?: string;
+}
+
+export interface VerifyFastResult {
+  ok: boolean;
+  rpcReady: boolean;
+  runtimeAvailable: boolean;
+  latencyMs: number;
+}
+
+export interface RpcEnvelope {
+  id: string;
+  ok: boolean;
+  result?: Record<string, unknown>;
+  error?: RpcErrorPayload;
+  _clientDurationMs?: number;
+}
+
+export interface RpcErrorPayload {
+  code: number;
+  string_code?: string;
+  message: string;
+  recovery_hint?: string;
+  nextRecommendedCommand?: string;
+  retryable?: boolean;
+  category?: string;
+}
+
+export interface TransportOptions {
+  socketPath?: string;
+  tokenPath?: string;
+  schemaVersion?: string;
+  requestTimeoutMs?: number;
+  startApp?: boolean;
+  appPath?: string;
+}

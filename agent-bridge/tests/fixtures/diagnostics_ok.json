@@ -1,0 +1,11 @@
+{
+  "mode": "runtime_diagnostics",
+  "available": true,
+  "checkpointStatus": "ready",
+  "mutationAuthority": "cpp_kernel",
+  "recordAuthority": "runtime_journal",
+  "workspacePath": "/tmp/workspace",
+  "complete": true,
+  "partial": false,
+  "warnings": []
+}
