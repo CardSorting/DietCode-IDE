@@ -2,11 +2,11 @@
   <img src="resources/logo.svg" width="180" height="180" alt="DietCode Logo">
 </p>
 
-<h1 align="center">DietCode IDE</h1>
+<h1 align="center">DietCode</h1>
 
 <p align="center">
-  <strong>A native, local-first macOS IDE with a bundled agent control stack.</strong><br>
-  <em>C++20 core · AppKit shell · Agent Bridge · deterministic runtime journal</em>
+  <strong>A native, local-first macOS coding environment with a bundled deterministic agent runtime.</strong><br>
+  <em>C++20 core · AppKit shell · Agent Bridge · runtime journal</em>
 </p>
 
 <p align="center">
@@ -19,17 +19,24 @@
 
 ## What this is
 
-DietCode is a smaller, calmer, native macOS IDE — local-first, offline-first, built from a portable C++20 core with an Objective-C++ / AppKit shell. No Electron. No background indexing tax. No cloud defaults.
+DietCode is a smaller, calmer, native macOS coding environment built from a portable C++20 core with an Objective-C++ / AppKit shell.
 
-It also ships a **deterministic agent control stack**: a C++ mutation kernel behind a Unix-socket JSON-RPC runtime, wrapped by a **bundled Agent Bridge** that gives external agents a stable TypeScript API and CLI. You install one app; agents get safe search, patch, and observability workflows without calling raw RPC.
+No Electron.  
+No Chromium.  
+No background indexing tax.  
+No cloud defaults.
 
-> Open. Code. Run. Save. No jet engine.
+**Open. Code. Run. Save. No jet engine.**
 
-Product positioning: [Product Specification](docs/product-spec.md).
+DietCode also ships with a bundled deterministic agent runtime: a hardened local control stack that allows external or local agents to safely search, patch, verify, and recover against a live workspace through a stable Agent Bridge API.
+
+You install one app.  
+Humans get a native editor.  
+Agents get a deterministic operating layer.
 
 ---
 
-## Strategy: one app, three layers
+## Architecture
 
 ```text
   [ External agents ]     [ Human developer ]
@@ -50,77 +57,127 @@ Product positioning: [Product Specification](docs/product-spec.md).
 
 | Layer | Role | Who uses it |
 |-------|------|-------------|
-| **Agent Bridge** | Stable workflows — `safePatchFile`, `searchLiteral`, error normalization | External / local agents |
-| **Runtime RPC** | JSON-RPC dispatch, queues, contracts | Bridge adapters (not agent code) |
-| **C++ kernel** | Mutation authority — `expectBeforeHash`, receipts, atomic batch | Source of truth for all writes |
+| **Agent Bridge** | Stable workflows — `safePatchFile`, `searchLiteral`, recovery handling | External / local agents |
+| **Runtime RPC** | JSON-RPC dispatch, queues, contracts | Bridge adapters |
+| **C++ mutation kernel** | Mutation authority — `expectBeforeHash`, receipts, atomic batch | Source of truth for all writes |
+| **Runtime journal** | Durable operation memory, timeline, replay, diagnostics | Runtime + agents |
 
-**Agent rule:** use the [Agent Bridge](docs/agent-bridge.md) or `dietcode-agent-client` — not raw `patch.apply` / `search.*` RPC from agent code.
+Deep dive: [Agent Bridge Architecture](docs/agent-bridge-architecture.md) · [Technical Architecture](docs/technical-architecture.md).
 
-Full architecture: [Agent Bridge Architecture](docs/agent-bridge-architecture.md) · C++ audit: [Agent Runtime Audit](docs/agent-runtime-audit.md).
+---
+
+## Core philosophy
+
+DietCode is built around a few constraints:
+
+- local-first
+- deterministic behavior
+- inspectable runtime surfaces
+- explicit recovery paths
+- bounded autonomous mutation
+- no hidden ranking or semantic heuristics
+- no background indexing daemons
+- no cloud dependency
+
+The runtime is designed so agents can mutate code safely without relying on opaque retrieval systems or probabilistic patch workflows.
+
+**The kernel decides what happened.**  
+**The runtime journal remembers what happened.**
 
 ---
 
 ## Agent Bridge (preferred integration)
 
-The bridge ships inside `DietCode.app` at `Contents/Resources/agent-bridge/`. CLI launcher: `Contents/Resources/bin/dietcode-agent-client`.
+The Agent Bridge ships inside `DietCode.app`.
+
+Agents should use the bridge or the bundled CLI — **not** raw runtime RPC.
 
 ```typescript
 import { DietCodeBridgeClient } from '@dietcode/agent-bridge';
 
 const bridge = new DietCodeBridgeClient({ startApp: false });
+
 await bridge.connect();
 
-await bridge.searchLiteral('expectBeforeHash', { maxResults: 10 });
-const outcome = await bridge.safePatchFile('src/foo.ts', unifiedDiff);
+await bridge.searchLiteral('expectBeforeHash', {
+  maxResults: 10,
+});
+
+const outcome = await bridge.safePatchFile(
+  'src/foo.ts',
+  unifiedDiff,
+);
 
 await bridge.close();
 ```
 
+CLI:
+
 ```bash
-# After make app
 build/DietCode.app/Contents/Resources/bin/dietcode-agent-client profile
+
 build/DietCode.app/Contents/Resources/bin/dietcode-agent-client verify fast
-build/DietCode.app/Contents/Resources/bin/dietcode-agent-client patch safe-file src/foo.ts /tmp/foo.patch
+
+build/DietCode.app/Contents/Resources/bin/dietcode-agent-client patch safe-file \
+  src/foo.ts \
+  /tmp/foo.patch
 ```
 
-| Bridge method | What it does |
-|---------------|--------------|
-| `connect()` | Socket, readiness, capability detection, workspace bootstrap |
-| `searchLiteral` / `searchTokens` / `searchPaths` | Deterministic search (no semantic layer) |
-| `safePatchFile` / `safePatchBatch` | Validate → `expectBeforeHash` → apply with receipts |
-| `getOperationStatus` | Timeout-safe mutation replay |
-| `getTimeline` / `getRecentActivity` | Runtime journal surfaces |
-| `verifyFast()` | Quick health probe |
+### Bridge workflows
 
-Integration recipes: [Agent Bridge Integration Guide](docs/agent-bridge-integration-guide.md) · Audit record: [Agent Bridge Audit](docs/agent-bridge-audit.md).
+| Method | Purpose |
+|--------|---------|
+| `connect()` | Runtime readiness + capability detection |
+| `searchLiteral()` | Deterministic literal search |
+| `searchTokens()` | Exact token search |
+| `searchPaths()` | Deterministic path search |
+| `safePatchFile()` | Validate → `expectBeforeHash` → apply |
+| `safePatchBatch()` | Atomic batch mutation |
+| `getOperationStatus()` | Timeout-safe replay recovery |
+| `getTimeline()` | Runtime journal stream |
+| `verifyFast()` | Quick runtime health check |
+
+Full API and recipes: [Agent Bridge](docs/agent-bridge.md) · [Integration Guide](docs/agent-bridge-integration-guide.md) · [Bridge Audit](docs/agent-bridge-audit.md).
 
 ---
 
-## Runtime guarantees (under the bridge)
+## Runtime guarantees
 
-The C++ control surface is hardened as a **deterministic local transaction kernel**:
+The runtime behaves as a deterministic local transaction kernel for bounded autonomous mutation.
 
 | Guarantee | Mechanism |
 |-----------|-----------|
-| Stale-write detection | `expectBeforeHash` → `stale_content` |
+| Stale-write rejection | `expectBeforeHash` → `stale_content` |
 | Mutation proof | `mutationReceipt`, `batchMutationReceipt` |
-| Idempotent replay | `operation.status` by `idempotencyKey` |
-| Monotonic revision | `workspace.revision`, `workspace.snapshot` |
-| Deterministic search | Literal / token / path match — sorted, no scores |
-| Semantic quarantine | `search.semantic` → `4008`; use bridge search methods |
-| Partial-success honesty | `complete`, `partial`, `warnings`, `recoveryHint` |
+| Replay safety | `operation.status` + `idempotencyKey` |
+| Monotonic revisions | `workspace.revision` |
+| Durable runtime memory | BroccoliQ runtime journal |
+| Deterministic retrieval | literal / token / path search only |
+| Semantic quarantine | `search.semantic` → `4008` |
+| Honest partial success | `complete`, `partial`, `warnings` |
+| Safe batch mutation | atomic apply + rollback proof |
 
-Maintainers and harnesses may still use the Python client for raw RPC and contract tests: [Headless Agent Control](docs/headless-agent-control.md).
+Canonical C++ audit: [Agent Runtime Audit](docs/agent-runtime-audit.md). Maintainer RPC reference: [Headless Agent Control](docs/headless-agent-control.md).
 
 ---
 
 ## What DietCode is not
 
-- Electron, Chromium, Qt, or extension-host complexity
-- Background repo-wide indexing, telemetry, or hidden daemons
-- Semantic search, embeddings, fuzzy matching, or probabilistic ranking on agent surfaces
-- Cloud defaults, account systems, or AI-by-default features
-- A separate agent SDK to install — the bridge is bundled in the app
+DietCode is not:
+
+- Electron
+- Chromium
+- Qt
+- extension-host infrastructure
+- cloud-native IDE infrastructure
+- semantic-search tooling
+- embeddings-based retrieval
+- fuzzy-ranking infrastructure
+- telemetry-first tooling
+- hidden background orchestration
+- “AI that edits files behind your back”
+
+The runtime intentionally prefers deterministic, inspectable workflows over opaque automation.
 
 See [Anti-Scope Checklist](docs/anti-scope-checklist.md) and [MVP Scope](docs/mvp-scope.md).
 
@@ -128,12 +185,12 @@ See [Anti-Scope Checklist](docs/anti-scope-checklist.md) and [MVP Scope](docs/mv
 
 ## Quick start
 
-### Prerequisites
+### Requirements
 
 - macOS 12+
 - Xcode Command Line Tools (`xcode-select --install`)
-- Node.js 18+ (bridge build; bundled in app after `make app`)
-- Python 3 (maintainer harnesses and contract tests)
+- Node.js 18+ (bridge build only; bundled after `make app`)
+- Python 3 (maintainer harnesses)
 
 ### Build
 
@@ -141,38 +198,53 @@ See [Anti-Scope Checklist](docs/anti-scope-checklist.md) and [MVP Scope](docs/mv
 git clone <repo-url> DietCode-IDE
 cd DietCode-IDE
 
-make test          # C++ unit tests + offline agent self-test
-make app           # DietCode.app + bundled agent-bridge
+make test
+make app
 ```
 
-### Run the IDE
+### Run
 
 ```bash
-make run           # open DietCode.app
-make headless      # control server only (no window)
-make agent-ready   # wait for socket + RPC readiness
+make run
 ```
 
-### Develop against the bridge
+Headless runtime:
 
 ```bash
-make restart-agent-server          # required after C++ control-server changes
-make agent-bridge-fast             # compile TypeScript only
-make test-agent-bridge-fast        # offline bridge tests (fast loop)
-
-build/DietCode.app/Contents/Resources/bin/dietcode-agent-client profile --no-start
+make headless
+make agent-ready
 ```
 
-### Verify before merge
+---
+
+## Development workflow
+
+After C++ runtime changes:
 
 ```bash
-make test-agent-offline
-make verify-agent-runtime          # daily ladder (14 checks)
-make test-agent-bridge             # bridge offline + live + audit
-make verify-agent-runtime-full     # release ladder (workflows + drift + bridge)
+make restart-agent-server
 ```
 
-Full target reference: [Build & Test System](docs/build-and-test-system.md) · Pre-merge checklist: [Testing Checklist](docs/testing-checklist.md).
+Fast bridge iteration:
+
+```bash
+make agent-bridge-fast
+make test-agent-bridge-fast
+```
+
+Daily runtime ladder:
+
+```bash
+make verify-agent-runtime
+```
+
+Full release ladder:
+
+```bash
+make verify-agent-runtime-full
+```
+
+Details: [Build & Test System](docs/build-and-test-system.md) · [Testing Checklist](docs/testing-checklist.md).
 
 ---
 
@@ -180,64 +252,44 @@ Full target reference: [Build & Test System](docs/build-and-test-system.md) · P
 
 ```text
 DietCode-IDE/
-  src/                 # Portable C++20 core + macOS control server + UI
-  agent-bridge/        # @dietcode/agent-bridge (bundled into the app)
-  scripts/             # Python RPC client, contract tests, verification ladders
-  docs/                # Specifications and guides
-  resources/           # App bundle assets, CLI launcher template
-  tests/               # C++ editor unit tests
-  Makefile             # Build + all verification targets
+  src/                 # C++20 core + AppKit runtime/UI
+  runtime/memory/      # BroccoliQ runtime journal
+  agent-bridge/        # Bundled TypeScript bridge
+  scripts/             # Python harnesses + verification ladders
+  docs/                # Specifications and architecture docs
+  tests/               # C++ editor tests
+  resources/           # App bundle assets
 ```
 
-Details: [File Structure](docs/file-structure.md) · C++ layers: [Technical Architecture](docs/technical-architecture.md).
+[File Structure](docs/file-structure.md)
 
 ---
 
 ## Documentation
 
-| Audience | Start here |
-|----------|------------|
-| **Agent authors** | [Agent Bridge](docs/agent-bridge.md) → [Integration Guide](docs/agent-bridge-integration-guide.md) |
-| **IDE contributors** | [Getting Started Tutorial](docs/getting-started-tutorial.md) → [Build Instructions](docs/build-instructions.md) |
-| **Maintainers** | [Maintainer Guide](docs/maintainer-guide.md) → [Agent Runtime Audit](docs/agent-runtime-audit.md) |
-| **Everyone** | [Documentation Index](docs/README.md) · [FAQ & Troubleshooting](docs/faq-and-troubleshooting.md) |
+### Agent Bridge
 
-### Agent bridge
+- [Agent Bridge](docs/agent-bridge.md)
+- [Agent Bridge Architecture](docs/agent-bridge-architecture.md)
+- [Agent Bridge Integration Guide](docs/agent-bridge-integration-guide.md)
+- [Agent Bridge Audit](docs/agent-bridge-audit.md)
 
-| Doc | Contents |
-|-----|----------|
-| [Agent Bridge](docs/agent-bridge.md) | Overview, public API, CLI |
-| [Agent Bridge Architecture](docs/agent-bridge-architecture.md) | Layers, transport, connect lifecycle |
-| [Agent Bridge Integration Guide](docs/agent-bridge-integration-guide.md) | TypeScript recipes, error handling |
-| [Agent Bridge Audit](docs/agent-bridge-audit.md) | Pass I–II record and verification |
+### Runtime
 
-### Runtime and contracts
+- [Agent Runtime Audit](docs/agent-runtime-audit.md)
+- [Runtime Invariants](docs/runtime-invariants.md)
+- [Headless Agent Control](docs/headless-agent-control.md)
+- [BroccoliQ Runtime Memory](docs/broccoliq-runtime-memory.md)
+- [Error Codes](docs/error-codes.md)
 
-| Doc | Contents |
-|-----|----------|
-| [Agent Runtime Audit](docs/agent-runtime-audit.md) | C++ kernel Passes I–VI |
-| [Headless Agent Control](docs/headless-agent-control.md) | Raw RPC reference (maintainers) |
-| [Runtime Invariants](docs/runtime-invariants.md) | Stale writes, sort order, receipts |
-| [Error Codes](docs/error-codes.md) | `string_code` + recovery hints |
-| [BroccoliQ Runtime Memory](docs/broccoliq-runtime-memory.md) | Journal semantics |
+### Development
 
----
-
-## Key Makefile targets
-
-| Target | Purpose |
-|--------|---------|
-| `make app` | Build `DietCode.app` + bundle `agent-bridge` |
-| `make test` | C++ unit tests + offline agent self-test |
-| `make agent-bridge-fast` | Compile TypeScript bridge only |
-| `make test-agent-bridge-fast` | Offline bridge tests (no socket) |
-| `make test-agent-bridge` | Bridge offline + live workflows + audit |
-| `make restart-agent-server` | Rebuild and restart control server |
-| `make verify-agent-runtime` | Daily verification ladder |
-| `make verify-agent-runtime-full` | Release ladder (includes bridge) |
-| `make release-check-agent-runtime` | Release gate |
-
-Per-pass C++ suites: `make test-grep-diff-tooling` (I) through `make test-agent-workflow-smoke` (VI) — see [Agent Runtime Audit](docs/agent-runtime-audit.md).
+- [Documentation Index](docs/README.md)
+- [Build & Test System](docs/build-and-test-system.md)
+- [Testing Checklist](docs/testing-checklist.md)
+- [Maintainer Guide](docs/maintainer-guide.md)
+- [Getting Started Tutorial](docs/getting-started-tutorial.md)
+- [FAQ & Troubleshooting](docs/faq-and-troubleshooting.md)
 
 ---
 
