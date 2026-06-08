@@ -1,6 +1,8 @@
 # Agent Success Benchmark
 
-End-to-end benchmark harness for DietCode agent workflows. Each task exercises a
+End-to-end benchmark harness for DietCode agent workflows.
+
+**Whitepaper:** [WHITEPAPER.md](WHITEPAPER.md) · **Results:** [RESULTS.md](RESULTS.md) Each task exercises a
 realistic agent pattern (search → inspect → patch, stale recovery, symlink safety,
 large-file avoidance, batch rollback, deprecated search recovery, partial results,
 verify-after-mutation) against an isolated fixture workspace.
