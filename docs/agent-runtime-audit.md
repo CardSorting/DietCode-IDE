@@ -287,6 +287,45 @@ make test-partial-success-closure  # Pass VI closure
 
 ---
 
+## Source file index
+
+| Area | Primary files |
+|------|---------------|
+| Disk fallback + enrichment | `src/platform/macos/control/utils/MacControlSupport.mm` |
+| Grep / search | `src/platform/macos/control/services/MacControlSearchService.mm` |
+| Patch / batch | `src/platform/macos/control/services/MacControlPatchService.mm` |
+| Revision / snapshot | `src/platform/macos/control/services/MacControlWorkspaceState.mm` |
+| Tool registry | `src/platform/macos/control/services/MacControlToolRegistry.mm` |
+| Error recovery hints | `src/platform/macos/control/utils/MacControlRuntimeDiagnostics.mm` |
+| Socket safety | `src/platform/macos/control/utils/MacControlSocketSafety.mm` |
+| Runtime limits | `src/domain/control/ControlRuntimeLimits.hpp` |
+| Contract constants | `scripts/agent_contracts.py` |
+| Offline mirrors | `scripts/agent_tooling.py`, `scripts/harness_support.py` |
+| Python client | `scripts/dietcode_agent_client.py` |
+
+---
+
+## Fixture index
+
+| Fixture | Validates |
+|---------|-----------|
+| `scripts/fixtures/tooling/grep_anchor.json` | Grep match shape and accounting |
+| `scripts/fixtures/tooling/sample_unified_diff.txt` | Offline diff hunk parser parity |
+| `scripts/fixtures/tooling/stale_content.json` | Stale-write scenario metadata |
+| `scripts/fixtures/retrieval/search_literal_golden.json` | search.literal response |
+| `scripts/fixtures/retrieval/search_tokens_golden.json` | search.tokens response |
+| `scripts/fixtures/retrieval/tool_registry_golden.json` | tool.registry entry shape |
+| `scripts/fixtures/retrieval/semantic_disabled_golden.json` | semantic_disabled envelope |
+| `scripts/fixtures/recovery/error_recovery_hints.json` | ERROR_RECOVERY_HINTS parity |
+| `scripts/fixtures/release/surface_classification.json` | STABILITY classification |
+| `scripts/fixtures/release/internal_method_namespaces.json` | INTERNAL_METHOD_NAMESPACES |
+| `scripts/fixtures/harness/symlink_policy.json` | Symlink traversal policy |
+| `scripts/fixtures/harness/search_files_golden.json` | search.files deterministic match |
+| `scripts/fixtures/safety/destructive_methods.json` | Destructive RPC tier list |
+| `scripts/fixtures/rpc/expected_error_codes.json` | Golden string_code set |
+
+---
+
 ## Contract inventory (frozen keys)
 
 Source of truth: `scripts/agent_contracts.py` (grep `CONTRACT:`).

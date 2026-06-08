@@ -55,14 +55,26 @@ Copy this file per release (e.g. `docs/releases/agent-runtime-1.0.0.md`).
 1. ...
 2. ...
 
+## Agent runtime pass impact (if applicable)
+
+| Pass | Harness | Doc to update |
+|------|---------|---------------|
+| I — Grep | `make test-grep-diff-tooling` | `agent-tooling.md` |
+| II — Determinism | `make test-runtime-determinism` | `runtime-invariants.md` |
+| III — Transaction | `make test-transaction-kernel` | `agent-runtime-audit.md` |
+| IV — Harness | `make test-harness-realism` | `runtime-invariants.md` |
+| V — Retrieval | `make test-deterministic-retrieval` | `deprecation-policy.md` |
+| VI — Failure traps | `make test-agent-workflow-smoke` | `error-codes.md`, `headless-agent-control.md` |
+
 ## Verification commands run
 
 \`\`\`bash
+make verify-agent-runtime-full
 make release-check-agent-runtime
-make verify-agent-runtime
+make test-docs-code-drift
 python3 scripts/dietcode_agent_client.py --emit-config --json
 python3 scripts/dietcode_agent_client.py --diagnose --json
-rg 'RELEASE:|STABILITY:' src/ scripts/ docs/
+rg 'RELEASE:|STABILITY:|CONTRACT:' src/ scripts/ docs/
 git diff src/ scripts/ docs/ Makefile
 \`\`\`
 

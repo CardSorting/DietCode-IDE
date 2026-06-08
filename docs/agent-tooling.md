@@ -11,6 +11,38 @@ make verify-agent-runtime-full
 
 ---
 
+## Frozen contract constants
+
+Source of truth: `scripts/agent_contracts.py`. Harnesses call validators that check live responses against these key sets.
+
+| Constant | RPC surface |
+|----------|-------------|
+| `GREP_RESPONSE_KEYS` / `GREP_MATCH_KEYS` | `workspace.grep` |
+| `SEARCH_ACCOUNTING_KEYS` | Shared grep/text/todo accounting |
+| `SEARCH_LITERAL_RESPONSE_KEYS` | `search.literal` |
+| `SEARCH_TOKENS_RESPONSE_KEYS` | `search.tokens` |
+| `SEARCH_FILES_RESPONSE_KEYS` | `search.files` / `search.paths` |
+| `PATCH_VALIDATION_KEYS` | `patch.validate` |
+| `MUTATION_RECEIPT_KEYS` | `patch.apply` |
+| `PATCH_APPLY_BATCH_SUCCESS_KEYS` | `patch.applyBatch` success |
+| `BATCH_MUTATION_RECEIPT_KEYS` | `batchMutationReceipt` object |
+| `WORKSPACE_REVISION_KEYS` | `workspace.revision` |
+| `WORKSPACE_SNAPSHOT_KEYS` | `workspace.snapshot` |
+| `OPERATION_STATUS_COMPLETED_KEYS` | `operation.status` |
+| `DIFF_HUNKS_RESPONSE_KEYS` | `diff.hunks` / `patch.hunks` |
+| `FILE_STAT_KEYS` | `file.stat` |
+| `TOOL_REGISTRY_ENTRY_KEYS` | `tool.registry` entries |
+| `TOOL_CAPABILITIES_RESPONSE_KEYS` | `tool.capabilities` |
+| `PARTIAL_SUCCESS_OPTIONAL_KEYS` | Shared enrichment on read/mutation success |
+| `ERROR_RECOVERY_HINTS` | Error envelope recovery (mirrored in `error-codes.md`) |
+
+```bash
+rg '^[A-Z_]+_KEYS' scripts/agent_contracts.py
+make test-agent-offline    # contract lockdown
+```
+
+---
+
 ## Audit summary (Pass I — grep/diff/patch)
 
 | Issue | Root cause | Fix |

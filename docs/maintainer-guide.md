@@ -153,6 +153,28 @@ After any C++ change to control services: `make restart-agent-server` before liv
 
 ---
 
+## How to keep documentation aligned
+
+When changing agent-runtime behavior, update docs in the same PR:
+
+| Change type | Update |
+|-------------|--------|
+| New frozen key set | `scripts/agent_contracts.py` + `docs/agent-tooling.md` constant table |
+| New error + recovery | `MacControlRuntimeDiagnostics.mm` + `error-codes.md` + `fixtures/recovery/` |
+| New Makefile target | `Makefile` + `docs/build-and-test-system.md` + `docs/build-instructions.md` |
+| New RPC method | `headless-agent-control.md` + `tool.registry` if agent-safe |
+| Pass-level feature | `docs/agent-runtime-audit.md` |
+| Internal namespace | `internal_method_namespaces.json` + `agent-tooling.md` |
+
+```bash
+make test-docs-code-drift
+rg 'agent-runtime-audit|verify-agent-runtime-full' docs/ README.md
+```
+
+Drift test enforces: recovery hints in `error-codes.md`, internal namespaces in `agent-tooling.md`, Makefile targets, and contract key presence in `runtime-invariants.md`.
+
+---
+
 ## How to review changes with rg/git diff
 
 ```bash

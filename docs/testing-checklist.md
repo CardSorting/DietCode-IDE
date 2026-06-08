@@ -2,41 +2,103 @@
 
 Audit context: [Agent Runtime Audit](agent-runtime-audit.md). Full ladder: `make verify-agent-runtime-full`.
 
-## Agent / RPC surface
+---
 
-- [ ] `make agent-self-test` passes (offline, no socket)
+## Preflight (every change)
+
+- [ ] `make test` passes (C++ unit tests + offline self-test)
+- [ ] `make app` builds without warnings treated as errors
+- [ ] After C++ control changes: `make restart-agent-server` before live harnesses
 - [ ] `make agent-ready` → `make agent-status` reports `"ok":true`
-- [ ] `make control-smoke` emits NDJSON summary with `"ok":true`
-- [ ] `make agent-integration` passes smoke + ergonomics rollup
 - [ ] `python3 scripts/dietcode_agent_client.py --emit-config --json` shows resolved paths
-- [ ] Error envelopes use stable `string_code` (see [Error Codes](error-codes.md))
+
+---
+
+## Agent / RPC — offline
+
+- [ ] `make agent-self-test` passes (no socket)
 - [ ] `make test-agent-offline` passes (self-test + contract lockdown)
-- [ ] `make verify-agent-runtime` passes (full ladder)
-- [ ] Runtime contracts documented in [Runtime Contracts](runtime-contracts.md)
+- [ ] `make test-docs-code-drift` passes (docs ↔ fixtures ↔ source parity)
+- [ ] Error envelopes use stable `string_code` ([Error Codes](error-codes.md))
+- [ ] Runtime contracts documented ([Runtime Contracts](runtime-contracts.md))
+
+---
+
+## Agent / RPC — core live
+
+- [ ] `make control-smoke` emits NDJSON summary with `"ok":true`
+- [ ] `make test-rpc-transaction` passes
+- [ ] `make test-task-health` passes
 - [ ] `make test-operator-diagnostics` passes
 - [ ] `python3 scripts/dietcode_agent_client.py --diagnose --json` shows socket/RPC readiness
 - [ ] `make test-runtime-safety` passes
-- [ ] `make test-grep-diff-tooling` passes (literal grep/diff/patch contracts)
-- [ ] Grep/diff/patch contracts documented in [Agent Tooling](agent-tooling.md)
-- [ ] `make test-runtime-determinism` passes (state hashes, stale-write rejection)
-- [ ] `make test-transaction-kernel` passes (revision, batch atomicity, search parity)
-- [ ] `make test-harness-realism` passes (symlink escape, transport, concurrency)
-- [ ] `make test-deterministic-retrieval` passes (semantic quarantine, tool registry, literal/token search)
-- [ ] `search.semantic` returns `semantic_disabled` (4008) without `allowExperimental`
-- [ ] `tool.registry` / `tool.capabilities` list agent-safe deterministic methods
+- [ ] `make test-ergonomics` passes
+- [ ] `make agent-integration` passes smoke + ergonomics rollup
+
+---
+
+## Pass I — Grep / diff / patch
+
+- [ ] `make test-grep-diff-tooling` passes
+- [ ] Grep returns disk fallback hits headless (`filesReadFromDisk` > 0 when files on disk match)
+- [ ] Contracts documented in [Agent Tooling](agent-tooling.md)
+
+---
+
+## Pass II — Runtime determinism
+
+- [ ] `make test-runtime-determinism` passes
+- [ ] `stale_content` returned when `expectBeforeHash` mismatches
+- [ ] `mutationReceipt` present on successful `patch.apply`
+- [ ] Invariants in [Runtime Invariants](runtime-invariants.md)
+
+---
+
+## Pass III — Transaction kernel
+
+- [ ] `make test-transaction-kernel` passes
+- [ ] `workspace.revision` bumps after mutation
+- [ ] `patch.applyBatch` rolls back atomically on failure
+- [ ] `operation.status` resolves idempotency replay
+
+---
+
+## Pass IV — Harness realism
+
+- [ ] `make test-harness-realism` passes
+- [ ] `search.files` has no `score` field; `searchMode: deterministic_path_match`
+- [ ] Symlink paths skipped in search; patch rejects `symlink_target`
+- [ ] `workspace.snapshot` reports `complete` / `truncated` correctly
+
+---
+
+## Pass V — Deterministic retrieval
+
+- [ ] `make test-deterministic-retrieval` passes
+- [ ] `search.semantic` → `semantic_disabled` (4008) without `allowExperimental`
+- [ ] `analysis.searchRanked` → `ranked_search_disabled` (4008)
+- [ ] `tool.registry` / `tool.capabilities` list agent-safe methods
+- [ ] `analysis.*` / `language.*` documented as internal (not in registry)
+
+---
+
+## Pass VI — Agent failure traps
+
 - [ ] `make test-agent-workflow-smoke` passes (find/patch, stale recovery, batch rollback, deprecated recovery)
-- [ ] `make test-cli-agent-failures` passes (CLI bad JSON, deprecation, error-json envelopes)
-- [ ] `make test-docs-code-drift` passes (docs match contracts and recovery hints)
-- [ ] `make verify-agent-runtime-full` passes (full release ladder)
-- [ ] `make test-partial-success-closure` passes (batch/snapshot/diff partial-success parity)
-- [ ] `analysis.*` / `language.*` documented as internal (not in `tool.registry`)
-- [ ] Partial success fields (`complete`, `partial`, `warnings`) present on truncated reads
+- [ ] `make test-cli-agent-failures` passes
+- [ ] `make test-partial-success-closure` passes (batch/snapshot/diff enrichment)
+- [ ] Partial success fields (`complete`, `partial`, `warnings`) on truncated reads
 - [ ] Error envelopes include `nextRecommendedCommand`
-- [ ] Runtime invariants documented in [Runtime Invariants](runtime-invariants.md)
-- [ ] Runtime limits documented in [Runtime Safety](runtime-safety.md)
+
+---
+
+## Verification ladders
+
+- [ ] `make verify-agent-runtime` passes (14 checks)
+- [ ] `make verify-agent-runtime-full` passes (release ladder)
 - [ ] `make release-check-agent-runtime` passes before release
-- [ ] Contract versions documented in [Runtime Contracts](runtime-contracts.md)
 - [ ] Release notes filled from [template](templates/runtime-release-notes.md) when contracts change
+- [ ] Runtime limits in [Runtime Safety](runtime-safety.md)
 
 ---
 
@@ -53,6 +115,8 @@ Audit context: [Agent Runtime Audit](agent-runtime-audit.md). Full ladder: `make
 - Undo and redo.
 - Find in file returns line/column matches.
 
+---
+
 ## macOS manual tests
 
 - App launches without opening a terminal or scanning folders.
@@ -67,6 +131,8 @@ Audit context: [Agent Runtime Audit](agent-runtime-audit.md). Full ladder: `make
 - Canceling Save As leaves document open and dirty.
 - File permission errors show a plain-language alert.
 
+---
+
 ## Performance/trust checks
 
 - No network on launch.
@@ -74,6 +140,8 @@ Audit context: [Agent Runtime Audit](agent-runtime-audit.md). Full ladder: `make
 - No recursive folder scan on launch.
 - Idle CPU near zero.
 - No hidden background job is started by the MVP.
+
+---
 
 ## UX checks
 

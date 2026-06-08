@@ -77,20 +77,46 @@ Now let's add a unit test for the `TextBuffer` to ensure our core logic remains 
 
 ## 5. Experimenting with the Agent API
 
-Finally, let's interact with your running DietCode instance using the Python SDK.
+Interact with the headless control surface over the local Unix socket.
 
-1. Ensure DietCode is running (or run in headless mode: `make headless`).
-2. Open a new terminal and run:
+1. Build and start the server:
    ```bash
-   # Get the status of the IDE and its agent socket
+   make app
+   make restart-agent-server    # use after any C++ control-server change
+   make agent-ready
+   ```
+
+2. Preflight checks:
+   ```bash
    make agent-status
-   
-   # List all open editor tabs
+   make agent-self-test         # offline parser checks (no socket)
+   python3 scripts/dietcode_agent_client.py tool.capabilities --compact
+   ```
+
+3. Literal workspace search (agent-safe — no semantic layer):
+   ```bash
+   python3 scripts/dietcode_agent_client.py --grep CONTRACT --max-results 5 --compact
+   python3 scripts/dietcode_agent_client.py --search-literal CONTRACT --max-results 5 --compact
+   ```
+
+4. Inspect open files and workspace root:
+   ```bash
    python3 scripts/dietcode_agent_client.py --compact editor.getOpenFiles
+   python3 scripts/dietcode_agent_client.py --compact workspace.getRoot
+   ```
+
+5. Run the verification ladder:
+   ```bash
+   make test-agent-offline
+   make verify-agent-runtime
    ```
 
 ---
 
 ## Next Steps
-- Explore the **[Agent Integration Cookbook](agent-integration-cookbook.md)** to build your first automation.
-- Read the **[Technical Architecture](technical-architecture.md)** to understand how the layers interact.
+
+- [Agent Integration Cookbook](agent-integration-cookbook.md) — find/patch workflows and stale-content recovery
+- [Agent Runtime Audit](agent-runtime-audit.md) — what Passes I–VI implemented and why
+- [Headless Agent Control](headless-agent-control.md) — full RPC reference and CLI flags
+- [Technical Architecture](technical-architecture.md) — layers and transaction kernel
+- [Build Instructions](build-instructions.md) — all Makefile targets and troubleshooting

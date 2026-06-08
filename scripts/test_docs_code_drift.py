@@ -92,6 +92,29 @@ def test_frozen_key_sets_nonempty() -> None:
     assert "failureRecoveryHint" in TOOL_REGISTRY_ENTRY_KEYS
 
 
+def test_root_readme_mentions_audit_and_verify() -> None:
+    text = (REPO_ROOT / "README.md").read_text(encoding="utf-8")
+    for needle in ("agent-runtime-audit.md", "verify-agent-runtime-full", "restart-agent-server"):
+        assert needle in text, f"README.md missing {needle}"
+
+
+def test_build_instructions_mentions_agent_verify() -> None:
+    text = (DOCS / "build-instructions.md").read_text(encoding="utf-8")
+    for needle in ("verify-agent-runtime", "restart-agent-server", "test-docs-code-drift"):
+        assert needle in text, f"build-instructions.md missing {needle}"
+
+
+def test_agent_environment_mentions_restart_target() -> None:
+    text = (DOCS / "agent-environment.md").read_text(encoding="utf-8")
+    assert "restart-agent-server" in text, "agent-environment.md must document make restart-agent-server"
+
+
+def test_file_structure_documents_control_tree() -> None:
+    text = (DOCS / "file-structure.md").read_text(encoding="utf-8")
+    for needle in ("MacControlServer.mm", "agent_contracts.py", "fixtures/"):
+        assert needle in text, f"file-structure.md missing {needle}"
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Pass VI docs-to-code drift checks.")
     add_output_args(parser)
@@ -108,6 +131,10 @@ def main() -> int:
         ("drift.makefile_targets", test_makefile_has_required_targets),
         ("drift.contract_key_sets", test_contract_key_sets_documented),
         ("drift.frozen_key_sets_nonempty", test_frozen_key_sets_nonempty),
+        ("drift.root_readme", test_root_readme_mentions_audit_and_verify),
+        ("drift.build_instructions", test_build_instructions_mentions_agent_verify),
+        ("drift.agent_environment", test_agent_environment_mentions_restart_target),
+        ("drift.file_structure", test_file_structure_documents_control_tree),
     ]:
         recorder.run(name, fn)
 

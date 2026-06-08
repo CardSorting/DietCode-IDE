@@ -81,7 +81,7 @@ The headless control surface is documented as a deterministic local transaction 
 |-----|----------|
 | [Technical Architecture](technical-architecture.md) | Layer model, domain logic, platform shell |
 | [Technical Data Flow](technical-data-flow.md) | RPC lifecycle and async events |
-| [File Structure](file-structure.md) | Repository directory layout |
+| [File Structure](file-structure.md) | Repository layout (`control/`, `scripts/fixtures/`, harnesses) |
 | [Editor Internals](editor-internals.md) | Line-based buffer, undo, tokenization |
 | [Runtime Mechanics](runtime-mechanics.md) | Chip/Combo architecture, mutation locking |
 | [Deterministic Combo Runtime Spec](deterministic-combo-runtime-spec.md) | Combo execution specification |

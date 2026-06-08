@@ -47,3 +47,43 @@ The initial implementation uses `NSTextView` for the editor surface to provide i
 - **Main Thread:** Reserved for UI rendering and standard event processing.
 - **Control Thread:** Handles RPC requests from the Unix socket to ensure the UI remains responsive during large-scale agent operations.
 - **Worker Pool:** Used for background search, symbol indexing, and diff generation.
+
+---
+
+## Agent transaction kernel (Passes I–VI)
+
+The control surface is hardened as a **deterministic local transaction kernel** for autonomous agents. Full audit: [Agent Runtime Audit](agent-runtime-audit.md).
+
+### Read path
+
+```
+Agent request → MacControlServer → routing policy (read queue vs execution queue)
+              → service handler → MacControlSupport (editor buffer, disk fallback)
+              → partial-success enrichment → JSON envelope
+```
+
+- Grep and search use `literal_substring` only — sorted `path_line_column` results, scan accounting, no scores.
+- Symlinks: `skip_never_follow` during traversal; patch rejects symlink targets.
+
+### Mutation path
+
+```
+patch.validate → beforeContentHash + patchFingerprint
+patch.apply    → expectBeforeHash check → stale_content if drifted
+               → apply (editor or disk) → mutationReceipt
+workspace.revision → monotonic revisionId
+patch.applyBatch → atomic multi-file with rollback on failure
+operation.status → idempotency replay lookup
+```
+
+### Agent-safe catalog
+
+- `tool.registry` / `tool.capabilities` list methods with `agentSafe`, `deterministic`, `deprecated`, `replacementMethod`.
+- Internal namespaces (`analysis.*`, `language.*`, `chip.*`, …) are excluded from the agent-safe surface.
+- Quarantined: `search.semantic`, `analysis.searchRanked` → `4008` with recovery hints.
+
+### Contract enforcement
+
+Frozen response key sets live in `scripts/agent_contracts.py`. Harnesses in `scripts/test_*.py` validate live behavior; `make verify-agent-runtime-full` rolls up offline + live checks.
+
+Key implementation files: `MacControlSupport.mm` (enrichment), `MacControlWorkspaceState.mm` (revision), `MacControlToolRegistry.mm` (catalog).
