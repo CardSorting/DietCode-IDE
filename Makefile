@@ -28,6 +28,9 @@ AGENT_BRIDGE_DIR := agent-bridge
 AGENT_BRIDGE_DIST := $(AGENT_BRIDGE_DIR)/dist
 PACKAGED_BRIDGE := $(APP_RESOURCES)/agent-bridge
 PACKAGED_BRIDGE_CLI := $(APP_BIN)/dietcode-agent-client
+HERMES_PLUGIN_SRC := integrations/hermes-dietcode-plugin
+PACKAGED_HERMES_PLUGIN := $(APP_RESOURCES)/integrations/hermes/dietcode
+PACKAGED_ENABLE_AGENT := $(APP_BIN)/dietcode-enable-agent
 TEST_BIN := $(BUILD_DIR)/test_editor
 
 CORE_CPP := \
@@ -96,7 +99,7 @@ MACOS_MM := \
 	src/filesystem/FileWatcher.mm \
 	src/core/LSPClient.mm
 
-.PHONY: all app agent-bridge agent-bridge-fast run headless ensure-socket restart-agent-server restart-agent-server-fast agent-ready agent-status agent-ping agent-methods agent-capabilities agent-self-test test-agent-offline control-smoke test-task-health test-rpc-transaction test-ergonomics test-grep-diff-tooling test-runtime-determinism test-transaction-kernel test-harness-realism test-deterministic-retrieval test-agent-workflow-smoke test-agent-shell-tooling test-agent-shell-tooling-fast test-agent-shell-workflows test-agent-shell-workflows-fast test-authority-boundaries test-authority-boundaries-fast test-agent-bridge-authority test-cli-agent-failures test-docs-code-drift test-partial-success-closure test-broccoliq-runtime-memory test-broccoliq-runtime-memory-fast test-runtime-native-integration test-runtime-native-integration-fast test-agent-bridge test-agent-bridge-fast test-agent-integration setup-hermes-bridge test-hermes-bridge-audit test-hermes-bridge-workflows hermes-ide-watchdog verify-hermes-bridge agent-integration verify-agent-runtime verify-agent-runtime-fast verify-agent-runtime-full verify-agent-runtime-full-fast benchmark-agent-success benchmark-agent-success-fast benchmark-agent-success-report test-agent-success-report test clean
+.PHONY: all app agent-bridge agent-bridge-fast run headless ensure-socket restart-agent-server restart-agent-server-fast agent-ready agent-status agent-ping agent-methods agent-capabilities agent-self-test test-agent-offline control-smoke test-task-health test-rpc-transaction test-ergonomics test-grep-diff-tooling test-runtime-determinism test-transaction-kernel test-harness-realism test-deterministic-retrieval test-agent-workflow-smoke test-agent-shell-tooling test-agent-shell-tooling-fast test-agent-shell-workflows test-agent-shell-workflows-fast test-authority-boundaries test-authority-boundaries-fast test-agent-bridge-authority test-cli-agent-failures test-docs-code-drift test-partial-success-closure test-broccoliq-runtime-memory test-broccoliq-runtime-memory-fast test-runtime-native-integration test-runtime-native-integration-fast test-agent-bridge test-agent-bridge-fast test-agent-integration sync-hermes-plugin enable-hermes-agent setup-hermes-bridge test-hermes-bridge-audit test-hermes-bridge-workflows hermes-ide-watchdog verify-hermes-bridge agent-integration verify-agent-runtime verify-agent-runtime-fast verify-agent-runtime-full verify-agent-runtime-full-fast benchmark-agent-success benchmark-agent-success-fast benchmark-agent-success-report test-agent-success-report test clean
 
 all: app test
 
@@ -127,7 +130,27 @@ $(PACKAGED_BRIDGE_CLI): $(APP_BIN) resources/bin/dietcode-agent-client
 	cp resources/bin/dietcode-agent-client $(PACKAGED_BRIDGE_CLI)
 	chmod +x $(PACKAGED_BRIDGE_CLI)
 
-app: $(APP_MACOS) $(APP_RESOURCES) $(APP_BIN) $(PACKAGED_BRIDGE) $(PACKAGED_BRIDGE_CLI)
+$(PACKAGED_HERMES_PLUGIN): $(APP_RESOURCES)
+	@if [ ! -f "$(HERMES_PLUGIN_SRC)/plugin.yaml" ]; then \
+		echo "→ Syncing Hermes plugin (first build)"; \
+		./scripts/sync-hermes-plugin.sh; \
+	fi
+	rm -rf $(PACKAGED_HERMES_PLUGIN)
+	mkdir -p $(PACKAGED_HERMES_PLUGIN)
+	rsync -a --exclude broccolidb/node_modules --exclude broccolidb/scratch --exclude '__pycache__' --exclude '*.pyc' \
+		$(HERMES_PLUGIN_SRC)/ $(PACKAGED_HERMES_PLUGIN)/
+
+$(PACKAGED_ENABLE_AGENT): $(APP_BIN) resources/bin/dietcode-enable-agent
+	cp resources/bin/dietcode-enable-agent $(PACKAGED_ENABLE_AGENT)
+	chmod +x $(PACKAGED_ENABLE_AGENT)
+
+sync-hermes-plugin:
+	./scripts/sync-hermes-plugin.sh
+
+enable-hermes-agent:
+	./scripts/enable-hermes-agent.sh
+
+app: $(APP_MACOS) $(APP_RESOURCES) $(APP_BIN) $(PACKAGED_BRIDGE) $(PACKAGED_BRIDGE_CLI) $(PACKAGED_HERMES_PLUGIN) $(PACKAGED_ENABLE_AGENT)
 	cp resources/Info.plist $(APP_CONTENTS)/Info.plist
 	if [ -f resources/AppIcon.icns ]; then cp resources/AppIcon.icns $(APP_RESOURCES)/AppIcon.icns; fi
 	$(CXX) $(OBJCXXFLAGS) $(CORE_CPP) $(MACOS_MM) -framework Cocoa -lsqlite3 -o $(APP_MACOS)/$(APP_NAME)

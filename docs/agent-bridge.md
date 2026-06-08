@@ -39,6 +39,22 @@ Users install **one** DietCode app. The bridge ships inside the bundle:
 
 Repo source: `agent-bridge/`
 
+### Hermes Agent (optional companion)
+
+Hermes is **not** vendored into the IDE. `make app` also bundles the DietCode Hermes plugin:
+
+| Path | Role |
+|------|------|
+| `integrations/hermes-dietcode-plugin/` | Maintainer sync boundary (not Hermes core) |
+| `DietCode.app/Contents/Resources/integrations/hermes/dietcode/` | Plugin deployed to `~/.hermes/plugins/dietcode/` |
+| `DietCode.app/Contents/Resources/bin/dietcode-enable-agent` | One-shot enable (lazy Hermes install + plugin deploy) |
+
+```bash
+./scripts/sync-hermes-plugin.sh    # maintainers: refresh integrations/
+./scripts/enable-hermes-agent.sh   # users: enable without a Hermes checkout
+build/DietCode.app/Contents/Resources/bin/dietcode-enable-agent
+```
+
 ---
 
 ## Public bridge API

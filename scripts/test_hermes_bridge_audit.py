@@ -23,6 +23,11 @@ TOKEN_PATH = Path.home() / ".dietcode" / "session.token"
 SOCKET_PATH = Path.home() / ".dietcode" / "control.sock"
 CONNECT_BIN = HERMES_HOME / "bin" / "dietcode-ide-connect"
 IDE_MARKER = PLUGIN_ROOT / ".dietcode-ide-connected"
+INTEGRATIONS_PLUGIN = REPO_ROOT / "integrations" / "hermes-dietcode-plugin"
+BUNDLED_PLUGIN = REPO_ROOT / "build" / "DietCode.app" / "Contents" / "Resources" / "integrations" / "hermes" / "dietcode"
+ENABLE_AGENT_SCRIPT = REPO_ROOT / "scripts" / "enable-hermes-agent.sh"
+SYNC_SCRIPT = REPO_ROOT / "scripts" / "sync-hermes-plugin.sh"
+BUNDLED_ENABLE_AGENT = REPO_ROOT / "build" / "DietCode.app" / "Contents" / "Resources" / "bin" / "dietcode-enable-agent"
 
 REQUIRED_PLUGIN_FILES = (
     "lib/agent/ide_bridge_client.py",
@@ -30,7 +35,9 @@ REQUIRED_PLUGIN_FILES = (
     "lib/tools/ide_bridge_tools.py",
 )
 
-SOURCE_PLUGIN = REPO_ROOT.parent / "hermes-agent-main" / "plugins" / "dietcode-plugin" / "dietcode"
+SOURCE_PLUGIN = INTEGRATIONS_PLUGIN if INTEGRATIONS_PLUGIN.is_dir() else (
+    REPO_ROOT.parent / "hermes-agent-main" / "plugins" / "dietcode-plugin" / "dietcode"
+)
 if not SOURCE_PLUGIN.is_dir():
     SOURCE_PLUGIN = Path("/Users/bozoegg/Downloads/hermes-agent-main/plugins/dietcode-plugin/dietcode")
 
@@ -79,14 +86,34 @@ def _run_bridge(args: list[str]) -> tuple[bool, str]:
 
 def test_setup_script_exists(rec: Recorder) -> None:
     rec.record("audit.setup_script", SETUP_SCRIPT.is_file())
+    rec.record("audit.enable_agent_script", ENABLE_AGENT_SCRIPT.is_file())
+    rec.record("audit.sync_plugin_script", SYNC_SCRIPT.is_file())
     rec.record("audit.watchdog_script", WATCHDOG_SCRIPT.is_file())
     rec.record("audit.workflow_script", WORKFLOW_SCRIPT.is_file())
 
 
 def test_makefile_targets(rec: Recorder) -> None:
     text = MAKEFILE.read_text(encoding="utf-8")
-    for target in ("setup-hermes-bridge:", "test-hermes-bridge-audit:", "verify-hermes-bridge:", "test-hermes-bridge-workflows:"):
+    for target in (
+        "sync-hermes-plugin:",
+        "enable-hermes-agent:",
+        "setup-hermes-bridge:",
+        "test-hermes-bridge-audit:",
+        "verify-hermes-bridge:",
+        "test-hermes-bridge-workflows:",
+        "PACKAGED_HERMES_PLUGIN",
+        "dietcode-enable-agent",
+    ):
         rec.record(f"audit.makefile.{target.rstrip(':')}", target in text)
+
+
+def test_integrations_plugin(rec: Recorder) -> None:
+    rec.record("audit.integrations_plugin", INTEGRATIONS_PLUGIN.is_dir() and (INTEGRATIONS_PLUGIN / "plugin.yaml").is_file(), str(INTEGRATIONS_PLUGIN))
+
+
+def test_bundled_plugin_in_app(rec: Recorder) -> None:
+    rec.record("audit.bundled_plugin_in_app", BUNDLED_PLUGIN.is_dir() and (BUNDLED_PLUGIN / "plugin.yaml").is_file(), str(BUNDLED_PLUGIN))
+    rec.record("audit.bundled_enable_agent", BUNDLED_ENABLE_AGENT.is_file(), str(BUNDLED_ENABLE_AGENT))
 
 
 def test_plugin_files_installed(rec: Recorder) -> None:
@@ -102,6 +129,7 @@ def test_source_plugin_has_retry(rec: Recorder) -> None:
     text = client.read_text(encoding="utf-8")
     rec.record("audit.source_retry", "reconnect_bridge" in text and "_execute_bridge_call" in text)
     rec.record("audit.source_post_hook", "_post_tool_call" in (SOURCE_PLUGIN / "lib/runtime/ide_hooks.py").read_text(encoding="utf-8"))
+    rec.record("audit.source_app_bundle_resolve", "resolve_app_bundle" in text)
 
 
 def test_tools_loader_contract(rec: Recorder) -> None:
@@ -307,6 +335,8 @@ def main() -> int:
     rec = Recorder()
     test_setup_script_exists(rec)
     test_makefile_targets(rec)
+    test_integrations_plugin(rec)
+    test_bundled_plugin_in_app(rec)
     test_plugin_files_installed(rec)
     test_source_plugin_has_retry(rec)
     test_tools_loader_contract(rec)

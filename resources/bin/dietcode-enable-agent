@@ -1,0 +1,34 @@
+#!/bin/bash
+# Enable Hermes Agent from a bundled DietCode.app (no source checkout required).
+set -euo pipefail
+DIR="$(cd "$(dirname "$0")" && pwd)"
+APP_BUNDLE="$(cd "$DIR/../../.." && pwd)"
+IDE_ROOT="$(cd "$APP_BUNDLE/../../.." 2>/dev/null && pwd || true)"
+if [[ -f "${IDE_ROOT}/scripts/enable-hermes-agent.sh" ]]; then
+  export DIETCODE_APP_BUNDLE="${APP_BUNDLE}"
+  exec "${IDE_ROOT}/scripts/enable-hermes-agent.sh" "$@"
+fi
+export DIETCODE_APP_BUNDLE="${APP_BUNDLE}"
+export DIETCODE_IDE_ROOT="${APP_BUNDLE}"
+export DIETCODE_APP_PATH="${APP_BUNDLE}/Contents/MacOS/DietCode"
+export DIETCODE_BRIDGE_CLI="${APP_BUNDLE}/Contents/Resources/bin/dietcode-agent-client"
+HERMES_HOME="${HERMES_HOME:-$HOME/.hermes}"
+PLUGIN_SRC="${APP_BUNDLE}/Contents/Resources/integrations/hermes/dietcode"
+if [[ ! -f "${PLUGIN_SRC}/plugin.yaml" ]]; then
+  echo "Bundled Hermes plugin missing. Reinstall DietCode.app." >&2
+  exit 1
+fi
+if ! command -v hermes >/dev/null 2>&1 && [[ ! -x "${HERMES_HOME}/bin/hermes" ]]; then
+  echo "→ Installing Hermes Agent"
+  curl -fsSL https://raw.githubusercontent.com/NousResearch/hermes-agent/main/scripts/install.sh | bash -s -- --skip-setup
+fi
+export PATH="${HERMES_HOME}/bin:${PATH}"
+mkdir -p "${HERMES_HOME}/plugins"
+rsync -a --delete \
+  --exclude broccolidb/node_modules \
+  --exclude broccolidb/scratch \
+  --exclude '__pycache__' \
+  --exclude '*.pyc' \
+  "${PLUGIN_SRC}/" "${HERMES_HOME}/plugins/dietcode/"
+python3 "${HERMES_HOME}/plugins/dietcode/install.py"
+echo "Done. Restart Hermes — /dietcode ide"

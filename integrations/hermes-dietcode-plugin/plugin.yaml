@@ -1,0 +1,16 @@
+name: dietcode
+version: 1.8.0
+description: >
+  BroccoliDB, BroccoliQ, JoyZoning, JSDP, and DietCode IDE Agent Bridge for Hermes.
+  Drag-and-drop to ~/.hermes/plugins/dietcode/ — auto_enable handles the rest.
+  IDE bridge auto-connects on session start when DietCode IDE is installed.
+  Verify with /dietcode doctor and /dietcode ide.
+author: DietCode
+kind: standalone
+auto_enable: true
+provides_hooks:
+  - on_session_start
+  - on_session_end
+  - pre_tool_call
+  - post_tool_call
+  - transform_tool_result
