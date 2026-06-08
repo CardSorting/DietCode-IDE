@@ -46,6 +46,7 @@ def build_manifest() -> dict[str, str]:
         "minHermesVersion": str(existing.get("minHermesVersion") or "0.15.0"),
         "schemaVersion": str(existing.get("schemaVersion") or "1.6.2"),
         "contractVersion": str(existing.get("contractVersion") or "1.0.0"),
+        "chatVersion": str(existing.get("chatVersion") or "1.0.0"),
     }
 
 

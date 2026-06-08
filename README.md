@@ -178,6 +178,18 @@ build/DietCode.app/Contents/Resources/bin/dietcode-agent-client patch safe-file 
 
 Full API and recipes: [Agent Bridge](docs/agent-bridge.md) · [Integration Guide](docs/agent-bridge-integration-guide.md) · [Bridge Audit](docs/agent-bridge-audit.md).
 
+### Agent Chat (Hermes in IDE)
+
+DietCode includes a native **Agent Chat sidebar** (⌘⇧A) wired to the bundled `dietcode-agent-chat` CLI — real Hermes + `dietcode_ide` + agent bridge, not a mock doctor shell.
+
+```bash
+build/DietCode.app/Contents/Resources/bin/dietcode-enable-agent --doctor
+build/DietCode.app/Contents/Resources/bin/dietcode-agent-chat \
+  --workspace /path/to/project --prompt "inspect this project"
+```
+
+See [Agent Chat Sidebar](docs/agent-chat-sidebar.md).
+
 ---
 
 ## Runtime guarantees

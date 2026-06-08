@@ -2,6 +2,7 @@ CXX := clang++
 
 # Header search paths
 INC_FLAGS := -I./src \
+             -I./src/platform/macos \
              -I./src/platform/macos/control \
              -I./src/platform/macos/control/categories \
              -I./src/platform/macos/control/services \
@@ -22,6 +23,7 @@ APP_NAME := DietCode
 APP_BUNDLE := $(BUILD_DIR)/$(APP_NAME).app
 APP_CONTENTS := $(APP_BUNDLE)/Contents
 APP_MACOS := $(APP_CONTENTS)/MacOS
+APP_BINARY := $(APP_MACOS)/$(APP_NAME)
 APP_RESOURCES := $(APP_CONTENTS)/Resources
 APP_BIN := $(APP_RESOURCES)/bin
 AGENT_BRIDGE_DIR := agent-bridge
@@ -32,6 +34,9 @@ HERMES_PLUGIN_SRC := integrations/hermes-dietcode-plugin
 PACKAGED_HERMES_PLUGIN := $(APP_RESOURCES)/integrations/hermes/dietcode
 PACKAGED_ENABLE_AGENT := $(APP_BIN)/dietcode-enable-agent
 PACKAGED_ENABLE_AGENT_PY := $(APP_BIN)/dietcode-enable-agent.py
+PACKAGED_AGENT_CHAT := $(APP_BIN)/dietcode-agent-chat
+PACKAGED_AGENT_CHAT_PY := $(APP_BIN)/dietcode-agent-chat.py
+PACKAGED_AGENT_BUNDLE_PY := $(APP_BIN)/dietcode_agent_bundle.py
 PACKAGED_BUNDLE_MANIFEST := $(APP_RESOURCES)/dietcode-agent-bundle.manifest.json
 BUNDLE_MANIFEST_SRC := resources/dietcode-agent-bundle.manifest.json
 TEST_BIN := $(BUILD_DIR)/test_editor
@@ -58,6 +63,8 @@ MACOS_MM := \
 	src/platform/macos/ui/controllers/categories/MacWindow+Settings.mm \
 	src/platform/macos/ui/controllers/categories/MacWindow+Recovery.mm \
 	src/platform/macos/ui/controllers/categories/MacWindow+AgentAPI.mm \
+	src/platform/macos/ui/controllers/categories/MacWindow+AgentSidebar.mm \
+	src/platform/macos/MacAgentSidebar.mm \
 	src/platform/macos/ui/controllers/categories/MacWindow+CommandPalette.mm \
 	src/platform/macos/ui/utils/MacWindowUtilities.mm \
 	src/platform/macos/ui/views/MacEditorComponents.mm \
@@ -102,7 +109,9 @@ MACOS_MM := \
 	src/filesystem/FileWatcher.mm \
 	src/core/LSPClient.mm
 
-.PHONY: all app agent-bridge agent-bridge-fast run headless ensure-socket restart-agent-server restart-agent-server-fast agent-ready agent-status agent-ping agent-methods agent-capabilities agent-self-test test-agent-offline control-smoke test-task-health test-rpc-transaction test-ergonomics test-grep-diff-tooling test-runtime-determinism test-transaction-kernel test-harness-realism test-deterministic-retrieval test-agent-workflow-smoke test-agent-shell-tooling test-agent-shell-tooling-fast test-agent-shell-workflows test-agent-shell-workflows-fast test-authority-boundaries test-authority-boundaries-fast test-agent-bridge-authority test-cli-agent-failures test-docs-code-drift test-partial-success-closure test-broccoliq-runtime-memory test-broccoliq-runtime-memory-fast test-runtime-native-integration test-runtime-native-integration-fast test-agent-bridge test-agent-bridge-fast test-agent-integration sync-hermes-plugin enable-hermes-agent test-dietcode-enable-agent setup-hermes-bridge test-hermes-bridge-audit test-hermes-bridge-workflows hermes-ide-watchdog verify-hermes-bridge agent-integration verify-agent-runtime verify-agent-runtime-fast verify-agent-runtime-full verify-agent-runtime-full-fast benchmark-agent-success benchmark-agent-success-fast benchmark-agent-success-report test-agent-success-report test clean
+AGENT_CHAT_BUNDLE := $(APP_BINARY) $(PACKAGED_BRIDGE) $(PACKAGED_BRIDGE_CLI) $(PACKAGED_HERMES_PLUGIN) $(PACKAGED_ENABLE_AGENT) $(PACKAGED_ENABLE_AGENT_PY) $(PACKAGED_AGENT_CHAT) $(PACKAGED_AGENT_CHAT_PY) $(PACKAGED_AGENT_BUNDLE_PY) $(PACKAGED_BUNDLE_MANIFEST)
+
+.PHONY: all app agent-chat-bundle agent-bridge agent-bridge-fast run headless ensure-socket restart-agent-server restart-agent-server-fast agent-ready agent-status agent-ping agent-methods agent-capabilities agent-self-test test-agent-offline control-smoke test-task-health test-rpc-transaction test-ergonomics test-grep-diff-tooling test-runtime-determinism test-transaction-kernel test-harness-realism test-deterministic-retrieval test-agent-workflow-smoke test-agent-shell-tooling test-agent-shell-tooling-fast test-agent-shell-workflows test-agent-shell-workflows-fast test-authority-boundaries test-authority-boundaries-fast test-agent-bridge-authority test-cli-agent-failures test-docs-code-drift test-partial-success-closure test-broccoliq-runtime-memory test-broccoliq-runtime-memory-fast test-runtime-native-integration test-runtime-native-integration-fast test-agent-bridge test-agent-bridge-fast test-agent-integration sync-hermes-plugin enable-hermes-agent test-dietcode-enable-agent test-dietcode-agent-chat verify-agent-chat-sidebar setup-hermes-bridge test-hermes-bridge-audit test-hermes-bridge-workflows hermes-ide-watchdog verify-hermes-bridge agent-integration verify-agent-runtime verify-agent-runtime-fast verify-agent-runtime-full verify-agent-runtime-full-fast benchmark-agent-success benchmark-agent-success-fast benchmark-agent-success-report test-agent-success-report test clean
 
 all: app test
 
@@ -156,16 +165,30 @@ $(PACKAGED_BUNDLE_MANIFEST): $(BUNDLE_MANIFEST_SRC) $(APP_RESOURCES)
 $(PACKAGED_ENABLE_AGENT_PY): scripts/dietcode_enable_agent.py $(APP_BIN)
 	cp scripts/dietcode_enable_agent.py $(PACKAGED_ENABLE_AGENT_PY)
 
+$(PACKAGED_AGENT_CHAT): $(APP_BIN) resources/bin/dietcode-agent-chat
+	cp resources/bin/dietcode-agent-chat $(PACKAGED_AGENT_CHAT)
+	chmod +x $(PACKAGED_AGENT_CHAT)
+
+$(PACKAGED_AGENT_CHAT_PY): scripts/dietcode_agent_chat.py $(APP_BIN)
+	cp scripts/dietcode_agent_chat.py $(PACKAGED_AGENT_CHAT_PY)
+
+$(PACKAGED_AGENT_BUNDLE_PY): scripts/dietcode_agent_bundle.py $(APP_BIN)
+	cp scripts/dietcode_agent_bundle.py $(PACKAGED_AGENT_BUNDLE_PY)
+
 sync-hermes-plugin:
 	./scripts/sync-hermes-plugin.sh
 
 enable-hermes-agent:
 	./scripts/enable-hermes-agent.sh
 
-app: $(APP_MACOS) $(APP_RESOURCES) $(APP_BIN) $(PACKAGED_BRIDGE) $(PACKAGED_BRIDGE_CLI) $(PACKAGED_HERMES_PLUGIN) $(PACKAGED_ENABLE_AGENT) $(PACKAGED_ENABLE_AGENT_PY) $(PACKAGED_BUNDLE_MANIFEST)
+$(APP_BINARY): $(APP_MACOS) $(CORE_CPP) $(MACOS_MM)
+	$(CXX) $(OBJCXXFLAGS) $(CORE_CPP) $(MACOS_MM) -framework Cocoa -lsqlite3 -o $(APP_BINARY)
+
+agent-chat-bundle: $(AGENT_CHAT_BUNDLE)
+
+app: $(APP_RESOURCES) $(APP_BIN) $(AGENT_CHAT_BUNDLE)
 	cp resources/Info.plist $(APP_CONTENTS)/Info.plist
 	if [ -f resources/AppIcon.icns ]; then cp resources/AppIcon.icns $(APP_RESOURCES)/AppIcon.icns; fi
-	$(CXX) $(OBJCXXFLAGS) $(CORE_CPP) $(MACOS_MM) -framework Cocoa -lsqlite3 -o $(APP_MACOS)/$(APP_NAME)
 
 run: app
 	open $(APP_BUNDLE)
@@ -328,13 +351,21 @@ hermes-ide-watchdog:
 	chmod +x scripts/hermes-ide-watchdog.sh
 	./scripts/hermes-ide-watchdog.sh
 
-test-dietcode-enable-agent: app
+test-dietcode-enable-agent: agent-chat-bundle
 	python3 scripts/test_dietcode_enable_agent.py
+
+test-dietcode-agent-chat: agent-chat-bundle
+	python3 scripts/test_dietcode_agent_chat.py
+
+verify-agent-chat-sidebar: agent-chat-bundle
+	python3 scripts/verify_agent_chat_sidebar.py
 
 verify-hermes-bridge: setup-hermes-bridge
 	python3 scripts/test_hermes_bridge_audit.py --compact
 	python3 scripts/test_hermes_bridge_workflows.py --compact
 	python3 scripts/test_dietcode_enable_agent.py
+	python3 scripts/test_dietcode_agent_chat.py
+	python3 scripts/verify_agent_chat_sidebar.py
 
 test-agent-bridge: restart-agent-server
 	cd $(AGENT_BRIDGE_DIR) && npm test

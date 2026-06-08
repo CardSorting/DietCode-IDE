@@ -54,6 +54,11 @@
 - (void)setupFilesUI;
 @end
 
+@interface DietCodeWindowController (AgentSidebar)
+- (void)setupAgentSidebar;
+- (void)toggleAgentSidebar:(id)sender;
+@end
+
 @interface DietCodeWindowController (Layout)
 - (void)buildInterface;
 - (void)buildBottomTabViews;

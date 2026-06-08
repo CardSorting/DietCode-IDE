@@ -27,7 +27,11 @@ build/DietCode.app/Contents/Resources/bin/dietcode-enable-agent --doctor
 build/DietCode.app/Contents/Resources/bin/dietcode-enable-agent --dry-run
 build/DietCode.app/Contents/Resources/bin/dietcode-enable-agent
 build/DietCode.app/Contents/Resources/bin/dietcode-enable-agent --uninstall
+build/DietCode.app/Contents/Resources/bin/dietcode-agent-chat \
+  --workspace /path/to/project --prompt "inspect this project"
 ```
+
+Agent Chat sidebar in the IDE uses `dietcode-agent-chat` for real Hermes sessions.
 
 Trust guarantees:
 

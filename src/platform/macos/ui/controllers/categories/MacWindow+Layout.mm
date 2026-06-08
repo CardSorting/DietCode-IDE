@@ -82,6 +82,7 @@ using namespace dietcode::platform::macos;
 
     [self prepareSidebarPanels];
     [self buildBottomTabViews];
+    [self setupAgentSidebar];
     [self applyThemeColors];
 }
 

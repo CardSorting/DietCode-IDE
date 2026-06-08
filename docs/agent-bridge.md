@@ -48,6 +48,7 @@ Hermes is **not** vendored into the IDE. `make app` also bundles the DietCode He
 | `integrations/hermes-dietcode-plugin/` | Maintainer sync boundary (not Hermes core) |
 | `DietCode.app/Contents/Resources/integrations/hermes/dietcode/` | Plugin deployed to `~/.hermes/plugins/dietcode/` |
 | `DietCode.app/Contents/Resources/bin/dietcode-enable-agent` | One-shot enable (lazy Hermes install + plugin deploy) |
+| `DietCode.app/Contents/Resources/bin/dietcode-agent-chat` | Bounded Hermes chat (`dietcode_ide` guardrails) |
 
 DietCode now ships a **bundled agent integration artifact**, not merely a benchmark bridge.
 
@@ -64,7 +65,15 @@ Trust + update safety:
 - Resolves `/Applications/DietCode.app`, `~/Applications/DietCode.app`, and local `build/DietCode.app`
 - Backs up `config.yaml`, `.env`, and the installed plugin before any write
 - Prints an exact change log (env keys, plugin version, config merge results)
-- Bundle manifest: `dietcode-agent-bundle.manifest.json` (runtime, bridge, plugin, min Hermes versions)
+- Bundle manifest: `dietcode-agent-bundle.manifest.json` (runtime, bridge, plugin, chat, min Hermes versions)
+
+Agent Chat sidebar (native UI): [Agent Chat Sidebar](agent-chat-sidebar.md)
+
+```bash
+build/DietCode.app/Contents/Resources/bin/dietcode-agent-chat \
+  --workspace /path/to/project \
+  --prompt "inspect this project"
+```
 
 ---
 

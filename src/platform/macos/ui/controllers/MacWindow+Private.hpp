@@ -1,6 +1,7 @@
 #pragma once
 
 #import "MacWindow.hpp"
+#import "MacAgentSidebar.hpp"
 #include "filesystem/FileService.hpp"
 #include "MacFileDialog.hpp"
 #include "core/LSPClient.hpp"
@@ -34,6 +35,7 @@
 
 @property(nonatomic, strong) NSSplitView* horizontalSplit;
 @property(nonatomic, strong) NSSplitView* verticalSplit;
+@property(nonatomic, strong) DietCodeAgentSidebarView* agentSidebarView;
 
 @property(nonatomic, strong) NSView* filesSidebarView;
 @property(nonatomic, strong) NSView* searchSidebarView;

@@ -65,6 +65,7 @@
     [viewMenu addItem:[self itemWithTitle:@"Open Welcome" action:@selector(showWelcome:) key:@"" modifiers:0 target:target]];
     [viewMenu addItem:[self itemWithTitle:@"Command Palette…" action:@selector(showCommandPalette:) key:@"p" modifiers:NSEventModifierFlagCommand | NSEventModifierFlagShift target:target]];
     [viewMenu addItem:[self itemWithTitle:@"Toggle Sidebar" action:@selector(toggleSidebar:) key:@"b" modifiers:NSEventModifierFlagCommand target:target]];
+    [viewMenu addItem:[self itemWithTitle:@"Toggle Agent Sidebar" action:@selector(toggleAgentSidebar:) key:@"a" modifiers:NSEventModifierFlagCommand | NSEventModifierFlagShift target:target]];
     [viewMenuItem setSubmenu:viewMenu];
 
     NSMenuItem* goMenuItem = [[NSMenuItem alloc] init];

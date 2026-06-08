@@ -1,0 +1,31 @@
+#!/bin/bash
+# DietCode bounded agent chat — delegates to Python controller.
+set -euo pipefail
+DIR="$(cd "$(dirname "$0")" && pwd)"
+APP_BUNDLE="$(cd "$DIR/../../.." && pwd)"
+
+if [[ -z "${DIETCODE_APP_BUNDLE:-}" && -d "${APP_BUNDLE}/Contents/MacOS" ]]; then
+  export DIETCODE_APP_BUNDLE="${APP_BUNDLE}"
+fi
+
+PY_SCRIPT="${DIR}/dietcode-agent-chat.py"
+if [[ ! -f "${PY_SCRIPT}" ]]; then
+  REPO_ROOT="$(cd "${APP_BUNDLE}/../../.." 2>/dev/null && pwd || true)"
+  if [[ -f "${REPO_ROOT}/scripts/dietcode_agent_chat.py" ]]; then
+    PY_SCRIPT="${REPO_ROOT}/scripts/dietcode_agent_chat.py"
+  fi
+fi
+
+if [[ ! -f "${PY_SCRIPT}" ]]; then
+  echo "dietcode-agent-chat controller missing. Reinstall DietCode.app." >&2
+  exit 1
+fi
+
+export PYTHONPATH="${DIR}:${PYTHONPATH:-}"
+if [[ -f "${DIR}/dietcode_agent_bundle.py" ]]; then
+  export PYTHONPATH="${DIR}:${PYTHONPATH}"
+elif [[ -n "${REPO_ROOT:-}" && -f "${REPO_ROOT}/scripts/dietcode_agent_bundle.py" ]]; then
+  export PYTHONPATH="${REPO_ROOT}/scripts:${PYTHONPATH}"
+fi
+
+exec python3 "${PY_SCRIPT}" "$@"
