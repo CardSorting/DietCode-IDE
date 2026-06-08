@@ -8,6 +8,16 @@ import {
   fetchTimeline,
   verifyFast,
 } from '../adapters/runtimeAdapter.js';
+import {
+  shellCatSmall,
+  shellCd,
+  shellHead,
+  shellPwd,
+  shellRg,
+  shellSedRange,
+  shellTail,
+  type ShellRgOptions,
+} from '../adapters/shellAdapter.js';
 import { safePatchBatch } from '../workflows/safePatchBatch.js';
 import { safePatchFile } from '../workflows/safePatchFile.js';
 import { resolveConnectOptions, waitForReady } from './connection.js';
@@ -149,5 +159,46 @@ export class DietCodeBridgeClient {
 
   async verifyFast(): Promise<VerifyFastResult> {
     return verifyFast(this.transport);
+  }
+
+  async shellPwd(): Promise<BridgeResult<Record<string, unknown>>> {
+    return shellPwd(this.transport);
+  }
+
+  async shellCd(path: string): Promise<BridgeResult<Record<string, unknown>>> {
+    return shellCd(this.transport, path);
+  }
+
+  async shellRg(
+    pattern: string,
+    options?: ShellRgOptions,
+  ): Promise<BridgeResult<Record<string, unknown>>> {
+    return shellRg(this.transport, pattern, options);
+  }
+
+  async shellHead(
+    path: string,
+    lines?: number,
+  ): Promise<BridgeResult<Record<string, unknown>>> {
+    return shellHead(this.transport, path, lines);
+  }
+
+  async shellTail(
+    path: string,
+    lines?: number,
+  ): Promise<BridgeResult<Record<string, unknown>>> {
+    return shellTail(this.transport, path, lines);
+  }
+
+  async shellSedRange(
+    path: string,
+    startLine: number,
+    endLine: number,
+  ): Promise<BridgeResult<Record<string, unknown>>> {
+    return shellSedRange(this.transport, path, startLine, endLine);
+  }
+
+  async shellCatSmall(path: string): Promise<BridgeResult<Record<string, unknown>>> {
+    return shellCatSmall(this.transport, path);
   }
 }

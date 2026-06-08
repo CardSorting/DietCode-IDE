@@ -60,6 +60,7 @@ describe('bridge.staleRecovery', () => {
       assert.equal(result.expectedBeforeHash, BEFORE_HASH);
       assert.equal(result.currentContentHash, CURRENT_HASH);
       assert.equal(result.nextRecommendedCommand, 'patch.validate');
+      assert.equal(result.recoverySource, 'runtime');
       assert.equal(transport.calls.filter((c) => c.method === 'patch.apply').length, 1);
     }
   });

@@ -2,6 +2,8 @@
   "schemaVersion": "1.0.0",
   "mutationAuthority": "cpp_kernel",
   "recordAuthority": "runtime_journal",
+  "currentStateAuthority": "workspace_live_read",
+  "notCurrentFileTruth": true,
   "methods": [
     "runtime.diagnostics",
     "runtime.status",

@@ -1,6 +1,10 @@
 #!/usr/bin/env python3
 # pass-viii-native
 # broccoliq-memory-test
+# pass-viii-native
+# broccoliq-memory-test
+# pass-viii-native
+# broccoliq-memory-test
 # broccoliq-memory-test
 # broccoliq-memory-test
 # pass-viii-native
@@ -260,6 +264,16 @@ ERROR_RECOVERY_HINTS = {
     "symlink_target": {"recovery_hint": "use_non_symlink_target_path", "nextRecommendedCommand": "file.stat"},
     "patch_failed": {"recovery_hint": "run_patch_preview_or_patch_validate", "nextRecommendedCommand": "patch.validate"},
     "nested_call_timeout": {"recovery_hint": "reduce_concurrency_or_retry_later", "nextRecommendedCommand": "operation.status"},
+    "shell_timeout": {"recovery_hint": "narrow_search_or_retry_later", "nextRecommendedCommand": "shell.rg"},
+    "shell_truncated": {"recovery_hint": "narrow_range_or_paginate", "nextRecommendedCommand": "shell.sedRange"},
+    "shell_binary_file": {"recovery_hint": "use_file_stat_or_skip_binary", "nextRecommendedCommand": "file.stat"},
+    "shell_file_too_large": {"recovery_hint": "use_shell_head_tail_or_sedRange", "nextRecommendedCommand": "shell.sedRange"},
+    "shell_directory_target": {"recovery_hint": "use_shell_cd_or_shell_rg", "nextRecommendedCommand": "shell.rg"},
+    "shell_invalid_range": {"recovery_hint": "verify_line_bounds_with_shell_sedRange", "nextRecommendedCommand": "shell.sedRange"},
+    "shell_outside_workspace": {"recovery_hint": "use_workspace_relative_path", "nextRecommendedCommand": "shell.pwd"},
+    "shell_symlink_escape": {"recovery_hint": "use_non_symlink_target_path", "nextRecommendedCommand": "file.stat"},
+    "shell_command_not_allowed": {"recovery_hint": "use_documented_shell_methods", "nextRecommendedCommand": "tool.capabilities"},
+    "shell_rg_failed": {"recovery_hint": "verify_pattern_and_path", "nextRecommendedCommand": "shell.rg"},
 }
 
 # CONTRACT: tool.capabilities response keys.
@@ -372,6 +386,8 @@ RUNTIME_DIAGNOSTICS_KEYS = frozenset({
     "droppedTelemetryCount",
     "mutationAuthority",
     "recordAuthority",
+    "currentStateAuthority",
+    "notCurrentFileTruth",
     "workspacePath",
     "startup",
     "runtimeRecoveredFromShutdown",
@@ -471,6 +487,14 @@ MEMORY_VERIFICATION_KEYS = frozenset({
     "mode",
 })
 
+# CONTRACT: Pass XI — journal authority boundary labels (memory/history only, not live file truth).
+JOURNAL_AUTHORITY_KEYS = frozenset({
+    "recordAuthority",
+    "mutationAuthority",
+    "currentStateAuthority",
+    "notCurrentFileTruth",
+})
+
 # CONTRACT: runtime.timeline response keys.
 RUNTIME_TIMELINE_KEYS = frozenset({
     "mode",
@@ -485,7 +509,7 @@ RUNTIME_TIMELINE_KEYS = frozenset({
     "warnings",
     "nextRecommendedCommand",
     "recoveryHint",
-})
+}) | JOURNAL_AUTHORITY_KEYS
 
 # CONTRACT: runtime.timeline event keys.
 RUNTIME_TIMELINE_EVENT_KEYS = frozenset({
@@ -531,6 +555,18 @@ MEMORY_RPC_METHODS = frozenset({
     "memory.verify.record",
     "memory.verify.latest",
     "memory.verify.history",
+})
+
+# CONTRACT: Pass XI — bridge recovery provenance fields.
+BRIDGE_RECOVERY_SOURCE_KEYS = frozenset({
+    "recoverySource",
+    "nextCommandSource",
+})
+
+# CONTRACT: Pass XI — safePatch live hash authority (never journal-derived).
+SAFE_PATCH_HASH_AUTHORITY = frozenset({
+    "live_validate",
+    "live_stat",
 })
 
 # CONTRACT: BroccoliQ memory safety boundary — memory layer must never expose mutation authority.
@@ -585,6 +621,73 @@ FILE_STAT_KEYS = frozenset({
     "pathEscapesWorkspace",
 })
 
+# CONTRACT: shell.* shared envelope keys (Pass IX).
+SHELL_ENVELOPE_KEYS = frozenset({
+    "ok",
+    "complete",
+    "partial",
+    "command",
+    "cwdBefore",
+    "cwdAfter",
+    "workspaceRoot",
+    "pathResolved",
+    "exitCode",
+    "stdout",
+    "stderr",
+    "truncated",
+    "bytesRead",
+    "lineCount",
+    "warnings",
+    "recoveryHint",
+    "nextRecommendedCommand",
+})
+
+# CONTRACT: shell.rg top-level result keys.
+SHELL_RG_RESPONSE_KEYS = SHELL_ENVELOPE_KEYS | frozenset({
+    "matches",
+    "matchCount",
+    "filesSearched",
+    "filesSkipped",
+    "filesSkippedBinary",
+    "filesSkippedSymlink",
+    "filesSkippedExcluded",
+    "searchMode",
+    "sortOrder",
+    "hiddenPolicy",
+    "symlinkPolicy",
+})
+
+# CONTRACT: shell.rg match row keys.
+SHELL_RG_MATCH_KEYS = frozenset({
+    "path",
+    "line",
+    "column",
+    "preview",
+})
+
+# CONTRACT: shell.head/tail/sedRange extended keys.
+SHELL_RANGE_RESPONSE_KEYS = SHELL_ENVELOPE_KEYS | frozenset({
+    "startLine",
+    "endLine",
+    "fileLineCount",
+    "hasMoreBefore",
+    "hasMoreAfter",
+})
+
+# CONTRACT: shell.sedRange requested vs actual line keys.
+SHELL_SED_RANGE_RESPONSE_KEYS = SHELL_RANGE_RESPONSE_KEYS | frozenset({
+    "requestedStartLine",
+    "requestedEndLine",
+    "actualStartLine",
+    "actualEndLine",
+})
+
+# CONTRACT: shell.catSmall extended keys.
+SHELL_CAT_SMALL_RESPONSE_KEYS = SHELL_ENVELOPE_KEYS | frozenset({
+    "partial",
+    "fileSizeBytes",
+})
+
 # CONTRACT: workspace.grep match row keys.
 GREP_MATCH_KEYS = frozenset({
     "resultIndex",
@@ -637,6 +740,11 @@ REQUIRED_MAKE_TARGETS = frozenset({
     "test-harness-realism",
     "test-deterministic-retrieval",
     "test-agent-workflow-smoke",
+    "test-agent-shell-tooling",
+    "test-agent-shell-tooling-fast",
+    "test-agent-shell-workflows",
+    "test-authority-boundaries",
+    "test-agent-bridge-authority",
     "test-cli-agent-failures",
     "test-docs-code-drift",
     "verify-agent-runtime-full",
@@ -665,6 +773,9 @@ INTEGRATION_SUITES = {
     "harness_realism": "scripts/test_harness_realism.py",
     "deterministic_retrieval": "scripts/test_deterministic_retrieval.py",
     "agent_workflow_smoke": "scripts/test_agent_workflow_smoke.py",
+    "agent_shell_tooling": "scripts/test_agent_shell_tooling.py",
+    "agent_shell_workflows": "scripts/test_agent_shell_workflows.py",
+    "authority_boundaries": "scripts/test_authority_boundaries.py",
     "cli_agent_failures": "scripts/test_cli_agent_failures.py",
     "docs_code_drift": "scripts/test_docs_code_drift.py",
     "partial_success_closure": "scripts/test_partial_success_closure.py",
@@ -795,6 +906,62 @@ def validate_partial_success_signals(result: dict[str, Any], *, expect_complete:
     if result.get("partial") is True and result.get("complete") is not True:
         if not result.get("recoveryHint") and not result.get("nextRecommendedCommand"):
             errors.append("incomplete partial result requires recoveryHint or nextRecommendedCommand")
+    return errors
+
+
+def validate_shell_envelope(result: dict[str, Any]) -> list[str]:
+    errors: list[str] = []
+    missing = SHELL_ENVELOPE_KEYS - set(result.keys())
+    if missing:
+        errors.append(f"shell envelope missing keys: {sorted(missing)}")
+    if not isinstance(result.get("warnings"), list):
+        errors.append("warnings must be list")
+    return errors
+
+
+def validate_shell_rg_response(result: dict[str, Any]) -> list[str]:
+    errors = validate_shell_envelope(result)
+    missing = SHELL_RG_RESPONSE_KEYS - set(result.keys())
+    if missing:
+        errors.append(f"shell.rg missing keys: {sorted(missing)}")
+    if result.get("searchMode") not in ("literal", "regex"):
+        errors.append("searchMode must be literal or regex")
+    if result.get("sortOrder") != "path_line_column":
+        errors.append("sortOrder must be path_line_column")
+    matches = result.get("matches")
+    if not isinstance(matches, list):
+        errors.append("matches must be list")
+    elif matches:
+        missing_row = SHELL_RG_MATCH_KEYS - set(matches[0].keys())
+        if missing_row:
+            errors.append(f"shell.rg match missing keys: {sorted(missing_row)}")
+    errors.extend(validate_partial_success_signals(result))
+    return errors
+
+
+def validate_shell_range_response(result: dict[str, Any]) -> list[str]:
+    errors = validate_shell_envelope(result)
+    missing = SHELL_RANGE_RESPONSE_KEYS - set(result.keys())
+    if missing:
+        errors.append(f"shell range missing keys: {sorted(missing)}")
+    errors.extend(validate_partial_success_signals(result))
+    return errors
+
+
+def validate_shell_sed_range_response(result: dict[str, Any]) -> list[str]:
+    errors = validate_shell_range_response(result)
+    missing = SHELL_SED_RANGE_RESPONSE_KEYS - set(result.keys())
+    if missing:
+        errors.append(f"shell.sedRange missing keys: {sorted(missing)}")
+    return errors
+
+
+def validate_shell_cat_small_response(result: dict[str, Any]) -> list[str]:
+    errors = validate_shell_envelope(result)
+    missing = SHELL_CAT_SMALL_RESPONSE_KEYS - set(result.keys())
+    if missing:
+        errors.append(f"shell.catSmall missing keys: {sorted(missing)}")
+    errors.extend(validate_partial_success_signals(result))
     return errors
 
 
@@ -1034,6 +1201,22 @@ def validate_tool_capabilities_response(result: dict[str, Any]) -> list[str]:
     return errors
 
 
+def validate_journal_authority_labels(result: dict[str, Any]) -> list[str]:
+    errors: list[str] = []
+    missing = JOURNAL_AUTHORITY_KEYS - set(result.keys())
+    if missing:
+        errors.append(f"journal authority missing keys: {sorted(missing)}")
+    if result.get("recordAuthority") != "runtime_journal":
+        errors.append("recordAuthority must be runtime_journal")
+    if result.get("mutationAuthority") != "cpp_kernel":
+        errors.append("mutationAuthority must be cpp_kernel")
+    if result.get("currentStateAuthority") != "workspace_live_read":
+        errors.append("currentStateAuthority must be workspace_live_read")
+    if result.get("notCurrentFileTruth") is not True:
+        errors.append("notCurrentFileTruth must be true for journal/history surfaces")
+    return errors
+
+
 def validate_runtime_diagnostics(result: dict[str, Any]) -> list[str]:
     errors: list[str] = []
     missing = RUNTIME_DIAGNOSTICS_KEYS - set(result.keys())
@@ -1041,10 +1224,7 @@ def validate_runtime_diagnostics(result: dict[str, Any]) -> list[str]:
         errors.append(f"runtime.diagnostics missing keys: {sorted(missing)}")
     if result.get("mode") != "runtime_diagnostics":
         errors.append("mode must be runtime_diagnostics")
-    if result.get("mutationAuthority") != "cpp_kernel":
-        errors.append("mutationAuthority must be cpp_kernel")
-    if result.get("recordAuthority") != "runtime_journal":
-        errors.append("recordAuthority must be runtime_journal")
+    errors.extend(validate_journal_authority_labels(result))
     errors.extend(validate_partial_success_signals(result))
     return errors
 
@@ -1062,6 +1242,7 @@ def validate_runtime_timeline(result: dict[str, Any]) -> list[str]:
         errors.append("mode must be runtime_timeline")
     if result.get("sortOrder") != "timestamp_desc":
         errors.append("sortOrder must be timestamp_desc")
+    errors.extend(validate_journal_authority_labels(result))
     errors.extend(validate_partial_success_signals(result))
     events = result.get("events")
     if isinstance(events, list) and events:

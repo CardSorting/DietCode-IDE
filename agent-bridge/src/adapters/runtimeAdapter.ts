@@ -9,6 +9,22 @@ import type {
   VerifyFastResult,
 } from '../contracts/types.js';
 
+const JOURNAL_AUTHORITY = {
+  recordAuthority: 'runtime_journal',
+  mutationAuthority: 'cpp_kernel',
+  currentStateAuthority: 'workspace_live_read',
+  notCurrentFileTruth: true,
+} as const;
+
+export function applyJournalAuthorityLabels<T extends Record<string, unknown>>(
+  raw: T,
+): T & typeof JOURNAL_AUTHORITY {
+  return {
+    ...raw,
+    ...JOURNAL_AUTHORITY,
+  };
+}
+
 export async function fetchTimeline(
   transport: RpcCaller,
   options: TimelineOptions = {},
@@ -22,7 +38,11 @@ export async function fetchTimeline(
   if (!envelope.ok || !envelope.result) {
     throw mapRpcError(envelope, 'getTimeline');
   }
-  return normalizeRpcSuccess(envelope, options.includeRaw);
+  const normalized = normalizeRpcSuccess(envelope, options.includeRaw);
+  return {
+    ...normalized,
+    result: applyJournalAuthorityLabels(normalized.result as Record<string, unknown>),
+  };
 }
 
 export async function fetchRecentActivity(
@@ -36,7 +56,11 @@ export async function fetchRecentActivity(
   if (!envelope.ok || !envelope.result) {
     throw mapRpcError(envelope, 'getRecentActivity');
   }
-  return normalizeRpcSuccess(envelope, options.includeRaw);
+  const normalized = normalizeRpcSuccess(envelope, options.includeRaw);
+  return {
+    ...normalized,
+    result: applyJournalAuthorityLabels(normalized.result as Record<string, unknown>),
+  };
 }
 
 export async function fetchOperationStatus(
@@ -47,7 +71,7 @@ export async function fetchOperationStatus(
   if (!envelope.ok || !envelope.result) {
     throw mapRpcError(envelope, 'getOperationStatus');
   }
-  const raw = envelope.result;
+  const raw = applyJournalAuthorityLabels(envelope.result as Record<string, unknown>);
   return {
     status: (raw.status as OperationStatusResult['status']) ?? 'unknown',
     idempotencyKey,
@@ -59,6 +83,10 @@ export async function fetchOperationStatus(
     mutationReceipt: raw.mutationReceipt as OperationStatusResult['mutationReceipt'],
     batchMutationReceipt: raw.batchMutationReceipt as OperationStatusResult['batchMutationReceipt'],
     completedAt: typeof raw.completedAt === 'string' ? raw.completedAt : undefined,
+    recordAuthority: raw.recordAuthority,
+    mutationAuthority: raw.mutationAuthority,
+    currentStateAuthority: raw.currentStateAuthority,
+    notCurrentFileTruth: raw.notCurrentFileTruth,
   };
 }
 

@@ -91,6 +91,7 @@ NSDictionary* MacControlEnrichSnapshotResult(NSDictionary* result);
 NSDictionary* MacControlEnrichDiffHunksResult(NSDictionary* result, NSString* methodName);
 
 NSDictionary* MacControlOperationIdentity(NSDictionary* record);
+NSDictionary* MacControlApplyJournalAuthorityLabels(NSDictionary* result);
 NSDictionary* MacControlEnrichRuntimeSurface(NSDictionary* result, NSString* mode, NSString* nextCommand);
 NSDictionary* MacControlEnrichRuntimeListResult(NSDictionary* result, NSString* mode, NSString* nextCommand, BOOL truncated);
 

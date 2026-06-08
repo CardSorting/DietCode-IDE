@@ -22,10 +22,11 @@ export async function safePatchFile(
     throw bridgeError('patch_failed', 'patch validation failed before apply');
   }
 
+  const liveBeforeHash = validation.beforeContentHash;
   const revisionBefore = await fetchWorkspaceRevision(transport);
 
   try {
-    const applied = await applyPatch(transport, path, unifiedDiff, validation.beforeContentHash, {
+    const applied = await applyPatch(transport, path, unifiedDiff, liveBeforeHash, {
       ...options,
       idempotencyKey,
     });
@@ -40,14 +41,17 @@ export async function safePatchFile(
       revisionAfter: verified.revisionAfter,
       idempotencyKey,
       nextRecommendedCommand: applied.nextRecommendedCommand ?? 'workspace.revision',
+      beforeHashSource: 'live_validate',
+      beforeContentHash: liveBeforeHash,
     };
   } catch (error) {
     if (isBridgeError(error) && error.code === 'stale_content') {
       return buildStaleRecoveryResponse(
         transport,
         path,
-        validation.beforeContentHash,
+        liveBeforeHash,
         idempotencyKey,
+        error.rawError,
       );
     }
 
@@ -61,6 +65,8 @@ export async function safePatchFile(
           revisionAfter: status.revisionAfter,
           idempotencyKey,
           nextRecommendedCommand: 'workspace.revision',
+          beforeHashSource: 'live_validate',
+          beforeContentHash: liveBeforeHash,
         };
       }
       throw error;

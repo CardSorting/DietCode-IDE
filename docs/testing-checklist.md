@@ -82,6 +82,18 @@ Audit context: [Agent Runtime Audit](agent-runtime-audit.md). Full ladder: `make
 
 ---
 
+## Pass IX — Shell tooling
+
+- [ ] `make test-agent-shell-tooling-fast` passes during iteration
+- [ ] `make test-agent-shell-tooling` passes before merge
+- [ ] `make test-agent-shell-workflows` passes (workflows A–E)
+- [ ] `shell.catSmall` returns `partial` + `recoveryHint` on large files
+- [ ] `shell.cd` rejects outside workspace and symlink escape
+- [ ] Bridge `shellRg` / `shellSedRange` used instead of raw shell RPC
+- [ ] Docs: [Agent Shell Tooling](agent-shell-tooling.md)
+
+---
+
 ## Pass VI — Agent failure traps
 
 - [ ] `make test-agent-workflow-smoke` passes (find/patch, stale recovery, batch rollback, deprecated recovery)

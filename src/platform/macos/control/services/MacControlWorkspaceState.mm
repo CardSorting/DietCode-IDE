@@ -13,6 +13,7 @@
     NSMutableDictionary<NSString*, NSDictionary*>* _completedOperations;
     NSMutableDictionary<NSString*, NSString*>* _trackedFileHashes;
     NSMutableSet<NSString*>* _externallyChangedPaths;
+    NSString* _agentShellCwd;
 }
 
 - (instancetype)init {
@@ -348,6 +349,46 @@ static NSString* ReadHashForPath(NSString* absPath, DietCodeControlWindowBridge*
         @"revisionAfter": @(revisionAfter),
         @"idempotencyKey": idempotencyKey ?: @"",
     }];
+}
+
+- (NSString*)agentShellCwdForWorkspace:(NSString*)workspacePath {
+    if (_agentShellCwd.length > 0) return _agentShellCwd;
+    return workspacePath ?: @"";
+}
+
+- (void)resetAgentShellCwdForWorkspace:(NSString*)workspacePath {
+    (void)workspacePath;
+    _agentShellCwd = nil;
+}
+
+- (BOOL)setAgentShellCwd:(NSString*)absolutePath
+               workspace:(NSString*)workspacePath
+               errorCode:(NSString**)outErrCode
+            errorMessage:(NSString**)outErrMsg {
+    if (absolutePath.length == 0) {
+        if (outErrCode) *outErrCode = @"invalid_params";
+        if (outErrMsg) *outErrMsg = @"path parameter required.";
+        return NO;
+    }
+    if (workspacePath.length > 0 && !PathIsInsideWorkspace(absolutePath, workspacePath)) {
+        if (outErrCode) *outErrCode = @"outside_workspace";
+        if (outErrMsg) *outErrMsg = @"Target directory is outside workspace.";
+        return NO;
+    }
+    NSDictionary* symlinkMeta = PathSymlinkMetadata(absolutePath, workspacePath);
+    if ([symlinkMeta[@"pathEscapesWorkspace"] boolValue]) {
+        if (outErrCode) *outErrCode = @"symlink_escape";
+        if (outErrMsg) *outErrMsg = @"Symlink target escapes workspace.";
+        return NO;
+    }
+    BOOL isDir = NO;
+    if (![[NSFileManager defaultManager] fileExistsAtPath:absolutePath isDirectory:&isDir] || !isDir) {
+        if (outErrCode) *outErrCode = @"directory_not_found";
+        if (outErrMsg) *outErrMsg = @"Directory does not exist.";
+        return NO;
+    }
+    _agentShellCwd = [absolutePath copy];
+    return YES;
 }
 
 @end

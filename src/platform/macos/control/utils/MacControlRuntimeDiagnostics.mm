@@ -121,6 +121,46 @@ NSDictionary* MacControlRpcErrorDiagnosticMetadata(NSString* stringCode) {
     } else if ([code isEqualToString:@"rollback_failed"] || [code isEqualToString:@"backup_corrupt"]) {
         category = @"recovery";
         recoveryHint = @"recovery.list_or_recovery.scan";
+    } else if ([code isEqualToString:@"shell_timeout"]) {
+        category = @"domain";
+        recoveryHint = @"narrow_search_or_retry_later";
+        nextRecommendedCommand = @"shell.rg";
+    } else if ([code isEqualToString:@"shell_truncated"]) {
+        category = @"domain";
+        recoveryHint = @"narrow_range_or_paginate";
+        nextRecommendedCommand = @"shell.sedRange";
+    } else if ([code isEqualToString:@"shell_binary_file"]) {
+        category = @"validation";
+        recoveryHint = @"use_file_stat_or_skip_binary";
+        nextRecommendedCommand = @"file.stat";
+    } else if ([code isEqualToString:@"shell_file_too_large"]) {
+        category = @"validation";
+        recoveryHint = @"use_shell_head_tail_or_sedRange";
+        nextRecommendedCommand = @"shell.sedRange";
+    } else if ([code isEqualToString:@"shell_directory_target"]) {
+        category = @"validation";
+        recoveryHint = @"use_shell_cd_or_shell_rg";
+        nextRecommendedCommand = @"shell.rg";
+    } else if ([code isEqualToString:@"shell_invalid_range"]) {
+        category = @"validation";
+        recoveryHint = @"verify_line_bounds_with_shell_sedRange";
+        nextRecommendedCommand = @"shell.sedRange";
+    } else if ([code isEqualToString:@"shell_outside_workspace"]) {
+        category = @"validation";
+        recoveryHint = @"use_workspace_relative_path";
+        nextRecommendedCommand = @"shell.pwd";
+    } else if ([code isEqualToString:@"shell_symlink_escape"]) {
+        category = @"validation";
+        recoveryHint = @"use_non_symlink_target_path";
+        nextRecommendedCommand = @"file.stat";
+    } else if ([code isEqualToString:@"shell_command_not_allowed"]) {
+        category = @"validation";
+        recoveryHint = @"use_documented_shell_methods";
+        nextRecommendedCommand = @"tool.capabilities";
+    } else if ([code isEqualToString:@"shell_rg_failed"]) {
+        category = @"domain";
+        recoveryHint = @"verify_pattern_and_path";
+        nextRecommendedCommand = @"shell.rg";
     }
 
     return @{

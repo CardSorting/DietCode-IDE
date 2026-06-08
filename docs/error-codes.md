@@ -129,6 +129,8 @@ See [Runtime Safety](runtime-safety.md).
 
 **Recovery:** use `search.literal`, `search.tokens`, `workspace.grep`, or `search.references`. Each error includes `recovery_hint` and `nextRecommendedCommand` in the envelope.
 
+**Pass XI — bridge provenance:** when errors pass through the Agent Bridge, `DietCodeBridgeError` adds `recoverySource` and `nextCommandSource` (`runtime` when the RPC supplied hints; `bridge_fallback` only when absent). Always preserve `rawError` for audit.
+
 | string_code | recovery_hint | nextRecommendedCommand |
 |-------------|---------------|------------------------|
 | `stale_content` | `revalidate_patch_with_patch.validate` | `patch.validate` |
@@ -137,6 +139,25 @@ See [Runtime Safety](runtime-safety.md).
 | `ranked_search_disabled` | `use_workspace_grep_or_search_literal` | `workspace.grep` |
 | `patch_failed` | `run_patch_preview_or_patch_validate` | `patch.validate` |
 | `nested_call_timeout` | `reduce_concurrency_or_retry_later` | `operation.status` |
+
+## Shell wrapper codes (Pass IX)
+
+| string_code | Meaning | recovery_hint | nextRecommendedCommand |
+|-------------|---------|---------------|------------------------|
+| `shell_timeout` | `shell.rg` subprocess timed out | `narrow_search_or_retry_later` | `shell.rg` |
+| `shell_truncated` | Result or range limit exceeded | `narrow_range_or_paginate` | `shell.sedRange` |
+| `shell_binary_file` | Binary file rejected for text read | `use_file_stat_or_skip_binary` | `file.stat` |
+| `shell_file_too_large` | File exceeds shell read cap (2 MiB) | `use_shell_head_tail_or_sedRange` | `shell.sedRange` |
+| `shell_directory_target` | Path is a directory | `use_shell_cd_or_shell_rg` | `shell.rg` |
+| `shell_invalid_range` | Invalid `startLine`/`endLine` | `verify_line_bounds_with_shell_sedRange` | `shell.sedRange` |
+| `shell_outside_workspace` | Resolved path leaves workspace | `use_workspace_relative_path` | `shell.pwd` |
+| `shell_symlink_escape` | Symlink escapes workspace or read blocked | `use_non_symlink_target_path` | `file.stat` |
+| `shell_command_not_allowed` | Unknown `shell.*` method | `use_documented_shell_methods` | `tool.capabilities` |
+| `shell_rg_failed` | ripgrep subprocess failed | `verify_pattern_and_path` | `shell.rg` |
+
+`shell.cd` uses domain codes: `directory_not_found`, `not_directory`, `outside_workspace`, `symlink_escape`, `invalid_path`.
+
+Docs: [Agent Shell Tooling](agent-shell-tooling.md).
 
 ```bash
 python3 scripts/dietcode_agent_client.py --raw-response --compact search.semantic '{"query":"foo"}'

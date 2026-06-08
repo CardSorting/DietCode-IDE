@@ -513,9 +513,21 @@ NSDictionary* MacControlOperationIdentity(NSDictionary* record) {
     };
 }
 
-NSDictionary* MacControlEnrichRuntimeSurface(NSDictionary* result, NSString* mode, NSString* nextCommand) {
+NSDictionary* MacControlApplyJournalAuthorityLabels(NSDictionary* result) {
     if (![result isKindOfClass:[NSDictionary class]]) return result ?: @{};
     NSMutableDictionary* enriched = [result mutableCopy];
+    enriched[@"recordAuthority"] = @"runtime_journal";
+    enriched[@"mutationAuthority"] = @"cpp_kernel";
+    enriched[@"currentStateAuthority"] = @"workspace_live_read";
+    enriched[@"notCurrentFileTruth"] = @YES;
+    return enriched;
+}
+
+NSDictionary* MacControlEnrichRuntimeSurface(NSDictionary* result, NSString* mode, NSString* nextCommand) {
+    if (![result isKindOfClass:[NSDictionary class]]) return result ?: @{};
+    NSDictionary* labeled = MacControlApplyJournalAuthorityLabels(result);
+    NSMutableDictionary* enriched = [labeled mutableCopy];
+    if (!enriched) enriched = [NSMutableDictionary dictionary];
     enriched[@"mode"] = mode ?: @"runtime_surface";
     enriched[@"complete"] = result[@"complete"] ?: @YES;
     enriched[@"partial"] = result[@"partial"] ?: @NO;
@@ -532,7 +544,9 @@ NSDictionary* MacControlEnrichRuntimeSurface(NSDictionary* result, NSString* mod
 
 NSDictionary* MacControlEnrichRuntimeListResult(NSDictionary* result, NSString* mode, NSString* nextCommand, BOOL truncated) {
     if (![result isKindOfClass:[NSDictionary class]]) return result ?: @{};
-    NSMutableDictionary* enriched = [result mutableCopy];
+    NSDictionary* labeled = MacControlApplyJournalAuthorityLabels(result);
+    NSMutableDictionary* enriched = [labeled mutableCopy];
+    if (!enriched) enriched = [NSMutableDictionary dictionary];
     enriched[@"mode"] = mode ?: @"runtime_list";
     enriched[@"complete"] = @(!truncated);
     enriched[@"partial"] = @(truncated);

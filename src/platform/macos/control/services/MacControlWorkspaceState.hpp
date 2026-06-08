@@ -48,4 +48,12 @@
                     revisionAfter:(NSInteger)revisionAfter
                     resultPayload:(NSDictionary*)resultPayload;
 
+/** Agent shell session cwd — defaults to workspace root; persists until shell.cd changes it. */
+- (NSString*)agentShellCwdForWorkspace:(NSString*)workspacePath;
+- (void)resetAgentShellCwdForWorkspace:(NSString*)workspacePath;
+- (BOOL)setAgentShellCwd:(NSString*)absolutePath
+               workspace:(NSString*)workspacePath
+               errorCode:(NSString**)outErrCode
+            errorMessage:(NSString**)outErrMsg;
+
 @end

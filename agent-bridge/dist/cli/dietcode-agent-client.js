@@ -70,6 +70,13 @@ Commands:
   timeline recent
   activity recent
   verify fast
+  shell pwd
+  shell cd <path>
+  shell rg <pattern> [--path PATH]
+  shell head <path> [--lines N]
+  shell tail <path> [--lines N]
+  shell sed <path> <startLine> <endLine>
+  shell cat-small <path>
 
 Options:
   --pretty         Pretty-print JSON
@@ -178,9 +185,52 @@ async function main() {
                     return 1;
                 }
                 break;
+            case 'shell': {
+                if (subcommand === 'pwd') {
+                    result = await client.shellPwd();
+                }
+                else if (subcommand === 'cd' && rest[0]) {
+                    result = await client.shellCd(rest[0]);
+                }
+                else if (subcommand === 'rg' && rest[0]) {
+                    const pathIdx = rest.indexOf('--path');
+                    const path = pathIdx >= 0 ? rest[pathIdx + 1] : undefined;
+                    const pattern = rest[0];
+                    result = await client.shellRg(pattern, path ? { path } : {});
+                }
+                else if (subcommand === 'head' && rest[0]) {
+                    const linesIdx = rest.indexOf('--lines');
+                    const lines = linesIdx >= 0 ? Number(rest[linesIdx + 1]) : undefined;
+                    result = await client.shellHead(rest[0], lines);
+                }
+                else if (subcommand === 'tail' && rest[0]) {
+                    const linesIdx = rest.indexOf('--lines');
+                    const lines = linesIdx >= 0 ? Number(rest[linesIdx + 1]) : undefined;
+                    result = await client.shellTail(rest[0], lines);
+                }
+                else if (subcommand === 'sed' && rest[0] && rest[1] && rest[2]) {
+                    result = await client.shellSedRange(rest[0], Number(rest[1]), Number(rest[2]));
+                }
+                else if (subcommand === 'cat-small' && rest[0]) {
+                    result = await client.shellCatSmall(rest[0]);
+                }
+                else {
+                    usage();
+                    return 1;
+                }
+                break;
+            }
             default:
                 usage();
                 return 1;
+        }
+        if (command === 'shell' &&
+            result &&
+            typeof result === 'object' &&
+            result.partial === true) {
+            const envelope = result;
+            const hint = envelope.recoveryHint ?? envelope.warnings?.join(', ') ?? 'partial shell result';
+            process.stderr.write(`warning: ${hint}\n`);
         }
         emit(result, flags.pretty, flags.compact);
         return 0;

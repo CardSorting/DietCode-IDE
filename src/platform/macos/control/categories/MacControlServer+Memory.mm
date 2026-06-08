@@ -112,39 +112,39 @@
             *outResult = replay;
             return;
         }
-        *outResult = replay;
+        *outResult = MacControlApplyJournalAuthorityLabels(replay);
         return;
     }
 
     if ([method isEqualToString:@"memory.revision.get"]) {
         NSInteger revisionId = [params[@"revisionId"] integerValue];
         NSDictionary* rev = [_memoryService revisionForId:revisionId];
-        *outResult = rev ?: @{ @"status": @"unknown", @"revisionId": @(revisionId) };
+        *outResult = MacControlApplyJournalAuthorityLabels(rev ?: @{ @"status": @"unknown", @"revisionId": @(revisionId) });
         return;
     }
 
     if ([method isEqualToString:@"memory.revision.list"]) {
         NSInteger limit = params[@"limit"] ? [params[@"limit"] integerValue] : 50;
-        *outResult = @{
+        *outResult = MacControlApplyJournalAuthorityLabels(@{
             @"revisions": [_memoryService listRevisions:limit],
             @"mode": @"memory_revision_list",
-        };
+        });
         return;
     }
 
     if ([method isEqualToString:@"memory.revision.changedFiles"]) {
         NSInteger revisionId = [params[@"revisionId"] integerValue];
         NSDictionary* rev = [_memoryService revisionForId:revisionId];
-        *outResult = @{
+        *outResult = MacControlApplyJournalAuthorityLabels(@{
             @"revisionId": @(revisionId),
             @"changedFiles": rev[@"changedFiles"] ?: @[],
             @"mode": @"memory_revision_changed_files",
-        };
+        });
         return;
     }
 
     if ([method isEqualToString:@"memory.revision.lastMutation"]) {
-        *outResult = [_memoryService lastMutationRevision] ?: @{ @"status": @"unknown" };
+        *outResult = MacControlApplyJournalAuthorityLabels([_memoryService lastMutationRevision] ?: @{ @"status": @"unknown" });
         return;
     }
 
@@ -211,18 +211,18 @@
 
     if ([method isEqualToString:@"memory.verify.latest"]) {
         NSString* command = params[@"command"] ?: @"verify-agent-runtime-full";
-        *outResult = [_memoryService latestVerificationForCommand:command] ?: @{ @"status": @"unknown", @"command": command };
+        *outResult = MacControlApplyJournalAuthorityLabels([_memoryService latestVerificationForCommand:command] ?: @{ @"status": @"unknown", @"command": command });
         return;
     }
 
     if ([method isEqualToString:@"memory.verify.history"]) {
         NSString* command = params[@"command"] ?: @"verify-agent-runtime-full";
         NSInteger limit = params[@"limit"] ? [params[@"limit"] integerValue] : 20;
-        *outResult = @{
+        *outResult = MacControlApplyJournalAuthorityLabels(@{
             @"command": command,
             @"runs": [_memoryService verificationHistory:command limit:limit],
             @"mode": @"memory_verification_history",
-        };
+        });
         return;
     }
 }

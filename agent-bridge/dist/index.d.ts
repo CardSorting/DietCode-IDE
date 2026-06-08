@@ -4,9 +4,9 @@ export { BRIDGE_PACKAGE_VERSION, resolveAppPath, resolveTransportConfig, } from 
 export { waitForReady, resolveConnectOptions } from './client/connection.js';
 export { buildRuntimeProfile } from './client/RuntimeProfile.js';
 export { detectRuntimeCapabilities, assertRequiredCapabilities, listRequiredFeatures, } from './capabilities/detectRuntimeCapabilities.js';
-export { DietCodeBridgeError, isBridgeError, toBridgeError } from './contracts/BridgeError.js';
+export { DietCodeBridgeError, isBridgeError, toBridgeError, resolveBridgeRecovery } from './contracts/BridgeError.js';
 export { bridgeError, mapRpcError, unsupportedCapabilityError } from './contracts/errors.js';
 export { normalizeBridgeResult, normalizeRpcSuccess, extractPartialMeta, hasPartialSuccessKeys, } from './contracts/schemas.js';
 export { validateMutationReceipt, validateBatchMutationReceipt, validateToolCapabilities, validateRuntimeDiagnostics, } from './contracts/validators.js';
-export type { BridgeError, BridgeErrorCode, BridgeEnvelope, BridgeResult, RuntimeProfile, RuntimeCapabilities, SafePatchResult, SafeBatchPatchResult, PatchBatchEntry, SearchOptions, PatchOptions, BatchPatchOptions, TimelineOptions, ActivityOptions, OperationStatusResult, VerifyFastResult, TransportOptions, MutationReceipt, BatchMutationReceipt, StalePatchRecovery, } from './contracts/types.js';
+export type { BridgeError, BridgeErrorCode, BridgeEnvelope, BridgeResult, RecoverySource, HashAuthority, RuntimeProfile, RuntimeCapabilities, SafePatchResult, SafeBatchPatchResult, PatchBatchEntry, SearchOptions, PatchOptions, BatchPatchOptions, TimelineOptions, ActivityOptions, OperationStatusResult, VerifyFastResult, TransportOptions, MutationReceipt, BatchMutationReceipt, StalePatchRecovery, } from './contracts/types.js';
 //# sourceMappingURL=index.d.ts.map

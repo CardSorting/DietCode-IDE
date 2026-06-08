@@ -1,5 +1,7 @@
 import type { BridgeErrorCode } from './types.js';
 
+export type RecoverySource = 'runtime' | 'bridge_fallback';
+
 const ERROR_RECOVERY: Record<
   string,
   { recoveryHint: string; nextRecommendedCommand: string; retrySafe: boolean }
@@ -56,12 +58,76 @@ const ERROR_RECOVERY: Record<
   },
 };
 
+const PROTECTED_RUNTIME_RECOVERY_CODES = new Set([
+  'stale_content',
+  'symlink_target',
+  'patch_failed',
+  'semantic_disabled',
+]);
+
+export function resolveBridgeRecovery(
+  code: BridgeErrorCode,
+  rawError?: Record<string, unknown>,
+  overrides?: Partial<{
+    recoveryHint: string;
+    nextRecommendedCommand: string;
+    retrySafe: boolean;
+  }>,
+): {
+  recoveryHint: string;
+  nextRecommendedCommand: string;
+  retrySafe: boolean;
+  recoverySource: RecoverySource;
+  nextCommandSource: RecoverySource;
+} {
+  const defaults = ERROR_RECOVERY[code] ?? {
+    recoveryHint: 'inspect_bridge_error',
+    nextRecommendedCommand: 'runtime.diagnostics',
+    retrySafe: false,
+  };
+
+  const runtimeHint =
+    (typeof overrides?.recoveryHint === 'string' && overrides.recoveryHint) ||
+    (typeof rawError?.recovery_hint === 'string' && rawError.recovery_hint) ||
+    undefined;
+  const runtimeNext =
+    (typeof overrides?.nextRecommendedCommand === 'string' && overrides.nextRecommendedCommand) ||
+    (typeof rawError?.nextRecommendedCommand === 'string' && rawError.nextRecommendedCommand) ||
+    undefined;
+  const runtimeRetry =
+    typeof overrides?.retrySafe === 'boolean'
+      ? overrides.retrySafe
+      : typeof rawError?.retryable === 'boolean'
+        ? rawError.retryable
+        : undefined;
+
+  if (PROTECTED_RUNTIME_RECOVERY_CODES.has(code) && runtimeHint) {
+    return {
+      recoveryHint: runtimeHint,
+      nextRecommendedCommand: runtimeNext ?? defaults.nextRecommendedCommand,
+      retrySafe: runtimeRetry ?? defaults.retrySafe,
+      recoverySource: 'runtime',
+      nextCommandSource: runtimeNext ? 'runtime' : 'bridge_fallback',
+    };
+  }
+
+  return {
+    recoveryHint: runtimeHint ?? defaults.recoveryHint,
+    nextRecommendedCommand: runtimeNext ?? defaults.nextRecommendedCommand,
+    retrySafe: runtimeRetry ?? defaults.retrySafe,
+    recoverySource: runtimeHint ? 'runtime' : 'bridge_fallback',
+    nextCommandSource: runtimeNext ? 'runtime' : 'bridge_fallback',
+  };
+}
+
 /** Throwable bridge error with stable recovery metadata. */
 export class DietCodeBridgeError extends Error {
   readonly code: BridgeErrorCode;
   readonly recoveryHint: string;
   readonly nextRecommendedCommand: string;
   readonly retrySafe: boolean;
+  readonly recoverySource: RecoverySource;
+  readonly nextCommandSource: RecoverySource;
   readonly rawError?: Record<string, unknown>;
 
   constructor(
@@ -77,14 +143,12 @@ export class DietCodeBridgeError extends Error {
     super(message);
     this.name = 'DietCodeBridgeError';
     this.code = code;
-    const defaults = ERROR_RECOVERY[code] ?? {
-      recoveryHint: 'inspect_bridge_error',
-      nextRecommendedCommand: 'runtime.diagnostics',
-      retrySafe: false,
-    };
-    this.recoveryHint = overrides?.recoveryHint ?? defaults.recoveryHint;
-    this.nextRecommendedCommand = overrides?.nextRecommendedCommand ?? defaults.nextRecommendedCommand;
-    this.retrySafe = overrides?.retrySafe ?? defaults.retrySafe;
+    const resolved = resolveBridgeRecovery(code, rawError, overrides);
+    this.recoveryHint = resolved.recoveryHint;
+    this.nextRecommendedCommand = resolved.nextRecommendedCommand;
+    this.retrySafe = resolved.retrySafe;
+    this.recoverySource = resolved.recoverySource;
+    this.nextCommandSource = resolved.nextCommandSource;
     this.rawError = rawError;
   }
 
@@ -95,6 +159,8 @@ export class DietCodeBridgeError extends Error {
       recoveryHint: this.recoveryHint,
       nextRecommendedCommand: this.nextRecommendedCommand,
       retrySafe: this.retrySafe,
+      recoverySource: this.recoverySource,
+      nextCommandSource: this.nextCommandSource,
       rawError: this.rawError,
     };
   }

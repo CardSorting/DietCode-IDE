@@ -1,0 +1,7 @@
+{
+  "code": "outside_workspace",
+  "message": "Target directory is outside workspace.",
+  "recoveryHint": "use_workspace_relative_path",
+  "nextRecommendedCommand": "shell.pwd",
+  "retrySafe": false
+}

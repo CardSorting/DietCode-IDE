@@ -70,6 +70,8 @@ describe('bridge.safePatchFile', () => {
     if (result.applied) {
       assert.equal(result.mutationReceipt.path, PATH);
       assert.equal(result.idempotencyKey, 'key-1');
+      assert.equal(result.beforeHashSource, 'live_validate');
+      assert.equal(result.beforeContentHash, BEFORE_HASH);
       assert.ok(result.revisionAfter! > result.revisionBefore!);
     }
   });

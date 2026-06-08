@@ -19,6 +19,16 @@ constexpr size_t kMaxSearchFileBytes = 2 * 1024 * 1024;
 constexpr int kMaxPlanSteps = 30;
 constexpr int kMaxActiveCombos = 4;
 
+// SHELL: Agent shell wrapper limits (Pass IX — grep: rg 'kShell' src/domain/control/).
+constexpr size_t kShellCatSmallMaxBytes = 64 * 1024;
+constexpr int kShellCatSmallMaxLines = 500;
+constexpr int kShellHeadTailDefaultLines = 80;
+constexpr int kShellHeadTailMaxLines = 300;
+constexpr int kShellRgMaxResults = 200;
+constexpr int kShellRgTimeoutSeconds = 30;
+constexpr size_t kShellMaxReadFileBytes = 2 * 1024 * 1024;
+constexpr int kShellRgMaxScanFiles = 10000;
+
 // SAFETY: Local abuse-resistance guardrails (grep: rg 'kMaxActiveConnections|SAFETY:' src/ docs/).
 constexpr int kMaxActiveConnections = 8;
 constexpr int kMaxPendingRequestsPerConnection = 32;

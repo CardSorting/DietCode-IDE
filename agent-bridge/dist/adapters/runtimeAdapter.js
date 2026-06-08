@@ -1,5 +1,17 @@
 import { mapRpcError } from '../contracts/errors.js';
 import { normalizeRpcSuccess } from '../contracts/schemas.js';
+const JOURNAL_AUTHORITY = {
+    recordAuthority: 'runtime_journal',
+    mutationAuthority: 'cpp_kernel',
+    currentStateAuthority: 'workspace_live_read',
+    notCurrentFileTruth: true,
+};
+export function applyJournalAuthorityLabels(raw) {
+    return {
+        ...raw,
+        ...JOURNAL_AUTHORITY,
+    };
+}
 export async function fetchTimeline(transport, options = {}) {
     const envelope = await transport.call('runtime.timeline', {
         limit: options.limit ?? 20,
@@ -10,7 +22,11 @@ export async function fetchTimeline(transport, options = {}) {
     if (!envelope.ok || !envelope.result) {
         throw mapRpcError(envelope, 'getTimeline');
     }
-    return normalizeRpcSuccess(envelope, options.includeRaw);
+    const normalized = normalizeRpcSuccess(envelope, options.includeRaw);
+    return {
+        ...normalized,
+        result: applyJournalAuthorityLabels(normalized.result),
+    };
 }
 export async function fetchRecentActivity(transport, options = {}) {
     const envelope = await transport.call('workspace.activity', {
@@ -20,14 +36,18 @@ export async function fetchRecentActivity(transport, options = {}) {
     if (!envelope.ok || !envelope.result) {
         throw mapRpcError(envelope, 'getRecentActivity');
     }
-    return normalizeRpcSuccess(envelope, options.includeRaw);
+    const normalized = normalizeRpcSuccess(envelope, options.includeRaw);
+    return {
+        ...normalized,
+        result: applyJournalAuthorityLabels(normalized.result),
+    };
 }
 export async function fetchOperationStatus(transport, idempotencyKey) {
     const envelope = await transport.call('operation.status', { idempotencyKey });
     if (!envelope.ok || !envelope.result) {
         throw mapRpcError(envelope, 'getOperationStatus');
     }
-    const raw = envelope.result;
+    const raw = applyJournalAuthorityLabels(envelope.result);
     return {
         status: raw.status ?? 'unknown',
         idempotencyKey,
@@ -39,6 +59,10 @@ export async function fetchOperationStatus(transport, idempotencyKey) {
         mutationReceipt: raw.mutationReceipt,
         batchMutationReceipt: raw.batchMutationReceipt,
         completedAt: typeof raw.completedAt === 'string' ? raw.completedAt : undefined,
+        recordAuthority: raw.recordAuthority,
+        mutationAuthority: raw.mutationAuthority,
+        currentStateAuthority: raw.currentStateAuthority,
+        notCurrentFileTruth: raw.notCurrentFileTruth,
     };
 }
 export async function verifyFast(transport) {

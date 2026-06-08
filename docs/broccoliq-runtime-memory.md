@@ -37,6 +37,7 @@ make verify-agent-runtime-full
 | Verification audit | `verify.last` ephemeral | `runtime_verification_runs` history | Low |
 | Telemetry | NDJSON only | `runtime_telemetry_events` (droppable under backpressure) | Medium — drops allowed |
 | Mutation authority | C++ kernel | **Unchanged** — BroccoliQ record-only | None |
+| Journal vs live truth | Implicit | Explicit `notCurrentFileTruth: true` on all journal reads (Pass XI) | Low — prevents replay-as-truth bugs |
 
 ---
 
@@ -147,6 +148,8 @@ DB path: `~/.dietcode/runtime-memory/<workspace_hash>/runtime_memory.db`
 Enforced via `memory.status` fields:
 - `mutationAuthority: cpp_kernel`
 - `memoryAuthority: broccoliq_record_only`
+
+**Pass XI — response labels:** all journal/history RPC responses also carry `recordAuthority`, `currentStateAuthority`, and `notCurrentFileTruth: true`. Agents must not use journal `postContentHash` or replay receipts as proof of current file content. Live truth requires `file.stat` or `patch.validate`.
 
 ---
 

@@ -1,0 +1,7 @@
+{
+  "code": "shell_binary_file",
+  "message": "File appears binary; use file.stat or a specialized reader.",
+  "recoveryHint": "use_file_stat_or_skip_binary",
+  "nextRecommendedCommand": "file.stat",
+  "retrySafe": false
+}

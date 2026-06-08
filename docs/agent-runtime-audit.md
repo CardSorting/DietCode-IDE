@@ -24,6 +24,33 @@ make verify-agent-runtime-full
 | **V** | Semantic surface removal | Quarantine `search.semantic`, deterministic retrieval, `tool.registry` | `make test-deterministic-retrieval` |
 | **VI** | Agent failure traps | Partial-success signals, workflow smoke tests, CLI ergonomics, docs drift | `make verify-agent-runtime-full` |
 | **VI closure** | Parity gaps | `patch.applyBatch`, `workspace.snapshot`, `diff.hunks` enrichment | `make test-partial-success-closure` |
+| **IX** | Shell tool success rate | `shell.*` wrappers, explicit cwd, bounded cat/rg/sed/head/tail | `make test-agent-shell-tooling` |
+
+---
+
+## Pass IX — Shell tool success rate
+
+### Problem
+
+Agents lose cwd, `cat` large/binary files blindly, invoke unsafe `sed` forms, and get non-deterministic `rg` output.
+
+### Changes
+
+| Area | Implementation |
+|------|----------------|
+| Shell RPC | `MacControlShellService.mm` — `shell.pwd`, `shell.cd`, `shell.rg`, `shell.head`, `shell.tail`, `shell.sedRange`, `shell.catSmall` |
+| Cwd state | `MacControlWorkspaceState` agent session cwd |
+| Contracts | `SHELL_ENVELOPE_KEYS`, `SHELL_RG_RESPONSE_KEYS`, … in `agent_contracts.py` |
+| CLI | `dietcode-agent-client shell …` |
+| Docs | `docs/agent-shell-tooling.md` |
+| Tests | `scripts/test_agent_shell_tooling.py` |
+
+### Invariants
+
+- All shell wrappers return `cwdBefore` / `cwdAfter` / `workspaceRoot` / `pathResolved`
+- `shell.cd` rejects `outside_workspace`, `symlink_escape`, `directory_not_found`, `not_directory`
+- `shell.catSmall` sets `partial` + `recoveryHint: use_head_tail_or_sedRange` when truncated
+- `shell.rg` uses `sortOrder: path_line_column`; no symlink follow
 
 ---
 

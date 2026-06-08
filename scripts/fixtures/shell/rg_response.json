@@ -1,0 +1,37 @@
+{
+  "ok": true,
+  "complete": true,
+  "partial": false,
+  "command": "rg",
+  "cwdBefore": "/workspace",
+  "cwdAfter": "/workspace",
+  "workspaceRoot": "/workspace",
+  "pathResolved": "scripts/fixtures/shell",
+  "exitCode": 0,
+  "stdout": "",
+  "stderr": "",
+  "truncated": false,
+  "bytesRead": 0,
+  "lineCount": 0,
+  "warnings": [],
+  "recoveryHint": "",
+  "nextRecommendedCommand": "shell.sedRange",
+  "matches": [
+    {
+      "path": "scripts/fixtures/shell/anchor_target.txt",
+      "line": 1,
+      "column": 1,
+      "preview": "SHELL_ANCHOR_IX: frozen anchor line\n"
+    }
+  ],
+  "matchCount": 1,
+  "filesSearched": 3,
+  "filesSkipped": 1,
+  "filesSkippedBinary": 0,
+  "filesSkippedSymlink": 1,
+  "filesSkippedExcluded": 0,
+  "searchMode": "literal",
+  "sortOrder": "path_line_column",
+  "hiddenPolicy": "include_hidden",
+  "symlinkPolicy": "no_follow"
+}

@@ -1,0 +1,20 @@
+{
+  "ok": true,
+  "complete": false,
+  "partial": true,
+  "command": "cat",
+  "cwdBefore": "/workspace",
+  "cwdAfter": "/workspace",
+  "workspaceRoot": "/workspace",
+  "pathResolved": "scripts/fixtures/shell/large_text.txt",
+  "exitCode": 0,
+  "stdout": "LARGE_FIXTURE_LINE=repeat\n",
+  "stderr": "",
+  "truncated": true,
+  "bytesRead": 65536,
+  "lineCount": 500,
+  "warnings": ["file_too_large_for_cat"],
+  "recoveryHint": "use_shell_head_tail_or_sedRange",
+  "nextRecommendedCommand": "shell.sedRange",
+  "fileSizeBytes": 200000
+}

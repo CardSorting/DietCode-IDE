@@ -17,7 +17,7 @@ export {
   assertRequiredCapabilities,
   listRequiredFeatures,
 } from './capabilities/detectRuntimeCapabilities.js';
-export { DietCodeBridgeError, isBridgeError, toBridgeError } from './contracts/BridgeError.js';
+export { DietCodeBridgeError, isBridgeError, toBridgeError, resolveBridgeRecovery } from './contracts/BridgeError.js';
 export { bridgeError, mapRpcError, unsupportedCapabilityError } from './contracts/errors.js';
 export {
   normalizeBridgeResult,
@@ -36,6 +36,8 @@ export type {
   BridgeErrorCode,
   BridgeEnvelope,
   BridgeResult,
+  RecoverySource,
+  HashAuthority,
   RuntimeProfile,
   RuntimeCapabilities,
   SafePatchResult,

@@ -1,0 +1,6 @@
+{
+  "recordAuthority": "runtime_journal",
+  "mutationAuthority": "cpp_kernel",
+  "currentStateAuthority": "workspace_live_read",
+  "notCurrentFileTruth": true
+}

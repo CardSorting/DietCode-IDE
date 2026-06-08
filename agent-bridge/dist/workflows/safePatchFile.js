@@ -11,9 +11,10 @@ export async function safePatchFile(transport, path, unifiedDiff, options = {}) 
     if (!validation.ok) {
         throw bridgeError('patch_failed', 'patch validation failed before apply');
     }
+    const liveBeforeHash = validation.beforeContentHash;
     const revisionBefore = await fetchWorkspaceRevision(transport);
     try {
-        const applied = await applyPatch(transport, path, unifiedDiff, validation.beforeContentHash, {
+        const applied = await applyPatch(transport, path, unifiedDiff, liveBeforeHash, {
             ...options,
             idempotencyKey,
         });
@@ -26,11 +27,13 @@ export async function safePatchFile(transport, path, unifiedDiff, options = {}) 
             revisionAfter: verified.revisionAfter,
             idempotencyKey,
             nextRecommendedCommand: applied.nextRecommendedCommand ?? 'workspace.revision',
+            beforeHashSource: 'live_validate',
+            beforeContentHash: liveBeforeHash,
         };
     }
     catch (error) {
         if (isBridgeError(error) && error.code === 'stale_content') {
-            return buildStaleRecoveryResponse(transport, path, validation.beforeContentHash, idempotencyKey);
+            return buildStaleRecoveryResponse(transport, path, liveBeforeHash, idempotencyKey, error.rawError);
         }
         if (isBridgeError(error) && error.code === 'nested_call_timeout') {
             const status = await fetchOperationStatus(transport, idempotencyKey);
@@ -42,6 +45,8 @@ export async function safePatchFile(transport, path, unifiedDiff, options = {}) 
                     revisionAfter: status.revisionAfter,
                     idempotencyKey,
                     nextRecommendedCommand: 'workspace.revision',
+                    beforeHashSource: 'live_validate',
+                    beforeContentHash: liveBeforeHash,
                 };
             }
             throw error;

@@ -60,6 +60,15 @@ Import from `@dietcode/agent-bridge` or use the bundled CLI.
 | `getTimeline(options?)` | `runtime.timeline` stream |
 | `getRecentActivity(options?)` | `workspace.activity` (mutation-focused) |
 | `verifyFast()` | Quick RPC + runtime health probe |
+| `shellPwd()` | Agent session cwd (`shell.pwd`) |
+| `shellCd(path)` | Workspace-scoped cwd change (`shell.cd`) |
+| `shellRg(pattern, options?)` | Bounded ripgrep (`shell.rg`) |
+| `shellHead(path, lines?)` | Bounded head read (`shell.head`) |
+| `shellTail(path, lines?)` | Bounded tail read (`shell.tail`) |
+| `shellSedRange(path, start, end)` | Read-only line range (`shell.sedRange`) |
+| `shellCatSmall(path)` | Small-file read with truncation (`shell.catSmall`) |
+
+Shell responses normalize `complete`, `partial`, `warnings`, `recoveryHint`, and `nextRecommendedCommand` like search/patch envelopes. See [Agent Shell Tooling](agent-shell-tooling.md).
 
 Test-only export: `@dietcode/agent-bridge/testing` → `MockRpcTransport` (not for production agents).
 
@@ -109,6 +118,10 @@ On `connect()` the bridge calls `tool.capabilities` and `runtime.diagnostics`, v
 5. On `nested_call_timeout`: `operation.status` with same key
 6. On `stale_content`: structured stale recovery — re-validate, do not re-apply
 
+**Pass XI — live authority:** `safePatchFile()` always sources `beforeContentHash` from `patch.validate` (`beforeHashSource: live_validate`). It never reads hashes from `runtime.timeline`, `memory.operation.*`, `memory.revision.*`, or cached `operation.status` receipts. Journal post-hashes are historical only.
+
+`make test-agent-bridge-authority` — offline bridge authority tests.
+
 `safePatchBatch()` mirrors for multiple files with atomic rollback verification.
 
 Diagram: [Architecture — safe patch](agent-bridge-architecture.md#workflow-safe-patch).
@@ -119,7 +132,14 @@ Diagram: [Architecture — safe patch](agent-bridge-architecture.md#workflow-saf
 
 Bridge results include: `complete`, `partial`, `warnings`, `fallbackUsed`, `truncated`, `recoveryHint`, `nextRecommendedCommand`. Set `includeRaw: true` to include the raw RPC payload.
 
-Errors throw `DietCodeBridgeError` with stable `code`, `recoveryHint`, `nextRecommendedCommand`, `retrySafe`.
+Errors throw `DietCodeBridgeError` with stable `code`, `recoveryHint`, `nextRecommendedCommand`, `retrySafe`, `rawError`, plus provenance:
+
+| Field | Values | Meaning |
+|-------|--------|---------|
+| `recoverySource` | `runtime` \| `bridge_fallback` | Where `recoveryHint` came from |
+| `nextCommandSource` | `runtime` \| `bridge_fallback` | Where `nextRecommendedCommand` came from |
+
+**Pass XI rule:** runtime hints win when present. Bridge fallbacks apply only when the runtime omits hints. Protected codes (`stale_content`, `symlink_target`, `patch_failed`, `semantic_disabled`) never have runtime hints rewritten. The bridge does not auto-retry `patch.apply` after `stale_content`.
 
 | Code | Typical cause |
 |------|----------------|
@@ -146,7 +166,7 @@ build/DietCode.app/Contents/Resources/bin/dietcode-agent-client verify fast --pr
 cd agent-bridge && npm run cli -- profile --no-start
 ```
 
-Commands: `profile`, `diagnostics`, `search literal|tokens|paths`, `stat`, `patch safe-file`, `patch safe-batch`, `timeline recent`, `activity recent`, `verify fast`.
+Commands: `profile`, `diagnostics`, `search literal|tokens|paths`, `stat`, `patch safe-file`, `patch safe-batch`, `timeline recent`, `activity recent`, `verify fast`, `shell pwd|cd|rg|head|tail|sed|cat-small`.
 
 Environment: `~/.dietcode/control.sock`, `~/.dietcode/session.token`, optional `DIETCODE_APP_PATH`.
 

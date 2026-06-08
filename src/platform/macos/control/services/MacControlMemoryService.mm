@@ -162,6 +162,8 @@ static NSString* SqliteError(sqlite3* db) {
         @"droppedTelemetryCount": @(_droppedTelemetryCount),
         @"mutationAuthority": @"cpp_kernel",
         @"recordAuthority": @"runtime_journal",
+        @"currentStateAuthority": @"workspace_live_read",
+        @"notCurrentFileTruth": @YES,
         @"workspacePath": _workspacePath ?: @"",
         @"startup": _startupDiagnostics ?: @{},
         @"runtimeRecoveredFromShutdown": @(_recoveredFromShutdown),

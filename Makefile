@@ -84,6 +84,8 @@ MACOS_MM := \
 	src/platform/macos/control/services/MacControlRoutingPolicy.mm \
 	src/platform/macos/control/services/MacControlMethodCatalog.mm \
 	src/platform/macos/control/services/MacControlToolRegistry.mm \
+	src/platform/macos/control/services/MacControlShellService.mm \
+	src/platform/macos/control/categories/MacControlServer+Shell.mm \
 	src/platform/macos/control/services/MacControlWindowBridge.mm \
 	src/platform/macos/services/SymbolIndexService.mm \
 	src/platform/macos/services/DiffAnalysisService.mm \
@@ -94,7 +96,7 @@ MACOS_MM := \
 	src/filesystem/FileWatcher.mm \
 	src/core/LSPClient.mm
 
-.PHONY: all app agent-bridge agent-bridge-fast run headless ensure-socket restart-agent-server restart-agent-server-fast agent-ready agent-status agent-ping agent-methods agent-capabilities agent-self-test test-agent-offline control-smoke test-task-health test-rpc-transaction test-ergonomics test-grep-diff-tooling test-runtime-determinism test-transaction-kernel test-harness-realism test-deterministic-retrieval test-agent-workflow-smoke test-cli-agent-failures test-docs-code-drift test-partial-success-closure test-broccoliq-runtime-memory test-broccoliq-runtime-memory-fast test-runtime-native-integration test-runtime-native-integration-fast test-agent-bridge test-agent-bridge-fast test-agent-integration agent-integration verify-agent-runtime verify-agent-runtime-fast verify-agent-runtime-full verify-agent-runtime-full-fast test clean
+.PHONY: all app agent-bridge agent-bridge-fast run headless ensure-socket restart-agent-server restart-agent-server-fast agent-ready agent-status agent-ping agent-methods agent-capabilities agent-self-test test-agent-offline control-smoke test-task-health test-rpc-transaction test-ergonomics test-grep-diff-tooling test-runtime-determinism test-transaction-kernel test-harness-realism test-deterministic-retrieval test-agent-workflow-smoke test-agent-shell-tooling test-agent-shell-tooling-fast test-agent-shell-workflows test-agent-shell-workflows-fast test-authority-boundaries test-authority-boundaries-fast test-agent-bridge-authority test-cli-agent-failures test-docs-code-drift test-partial-success-closure test-broccoliq-runtime-memory test-broccoliq-runtime-memory-fast test-runtime-native-integration test-runtime-native-integration-fast test-agent-bridge test-agent-bridge-fast test-agent-integration agent-integration verify-agent-runtime verify-agent-runtime-fast verify-agent-runtime-full verify-agent-runtime-full-fast test clean
 
 all: app test
 
@@ -214,6 +216,30 @@ test-deterministic-retrieval: restart-agent-server
 test-agent-workflow-smoke: restart-agent-server
 	python3 scripts/dietcode_agent_client.py --wait-ready --compact --error-json --quiet
 	python3 scripts/test_agent_workflow_smoke.py --compact
+
+test-agent-shell-tooling: restart-agent-server
+	python3 scripts/dietcode_agent_client.py --wait-ready --compact --error-json --quiet
+	python3 scripts/test_agent_shell_tooling.py --compact
+
+test-agent-shell-tooling-fast:
+	python3 scripts/test_agent_shell_tooling.py --compact
+
+test-agent-shell-workflows: restart-agent-server
+	python3 scripts/dietcode_agent_client.py --wait-ready --compact --error-json --quiet
+	python3 scripts/test_agent_shell_workflows.py --compact
+
+test-agent-shell-workflows-fast:
+	python3 scripts/test_agent_shell_workflows.py --compact
+
+test-authority-boundaries: restart-agent-server
+	python3 scripts/dietcode_agent_client.py --wait-ready --compact --error-json --quiet
+	python3 scripts/test_authority_boundaries.py --compact
+
+test-authority-boundaries-fast:
+	python3 scripts/test_authority_boundaries.py --compact
+
+test-agent-bridge-authority:
+	cd $(AGENT_BRIDGE_DIR) && npm run build && npm run test:authority
 
 test-cli-agent-failures: restart-agent-server
 	python3 scripts/dietcode_agent_client.py --wait-ready --compact --error-json --quiet

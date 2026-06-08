@@ -1,0 +1,2 @@
+# Generated large fixture — repeated line for catSmall truncation tests.
+LARGE_FIXTURE_LINE=repeat

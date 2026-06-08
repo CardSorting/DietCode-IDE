@@ -1,11 +1,15 @@
 /** Public bridge types — no raw RPC method names in agent-facing surfaces. */
 export type BridgeErrorCode = 'stale_content' | 'semantic_disabled' | 'ranked_search_disabled' | 'symlink_target' | 'patch_failed' | 'nested_call_timeout' | 'runtime_unavailable' | 'unsupported_runtime_capability' | 'transport_error' | 'invalid_params' | 'unknown';
+export type RecoverySource = 'runtime' | 'bridge_fallback';
+export type HashAuthority = 'live_validate' | 'live_stat';
 export interface BridgeError {
     code: BridgeErrorCode;
     message: string;
     recoveryHint: string;
     nextRecommendedCommand: string;
     retrySafe: boolean;
+    recoverySource: RecoverySource;
+    nextCommandSource: RecoverySource;
     rawError?: Record<string, unknown>;
 }
 export interface BridgeEnvelope<T> {
@@ -71,6 +75,8 @@ export interface SafePatchSuccess {
     revisionAfter?: number;
     idempotencyKey: string;
     nextRecommendedCommand?: string;
+    beforeHashSource: HashAuthority;
+    beforeContentHash: string;
 }
 export interface StalePatchRecovery {
     applied: false;
@@ -80,6 +86,8 @@ export interface StalePatchRecovery {
     currentContentHash?: string;
     recoveryHint: string;
     nextRecommendedCommand: string;
+    recoverySource: RecoverySource;
+    nextCommandSource: RecoverySource;
     idempotencyKey: string;
 }
 export type SafePatchResult = SafePatchSuccess | StalePatchRecovery;
@@ -145,6 +153,10 @@ export interface OperationStatusResult {
     mutationReceipt?: MutationReceipt;
     batchMutationReceipt?: BatchMutationReceipt;
     completedAt?: string;
+    recordAuthority?: string;
+    mutationAuthority?: string;
+    currentStateAuthority?: string;
+    notCurrentFileTruth?: boolean;
 }
 export interface VerifyFastResult {
     ok: boolean;

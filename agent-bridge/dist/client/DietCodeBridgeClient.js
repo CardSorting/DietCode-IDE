@@ -3,6 +3,7 @@ import { detectRuntimeCapabilities } from '../capabilities/detectRuntimeCapabili
 import { fetchDiagnostics, fetchFileStat } from '../adapters/diagnosticsAdapter.js';
 import { searchLiteral, searchPaths, searchTokens } from '../adapters/searchAdapter.js';
 import { fetchOperationStatus, fetchRecentActivity, fetchTimeline, verifyFast, } from '../adapters/runtimeAdapter.js';
+import { shellCatSmall, shellCd, shellHead, shellPwd, shellRg, shellSedRange, shellTail, } from '../adapters/shellAdapter.js';
 import { safePatchBatch } from '../workflows/safePatchBatch.js';
 import { safePatchFile } from '../workflows/safePatchFile.js';
 import { resolveConnectOptions, waitForReady } from './connection.js';
@@ -84,6 +85,27 @@ export class DietCodeBridgeClient {
     }
     async verifyFast() {
         return verifyFast(this.transport);
+    }
+    async shellPwd() {
+        return shellPwd(this.transport);
+    }
+    async shellCd(path) {
+        return shellCd(this.transport, path);
+    }
+    async shellRg(pattern, options) {
+        return shellRg(this.transport, pattern, options);
+    }
+    async shellHead(path, lines) {
+        return shellHead(this.transport, path, lines);
+    }
+    async shellTail(path, lines) {
+        return shellTail(this.transport, path, lines);
+    }
+    async shellSedRange(path, startLine, endLine) {
+        return shellSedRange(this.transport, path, startLine, endLine);
+    }
+    async shellCatSmall(path) {
+        return shellCatSmall(this.transport, path);
     }
 }
 //# sourceMappingURL=DietCodeBridgeClient.js.map

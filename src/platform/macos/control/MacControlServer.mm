@@ -1209,6 +1209,7 @@ static const void* kDietCodeReadQueueKey = &kDietCodeReadQueueKey;
     NSString* path = params[@"path"];
     if (path &&
         ![method isEqualToString:@"workspace.openFolder"] &&
+        ![method hasPrefix:@"shell."] &&
         ![method isEqualToString:@"diff.validatePatch"] &&
         ![method isEqualToString:@"diff.applyPatchPreview"] &&
         ![method isEqualToString:@"patch.validate"] &&
@@ -1302,6 +1303,8 @@ static const void* kDietCodeReadQueueKey = &kDietCodeReadQueueKey;
         [self executeRuntimeMethod:method params:params outResult:outResult outErrCode:outErrCode outErrMsg:outErrMsg outPaths:outPaths];
     } else if ([method hasPrefix:@"memory."]) {
         [self executeMemoryMethod:method params:params outResult:outResult outErrCode:outErrCode outErrMsg:outErrMsg outPaths:outPaths];
+    } else if ([method hasPrefix:@"shell."]) {
+        [self executeShellMethod:method params:params outResult:outResult outErrCode:outErrCode outErrMsg:outErrMsg outPaths:outPaths];
     } else if ([method hasPrefix:@"workspace."] || [method hasPrefix:@"file."] || [method hasPrefix:@"search."] || [method hasPrefix:@"operation."]) {
         [self executeFileMethod:method params:params outResult:outResult outErrCode:outErrCode outErrMsg:outErrMsg outPaths:outPaths];
     } else if ([method hasPrefix:@"editor."] || [method hasPrefix:@"buffers."] || [method hasPrefix:@"changes."] || [method hasPrefix:@"diff."] || [method hasPrefix:@"patch."]) {

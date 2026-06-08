@@ -64,6 +64,10 @@ Full audit context: [Agent Runtime Audit](agent-runtime-audit.md) (Passes I–VI
 | `make test-harness-realism` | `test_harness_realism.py` | IV |
 | `make test-deterministic-retrieval` | `test_deterministic_retrieval.py` | V |
 | `make test-agent-workflow-smoke` | `test_agent_workflow_smoke.py` | VI |
+| `make test-agent-shell-tooling` | `test_agent_shell_tooling.py` | IX |
+| `make test-agent-shell-tooling-fast` | Same (no rebuild) | IX |
+| `make test-agent-shell-workflows` | `test_agent_shell_workflows.py` | IX |
+| `make test-agent-shell-workflows-fast` | Same (no rebuild) | IX |
 | `make test-cli-agent-failures` | `test_cli_agent_failures.py` | VI |
 | `make test-partial-success-closure` | `test_partial_success_closure.py` | VI closure |
 | `make test-ergonomics` | `test_ergonomics.py` | — |

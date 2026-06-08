@@ -51,6 +51,7 @@ READ_METHODS = {
     "search.references", "search.todo", "search.semantic", "search.diagnostics",
     "tool.registry", "tool.capabilities",
     "file.read", "file.readBatch", "file.readRange", "file.readAround", "file.getChunks", "file.stat", "file.statBatch",
+    "shell.pwd", "shell.cd", "shell.rg", "shell.head", "shell.tail", "shell.sedRange", "shell.catSmall",
     "editor.getActiveFile", "editor.getOpenFiles", "editor.getText", "editor.getSelection",
     "analysis.workspaceSummary", "analysis.searchRanked", "analysis.fileSummary", "analysis.relatedFiles",
     "symbols.document", "symbols.hierarchy", "symbols.outline", "symbols.activeDocument",
@@ -1424,6 +1425,12 @@ Examples:
   %(prog)s --patch-file fix.diff --path src/foo.py --patch-summary --compact
   %(prog)s --expect-before-hash <hash> --patch-file fix.diff --path src/foo.py --confirm --compact
   %(prog)s tool.capabilities --compact
+  %(prog)s shell pwd --compact
+  %(prog)s shell cd scripts --compact
+  %(prog)s shell rg "CONTRACT:" --path scripts/ --compact
+  %(prog)s shell head scripts/fixtures/shell/anchor_target.txt --compact
+  %(prog)s shell sed scripts/fixtures/shell/anchor_target.txt 1 5 --compact
+  %(prog)s shell cat-small README.md --compact
   %(prog)s --raw-response --error-json search.semantic '{"query":"foo"}'
 """.strip()
 
@@ -1436,6 +1443,71 @@ def _emit_partial_success_hint(result: dict[str, Any], *, quiet: bool) -> None:
     hint = partial_success_hint(result)
     if hint:
         print(f"hint: {hint}", file=sys.stderr)
+
+
+def parse_shell_shortcut(
+    method: str,
+    params_json: str | None,
+    tail_args: list[str],
+) -> tuple[str, dict[str, Any]] | None:
+    """Map `shell <subcommand> ...` CLI invocations to shell.* RPC methods."""
+    if method != "shell":
+        return None
+    tokens: list[str] = []
+    if params_json:
+        tokens.append(params_json)
+    tokens.extend(tail_args)
+    if not tokens:
+        raise ValueError("shell subcommand required: pwd, cd, rg, head, tail, sed, cat-small")
+    sub = tokens[0]
+    rest = tokens[1:]
+    if sub == "pwd":
+        return "shell.pwd", {}
+    if sub == "cd":
+        if not rest:
+            raise ValueError("shell cd requires <path>")
+        return "shell.cd", {"path": rest[0]}
+    if sub == "rg":
+        if not rest:
+            raise ValueError("shell rg requires <pattern>")
+        path_idx = rest.index("--path") if "--path" in rest else -1
+        path = rest[path_idx + 1] if path_idx >= 0 else None
+        pattern = rest[0]
+        params: dict[str, Any] = {"pattern": pattern}
+        if path:
+            params["path"] = path
+        return "shell.rg", params
+    if sub == "head":
+        if not rest:
+            raise ValueError("shell head requires <path>")
+        lines_idx = rest.index("--lines") if "--lines" in rest else -1
+        lines = int(rest[lines_idx + 1]) if lines_idx >= 0 else None
+        params = {"path": rest[0]}
+        if lines is not None:
+            params["lines"] = lines
+        return "shell.head", params
+    if sub == "tail":
+        if not rest:
+            raise ValueError("shell tail requires <path>")
+        lines_idx = rest.index("--lines") if "--lines" in rest else -1
+        lines = int(rest[lines_idx + 1]) if lines_idx >= 0 else None
+        params = {"path": rest[0]}
+        if lines is not None:
+            params["lines"] = lines
+        return "shell.tail", params
+    if sub == "sed":
+        if len(rest) < 3:
+            raise ValueError("shell sed requires <path> <startLine> <endLine>")
+        return "shell.sedRange", {
+            "path": rest[0],
+            "startLine": int(rest[1]),
+            "endLine": int(rest[2]),
+        }
+    if sub == "cat-small":
+        if not rest:
+            raise ValueError("shell cat-small requires <path>")
+        return "shell.catSmall", {"path": rest[0]}
+    raise ValueError(f"unknown shell subcommand '{sub}'")
 
 
 def main() -> int:
@@ -1530,6 +1602,7 @@ def main() -> int:
     parser.add_argument("--batch-stdin", action="store_true", help="Read newline-delimited JSON RPC requests from stdin.")
     parser.add_argument("method", nargs="?", default="rpc.ping", help="RPC method to call after ensuring the socket.")
     parser.add_argument("params_json", nargs="?", help="JSON object params for the RPC call.")
+    parser.add_argument("tail_args", nargs="*", help=argparse.SUPPRESS)
     args = parser.parse_args()
     if args.json:
         args.compact = True
@@ -1797,10 +1870,11 @@ def main() -> int:
             print(json_text(response_for_output(response), compact=args.compact))
             return rpc_exit_code(response, raw_response=args.raw_response)
 
-        effective_method = args.method
+        shell_shortcut = parse_shell_shortcut(args.method, args.params_json, args.tail_args)
+        effective_method = shell_shortcut[0] if shell_shortcut else args.method
         if (args.patch_file or args.patch_stdin) and effective_method == "rpc.ping":
             effective_method = "patch.hunks" if args.patch_hunks else "patch.validate"
-        params = load_params(args)
+        params = shell_shortcut[1] if shell_shortcut else load_params(args)
         with DietCodeAgentClient(
             app_path=app_path,
             socket_path=socket_path,

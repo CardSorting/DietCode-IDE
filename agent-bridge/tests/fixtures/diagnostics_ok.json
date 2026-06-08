@@ -4,6 +4,8 @@
   "checkpointStatus": "ready",
   "mutationAuthority": "cpp_kernel",
   "recordAuthority": "runtime_journal",
+  "currentStateAuthority": "workspace_live_read",
+  "notCurrentFileTruth": true,
   "workspacePath": "/tmp/workspace",
   "complete": true,
   "partial": false,

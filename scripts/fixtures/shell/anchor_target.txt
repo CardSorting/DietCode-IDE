@@ -1,0 +1,6 @@
+SHELL_ANCHOR_IX: workflow anchor line one
+SHELL_ANCHOR_IX: workflow anchor line two
+context line three
+context line four
+context line five
+context line six

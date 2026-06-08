@@ -18,6 +18,7 @@ from agent_contracts import (
     INTERNAL_METHOD_NAMESPACES,
     REQUIRED_MAKE_TARGETS,
     SEARCH_LITERAL_RESPONSE_KEYS,
+    SHELL_ENVELOPE_KEYS,
     TOOL_REGISTRY_ENTRY_KEYS,
 )
 from agent_test_support import CheckRecorder, add_output_args, output_compact
@@ -66,8 +67,53 @@ def test_internal_namespaces_documented() -> None:
 
 def test_testing_checklist_has_verify_commands() -> None:
     text = (DOCS / "testing-checklist.md").read_text(encoding="utf-8")
-    for target in ("verify-agent-runtime", "verify-agent-runtime-full", "test-agent-workflow-smoke"):
+    for target in (
+        "verify-agent-runtime",
+        "verify-agent-runtime-full",
+        "test-agent-workflow-smoke",
+        "test-agent-shell-tooling",
+        "test-agent-shell-workflows",
+    ):
         assert target in text, f"testing-checklist.md missing {target}"
+
+
+def test_agent_shell_tooling_doc_lists_methods() -> None:
+    text = (DOCS / "agent-shell-tooling.md").read_text(encoding="utf-8")
+    for method in (
+        "shell.pwd",
+        "shell.cd",
+        "shell.rg",
+        "shell.head",
+        "shell.tail",
+        "shell.sedRange",
+        "shell.catSmall",
+        "use_shell_head_tail_or_sedRange",
+    ):
+        assert method in text, f"agent-shell-tooling.md missing {method}"
+
+
+def test_agent_bridge_doc_lists_shell_methods() -> None:
+    text = (DOCS / "agent-bridge.md").read_text(encoding="utf-8")
+    for method in ("shellPwd", "shellRg", "shellSedRange", "shellCatSmall"):
+        assert method in text, f"agent-bridge.md missing {method}"
+
+
+def test_shell_error_codes_documented() -> None:
+    text = (DOCS / "error-codes.md").read_text(encoding="utf-8")
+    for code in (
+        "shell_timeout",
+        "shell_binary_file",
+        "shell_symlink_escape",
+        "shell_outside_workspace",
+        "shell_rg_failed",
+    ):
+        assert code in text, f"error-codes.md missing {code}"
+
+
+def test_shell_envelope_keys_nonempty() -> None:
+    assert "complete" in SHELL_ENVELOPE_KEYS
+    assert "partial" in SHELL_ENVELOPE_KEYS
+    assert len(SHELL_ENVELOPE_KEYS) >= 15
 
 
 def test_makefile_has_required_targets() -> None:
@@ -128,6 +174,10 @@ def main() -> int:
         ("drift.agent_tooling_doc", test_agent_tooling_doc_lists_methods),
         ("drift.internal_namespaces", test_internal_namespaces_documented),
         ("drift.testing_checklist", test_testing_checklist_has_verify_commands),
+        ("drift.agent_shell_tooling_doc", test_agent_shell_tooling_doc_lists_methods),
+        ("drift.agent_bridge_shell_doc", test_agent_bridge_doc_lists_shell_methods),
+        ("drift.shell_error_codes", test_shell_error_codes_documented),
+        ("drift.shell_envelope_keys", test_shell_envelope_keys_nonempty),
         ("drift.makefile_targets", test_makefile_has_required_targets),
         ("drift.contract_key_sets", test_contract_key_sets_documented),
         ("drift.frozen_key_sets_nonempty", test_frozen_key_sets_nonempty),

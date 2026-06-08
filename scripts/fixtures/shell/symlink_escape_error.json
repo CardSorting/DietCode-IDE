@@ -1,0 +1,7 @@
+{
+  "code": "shell_symlink_escape",
+  "message": "Symlink paths are not readable via shell wrappers.",
+  "recoveryHint": "use_non_symlink_target_path",
+  "nextRecommendedCommand": "file.stat",
+  "retrySafe": false
+}

@@ -61,7 +61,7 @@ static const NSInteger kMaxBatchFilePaths = 100;
 
     if ([method isEqualToString:@"operation.status"]) {
         NSString* key = params[@"idempotencyKey"] ?: params[@"clientOperationId"];
-        *outResult = [_workspaceState operationStatusForKey:key];
+        *outResult = MacControlApplyJournalAuthorityLabels([_workspaceState operationStatusForKey:key]);
         return;
     }
     

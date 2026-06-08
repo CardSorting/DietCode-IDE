@@ -125,6 +125,23 @@ def check_source_invariants() -> None:
     assert (REPO_ROOT / "scripts/fixtures/tooling/sample_unified_diff.txt").is_file(), "tooling fixture required"
     assert (REPO_ROOT / "scripts/fixtures/tooling/grep_anchor.json").is_file(), "grep anchor fixture required"
     assert (REPO_ROOT / "docs/agent-tooling.md").is_file(), "agent-tooling.md required"
+    assert (REPO_ROOT / "docs/agent-shell-tooling.md").is_file(), "agent-shell-tooling.md required"
+    assert (REPO_ROOT / "scripts/agent_shell_tooling.py").is_file(), "agent_shell_tooling.py required"
+    assert (REPO_ROOT / "scripts/test_agent_shell_tooling.py").is_file(), "test_agent_shell_tooling.py required"
+    assert (REPO_ROOT / "src/platform/macos/control/services/MacControlShellService.mm").is_file(), "MacControlShellService required"
+    shell_svc = _read(REPO_ROOT / "src/platform/macos/control/services/MacControlShellService.mm")
+    assert "shell.catSmall" in shell_svc, "shell.catSmall required"
+    assert "symlink_escape" in shell_svc, "shell.cd symlink guard required"
+    assert "use_shell_head_tail_or_sedRange" in shell_svc, "catSmall recovery hint required"
+    for fixture in (
+        "rg_response.json",
+        "sed_range_response.json",
+        "cat_small_truncated.json",
+        "cd_outside_workspace_error.json",
+        "binary_rejection_error.json",
+        "symlink_escape_error.json",
+    ):
+        assert (REPO_ROOT / "scripts" / "fixtures" / "shell" / fixture).is_file(), f"shell fixture required: {fixture}"
     tooling = _read(REPO_ROOT / "scripts/agent_tooling.py")
     assert "literal_match_spans" in tooling, "literal_match_spans required"
     assert "parse_unified_diff_hunks" in tooling, "parse_unified_diff_hunks required"

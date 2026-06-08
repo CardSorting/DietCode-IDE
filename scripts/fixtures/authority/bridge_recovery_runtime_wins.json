@@ -1,0 +1,9 @@
+{
+  "code": "stale_content",
+  "runtimeHint": "revalidate_patch_with_patch.validate",
+  "runtimeNext": "patch.validate",
+  "recoveryHint": "revalidate_patch_with_patch.validate",
+  "nextRecommendedCommand": "patch.validate",
+  "recoverySource": "runtime",
+  "nextCommandSource": "runtime"
+}

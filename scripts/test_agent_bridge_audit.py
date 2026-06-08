@@ -48,6 +48,13 @@ PUBLIC_METHODS = (
     "getTimeline",
     "getRecentActivity",
     "verifyFast",
+    "shellPwd",
+    "shellCd",
+    "shellRg",
+    "shellHead",
+    "shellTail",
+    "shellSedRange",
+    "shellCatSmall",
 )
 
 

@@ -13,12 +13,18 @@ export type BridgeErrorCode =
   | 'invalid_params'
   | 'unknown';
 
+export type RecoverySource = 'runtime' | 'bridge_fallback';
+
+export type HashAuthority = 'live_validate' | 'live_stat';
+
 export interface BridgeError {
   code: BridgeErrorCode;
   message: string;
   recoveryHint: string;
   nextRecommendedCommand: string;
   retrySafe: boolean;
+  recoverySource: RecoverySource;
+  nextCommandSource: RecoverySource;
   rawError?: Record<string, unknown>;
 }
 
@@ -92,6 +98,8 @@ export interface SafePatchSuccess {
   revisionAfter?: number;
   idempotencyKey: string;
   nextRecommendedCommand?: string;
+  beforeHashSource: HashAuthority;
+  beforeContentHash: string;
 }
 
 export interface StalePatchRecovery {
@@ -102,6 +110,8 @@ export interface StalePatchRecovery {
   currentContentHash?: string;
   recoveryHint: string;
   nextRecommendedCommand: string;
+  recoverySource: RecoverySource;
+  nextCommandSource: RecoverySource;
   idempotencyKey: string;
 }
 
@@ -178,6 +188,10 @@ export interface OperationStatusResult {
   mutationReceipt?: MutationReceipt;
   batchMutationReceipt?: BatchMutationReceipt;
   completedAt?: string;
+  recordAuthority?: string;
+  mutationAuthority?: string;
+  currentStateAuthority?: string;
+  notCurrentFileTruth?: boolean;
 }
 
 export interface VerifyFastResult {

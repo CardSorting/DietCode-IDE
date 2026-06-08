@@ -1,0 +1,7 @@
+{
+  "pattern": "SHELL_ANCHOR_IX:",
+  "path": "scripts/fixtures/shell/anchor_target.txt",
+  "minMatches": 1,
+  "sedStart": 1,
+  "sedEnd": 5
+}

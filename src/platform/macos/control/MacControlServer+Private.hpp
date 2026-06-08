@@ -106,3 +106,7 @@
 - (NSDictionary*)runtimeTimelineResult:(NSDictionary*)params activityOnly:(BOOL)activityOnly;
 - (void)executeRuntimeMethod:(NSString*)method params:(NSDictionary*)params outResult:(NSDictionary**)outResult outErrCode:(NSString**)outErrCode outErrMsg:(NSString**)outErrMsg outPaths:(NSString**)outPaths;
 @end
+
+@interface DietCodeControlServer (Shell)
+- (void)executeShellMethod:(NSString*)method params:(NSDictionary*)params outResult:(NSDictionary**)outResult outErrCode:(NSString**)outErrCode outErrMsg:(NSString**)outErrMsg outPaths:(NSString**)outPaths;
+@end

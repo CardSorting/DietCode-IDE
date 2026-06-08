@@ -101,6 +101,23 @@ Both read the same journal. Mutation kernel remains authoritative.
 
 ---
 
+## Pass XI — journal authority labels
+
+Journal and history RPC responses include frozen authority fields (memory/history only — **not** current file truth):
+
+| Field | Value | Meaning |
+|-------|-------|---------|
+| `recordAuthority` | `runtime_journal` | This record is durable history |
+| `mutationAuthority` | `cpp_kernel` | Only C++ kernel may mutate files |
+| `currentStateAuthority` | `workspace_live_read` | Current file truth requires live read |
+| `notCurrentFileTruth` | `true` | Do not treat journal hashes as live content |
+
+Applies to: `runtime.timeline`, `runtime.history`, `workspace.activity`, `runtime.operation.recent`, `runtime.correlate`, `memory.operation.*`, `memory.revision.*`, `memory.verify.*`, `operation.status`.
+
+Verification: `make test-authority-boundaries`
+
+---
+
 ## Remaining gaps
 
 1. Automatic `verify.run` → timeline event hook (manual `memory.verify.record` today)

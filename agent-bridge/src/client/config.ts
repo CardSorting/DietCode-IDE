@@ -35,6 +35,13 @@ const READ_METHODS = new Set([
   'search.files',
   'file.stat',
   'patch.validate',
+  'shell.pwd',
+  'shell.cd',
+  'shell.rg',
+  'shell.head',
+  'shell.tail',
+  'shell.sedRange',
+  'shell.catSmall',
 ]);
 
 export interface ResolvedTransportConfig {
