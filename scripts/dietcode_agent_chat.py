@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+import time
 from pathlib import Path
 from typing import Any
 
@@ -25,6 +26,12 @@ from dietcode_agent_bundle import (
     validate_workspace,
     workspace_authority_report,
 )
+from dietcode_diff_authority import (
+    agent_chat_run_id,
+    audit_diff_authority,
+    empty_diff_authority,
+    snapshot_text_files,
+)
 from dietcode_mutation_authority import (
     audit_mutation_authority,
     collect_bridge_patch_events,
@@ -32,6 +39,14 @@ from dietcode_mutation_authority import (
     mutation_authority_label,
     mutation_event_log_path,
     workspace_manifest,
+)
+from dietcode_verification_authority import (
+    audit_verification_authority,
+    empty_verification_authority,
+    execute_verification_authority,
+    resolve_verify_command,
+    verification_failure_message,
+    verification_label,
 )
 
 
@@ -46,6 +61,9 @@ def _emit(payload: dict[str, Any], *, fmt: str) -> None:
             mutation = payload.get("mutationAuthority")
             if isinstance(mutation, dict):
                 print(f"Mutation path: {mutation_authority_label(str(mutation.get('mode') or 'unknown'))}")
+            verification = payload.get("verificationAuthority")
+            if isinstance(verification, dict):
+                print(f"Verification: {verification_label(verification)}")
         else:
             err = payload.get("error")
             if isinstance(err, dict):
@@ -93,6 +111,8 @@ def cmd_doctor(repo_root: Path, ctx, *, fmt: str, workspace: Path | None) -> int
     if authority and workspace is not None:
         ok = ok and bool(authority.get("workspaceMatch"))
     mutation = empty_mutation_authority()
+    diff_authority = empty_diff_authority()
+    verification = empty_verification_authority()
     payload: dict[str, Any] = {
         "ok": ok,
         "action": "doctor",
@@ -100,6 +120,8 @@ def cmd_doctor(repo_root: Path, ctx, *, fmt: str, workspace: Path | None) -> int
         "status": status,
         "workspaceAuthority": authority,
         "mutationAuthority": mutation,
+        "diffAuthority": diff_authority,
+        "verificationAuthority": verification,
     }
     if fmt == "json":
         print(json.dumps(payload, indent=2))
@@ -115,6 +137,7 @@ def cmd_doctor(repo_root: Path, ctx, *, fmt: str, workspace: Path | None) -> int
             if not authority.get("workspaceMatch", True):
                 parts.append("Workspace mismatch — agent disabled")
         parts.append(f"Mutation path: {mutation_authority_label(mutation['mode'])}")
+        parts.append(f"Verification: {verification_label(verification)}")
         print("\n".join(parts))
     return 0 if ok else 1
 
@@ -128,9 +151,13 @@ def cmd_chat(
     fmt: str,
     max_turns: int,
     enforce_mutation_authority: bool,
+    verify_command: str | None,
+    enforce_verification_authority: bool,
 ) -> int:
-    event_log = mutation_event_log_path()
+    run_id = agent_chat_run_id()
+    event_log = mutation_event_log_path(run_id)
     before_manifest = workspace_manifest(workspace)
+    before_contents = snapshot_text_files(workspace)
     try:
         status = assert_chat_ready(ctx, repo_root, workspace)
         workspace_authority = status.get("workspaceAuthority")
@@ -150,8 +177,35 @@ def cmd_chat(
             bridge_events=bridge_events,
             transcript=transcript,
         )
+        mutation_completed_at = time.time()
+        diff_authority = audit_diff_authority(
+            workspace,
+            run_id=run_id,
+            before_contents=before_contents,
+            mutation_authority=mutation,
+        )
+        resolved_verify = resolve_verify_command(workspace, override=verify_command)
+        verification = execute_verification_authority(
+            workspace,
+            run_id=run_id,
+            mutation_completed_at=mutation_completed_at,
+            verify_command=resolved_verify,
+        )
+        verification_audit = audit_verification_authority(
+            run_id,
+            verification,
+            mutation_completed_at=mutation_completed_at,
+        )
         ok = exit_code == 0
         if enforce_mutation_authority and mutation["mode"] in {"unknown", "violated"}:
+            ok = False
+        verify_ok = (
+            verification.get("executed")
+            and verification.get("passed")
+            and verification.get("checkedAfterMutation")
+            and verification_audit.get("ok")
+        )
+        if enforce_verification_authority and not verify_ok:
             ok = False
         payload: dict[str, Any] = {
             "ok": ok,
@@ -162,6 +216,10 @@ def cmd_chat(
             "status": status,
             "workspaceAuthority": workspace_authority,
             "mutationAuthority": mutation,
+            "diffAuthority": diff_authority,
+            "verificationAuthority": verification,
+            "verificationAudit": verification_audit,
+            "runId": run_id,
         }
         if enforce_mutation_authority and mutation["mode"] in {"unknown", "violated"}:
             payload["error"] = {
@@ -173,14 +231,24 @@ def cmd_chat(
                 ),
                 "recoveryHint": "review_mutation_authority",
             }
+        elif enforce_verification_authority and not verify_ok:
+            payload["error"] = {
+                "code": "verification_authority_failure",
+                "message": verification_failure_message(verification),
+                "recoveryHint": "review_verification_logs",
+            }
         _emit(payload, fmt=fmt)
         if enforce_mutation_authority and mutation["mode"] in {"unknown", "violated"}:
             return 11
+        if enforce_verification_authority and not verify_ok:
+            return 12
         return 0 if exit_code == 0 else 10
     except AgentChatError as exc:
         payload = exc.to_dict()
         payload["action"] = "chat"
         payload["mutationAuthority"] = empty_mutation_authority()
+        payload["diffAuthority"] = empty_diff_authority()
+        payload["verificationAuthority"] = empty_verification_authority()
         _emit(payload, fmt=fmt)
         return exc.exit_code
     finally:
@@ -204,6 +272,15 @@ def main(argv: list[str] | None = None) -> int:
         "--enforce-mutation-authority",
         action="store_true",
         help="Exit nonzero when mutation authority is unknown or violated",
+    )
+    parser.add_argument(
+        "--verify-command",
+        help="Executable verification command (default: ./verify.sh if present)",
+    )
+    parser.add_argument(
+        "--enforce-verification-authority",
+        action="store_true",
+        help="Exit nonzero when verification fails or does not run after mutation",
     )
     if argv is None:
         script_file = Path(sys.argv[0])
@@ -259,6 +336,8 @@ def main(argv: list[str] | None = None) -> int:
         fmt=args.format,
         max_turns=max(1, args.max_turns),
         enforce_mutation_authority=args.enforce_mutation_authority,
+        verify_command=args.verify_command,
+        enforce_verification_authority=args.enforce_verification_authority,
     )
 
 

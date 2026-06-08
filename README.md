@@ -196,6 +196,7 @@ Live bounded-edit proof (sidebar/chat → Hermes → `dietcode_ide` → bridge �
 make smoke-agent-chat-live
 make test-agent-chat-workspace-switch
 make test-mutation-authority
+make test-verification-authority
 ```
 
 ---

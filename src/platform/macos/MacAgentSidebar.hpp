@@ -15,6 +15,8 @@
 @property(nonatomic, strong, readonly) NSTextField* inputField;
 @property(nonatomic, strong, readonly) NSButton* sendButton;
 @property(nonatomic, strong, readonly) NSButton* stopButton;
+@property(nonatomic, strong, readonly) NSButton* viewDiffButton;
+@property(nonatomic, strong, readonly) NSButton* viewVerifyLogButton;
 
 - (void)appendTranscriptWithSpeaker:(NSString*)speaker message:(NSString*)message;
 - (void)refreshStatus;

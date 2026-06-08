@@ -133,6 +133,8 @@ class DietcodeAgentChatTests(unittest.TestCase):
                         fmt="json",
                         max_turns=5,
                         enforce_mutation_authority=False,
+                        verify_command=None,
+                        enforce_verification_authority=False,
                     )
             self.assertEqual(code, 0)
 

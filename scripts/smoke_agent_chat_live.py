@@ -8,6 +8,7 @@ import json
 import os
 import re
 import shutil
+import stat
 import subprocess
 import sys
 import tempfile
@@ -28,6 +29,14 @@ from dietcode_agent_bundle import (  # noqa: E402
     run_enable_doctor,
     run_hermes_chat,
 )
+from dietcode_diff_authority import agent_chat_run_id, audit_diff_authority, snapshot_text_files  # noqa: E402
+from dietcode_verification_authority import (  # noqa: E402
+    audit_verification_authority,
+    execute_verification_authority,
+    resolve_verify_command,
+    verify_stderr_path,
+    verify_stdout_path,
+)
 from dietcode_mutation_authority import (  # noqa: E402
     audit_mutation_authority,
     collect_bridge_patch_events,
@@ -38,6 +47,10 @@ from dietcode_mutation_authority import (  # noqa: E402
 PROBE_REL = "smoke_probe.py"
 PROBE_BROKEN = "VALUE = 1\n"
 PROBE_FIXED_RE = re.compile(r"VALUE\s*=\s*2\b")
+SMOKE_VERIFY_SH = """#!/usr/bin/env bash
+set -euo pipefail
+grep -q 'VALUE = 2' smoke_probe.py
+"""
 DEFAULT_TIMEOUT = int(os.environ.get("AGENT_CHAT_SMOKE_TIMEOUT", "180"))
 DEFAULT_MAX_TURNS = int(os.environ.get("AGENT_CHAT_SMOKE_MAX_TURNS", "15"))
 
@@ -196,11 +209,16 @@ def run_smoke(*, app_bundle: str | None, compact: bool, max_turns: int, timeout:
     workspace_dir = tempfile.mkdtemp(prefix="dietcode-agent-chat-smoke-")
     workspace = Path(workspace_dir)
     probe_path = workspace / PROBE_REL
-    event_log = mutation_event_log_path()
+    run_id = agent_chat_run_id()
+    event_log = mutation_event_log_path(run_id)
 
     try:
         probe_path.write_text(PROBE_BROKEN, encoding="utf-8")
+        verify_script = workspace / "verify.sh"
+        verify_script.write_text(SMOKE_VERIFY_SH, encoding="utf-8")
+        verify_script.chmod(verify_script.stat().st_mode | stat.S_IXUSR)
         rec.record("smoke.workspace_created", probe_path.is_file(), {"workspace": str(workspace)})
+        rec.record("smoke.verify_script", verify_script.is_file(), {"verify.sh": str(verify_script)})
 
         try:
             readiness = assert_chat_ready(ctx, repo_root, workspace)
@@ -221,6 +239,7 @@ def run_smoke(*, app_bundle: str | None, compact: bool, max_turns: int, timeout:
         rec.record("smoke.bridge_verify", ok_verify, verify_payload)
 
         before_manifest = workspace_manifest(workspace)
+        before_contents = snapshot_text_files(workspace)
         rec.record(
             "smoke.chat_start",
             True,
@@ -253,6 +272,56 @@ def run_smoke(*, app_bundle: str | None, compact: bool, max_turns: int, timeout:
             transcript=transcript,
         )
         rec.record("smoke.mutation_authority", mutation["mode"] == "bridge_only", mutation)
+
+        diff_authority = audit_diff_authority(
+            workspace,
+            run_id=run_id,
+            before_contents=before_contents,
+            mutation_authority=mutation,
+        )
+        rec.record(
+            "smoke.diff_authority",
+            bool(diff_authority.get("matchesMutationAuthority"))
+            and PROBE_REL in (diff_authority.get("changedFiles") or []),
+            diff_authority,
+        )
+        diff_file = Path(str(diff_authority.get("diffFile") or ""))
+        diff_text = diff_file.read_text(encoding="utf-8") if diff_file.is_file() else ""
+        rec.record(
+            "smoke.diff_includes_probe",
+            PROBE_REL in diff_text,
+            {"diffFile": str(diff_file), "snippet": diff_text[:400]},
+        )
+
+        mutation_completed_at = time.time()
+        resolved_verify = resolve_verify_command(workspace)
+        verification = execute_verification_authority(
+            workspace,
+            run_id=run_id,
+            mutation_completed_at=mutation_completed_at,
+            verify_command=resolved_verify,
+        )
+        verification_audit = audit_verification_authority(
+            run_id,
+            verification,
+            mutation_completed_at=mutation_completed_at,
+        )
+        rec.record(
+            "smoke.verification_authority",
+            bool(verification.get("executed"))
+            and bool(verification.get("passed"))
+            and bool(verification.get("checkedAfterMutation"))
+            and bool(verification_audit.get("ok")),
+            verification,
+        )
+        rec.record(
+            "smoke.verification_logs",
+            verify_stdout_path(run_id).is_file() and verify_stderr_path(run_id).is_file(),
+            {
+                "stdoutFile": str(verify_stdout_path(run_id)),
+                "stderrFile": str(verify_stderr_path(run_id)),
+            },
+        )
 
         disk_text = probe_path.read_text(encoding="utf-8") if probe_path.is_file() else ""
         rec.record(

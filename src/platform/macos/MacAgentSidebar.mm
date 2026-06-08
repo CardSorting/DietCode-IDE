@@ -44,6 +44,9 @@ static NSColor* AgentSidebarBackgroundColor(void) {
     BOOL _workspaceAuthorityMatch;
     BOOL _mutationAuthorityViolated;
     NSString* _lastWorkspaceForAuthority;
+    NSString* _lastDiffFile;
+    NSString* _lastVerifyStdoutFile;
+    NSString* _lastVerifyStderrFile;
     NSTask* _activeTask;
     NSInteger _lastExitCode;
 }
@@ -54,6 +57,9 @@ static NSColor* AgentSidebarBackgroundColor(void) {
         _lastExitCode = 0;
         _workspaceAuthorityMatch = YES;
         _mutationAuthorityViolated = NO;
+        _lastDiffFile = @"";
+        _lastVerifyStdoutFile = @"";
+        _lastVerifyStderrFile = @"";
         [self buildInterface];
         [self appendTranscriptWithSpeaker:kAgentSpeakerHermes
                                   message:@"Agent chat ready. Open a folder, then send a prompt."];
@@ -114,6 +120,18 @@ static NSColor* AgentSidebarBackgroundColor(void) {
     [_stopButton setTranslatesAutoresizingMaskIntoConstraints:NO];
     [self addSubview:_stopButton];
 
+    _viewDiffButton = [NSButton buttonWithTitle:@"View Diff" target:self action:@selector(viewDiff:)];
+    [_viewDiffButton setBezelStyle:NSBezelStyleRounded];
+    [_viewDiffButton setEnabled:NO];
+    [_viewDiffButton setTranslatesAutoresizingMaskIntoConstraints:NO];
+    [self addSubview:_viewDiffButton];
+
+    _viewVerifyLogButton = [NSButton buttonWithTitle:@"View Verify Log" target:self action:@selector(viewVerifyLog:)];
+    [_viewVerifyLogButton setBezelStyle:NSBezelStyleRounded];
+    [_viewVerifyLogButton setEnabled:NO];
+    [_viewVerifyLogButton setTranslatesAutoresizingMaskIntoConstraints:NO];
+    [self addSubview:_viewVerifyLogButton];
+
     [NSLayoutConstraint activateConstraints:@[
         [title.topAnchor constraintEqualToAnchor:self.topAnchor constant:12],
         [title.leadingAnchor constraintEqualToAnchor:self.leadingAnchor constant:12],
@@ -136,6 +154,14 @@ static NSColor* AgentSidebarBackgroundColor(void) {
         [_stopButton.leadingAnchor constraintEqualToAnchor:self.leadingAnchor constant:10],
         [_stopButton.bottomAnchor constraintEqualToAnchor:self.bottomAnchor constant:-12],
         [_stopButton.widthAnchor constraintGreaterThanOrEqualToConstant:64],
+
+        [_viewDiffButton.centerYAnchor constraintEqualToAnchor:_stopButton.centerYAnchor],
+        [_viewDiffButton.leadingAnchor constraintEqualToAnchor:_stopButton.trailingAnchor constant:8],
+        [_viewDiffButton.widthAnchor constraintGreaterThanOrEqualToConstant:84],
+
+        [_viewVerifyLogButton.centerYAnchor constraintEqualToAnchor:_stopButton.centerYAnchor],
+        [_viewVerifyLogButton.leadingAnchor constraintEqualToAnchor:_viewDiffButton.trailingAnchor constant:8],
+        [_viewVerifyLogButton.widthAnchor constraintGreaterThanOrEqualToConstant:108],
 
         [_sendButton.centerYAnchor constraintEqualToAnchor:_stopButton.centerYAnchor],
         [_sendButton.trailingAnchor constraintEqualToAnchor:self.trailingAnchor constant:-10],
@@ -164,6 +190,61 @@ static NSColor* AgentSidebarBackgroundColor(void) {
         return [self.delegate agentSidebarWorkspacePath] ?: @"";
     }
     return @"";
+}
+
+- (void)updateViewDiffButton {
+    BOOL enabled = _lastDiffFile.length > 0
+        && [[NSFileManager defaultManager] isReadableFileAtPath:_lastDiffFile];
+    [_viewDiffButton setEnabled:enabled];
+}
+
+- (void)updateViewVerifyLogButton {
+    BOOL enabled = _lastVerifyStdoutFile.length > 0
+        && [[NSFileManager defaultManager] isReadableFileAtPath:_lastVerifyStdoutFile];
+    [_viewVerifyLogButton setEnabled:enabled];
+}
+
+- (void)viewVerifyLog:(id)sender {
+    (void)sender;
+    if (_lastVerifyStdoutFile.length == 0) {
+        return;
+    }
+    if (![[NSFileManager defaultManager] isReadableFileAtPath:_lastVerifyStdoutFile]) {
+        [self appendTranscriptWithSpeaker:kAgentSpeakerHermes message:@"Verify log not found."];
+        [_viewVerifyLogButton setEnabled:NO];
+        return;
+    }
+    [[NSWorkspace sharedWorkspace] openFile:_lastVerifyStdoutFile];
+    if (_lastVerifyStderrFile.length > 0
+        && [[NSFileManager defaultManager] isReadableFileAtPath:_lastVerifyStderrFile]) {
+        [[NSWorkspace sharedWorkspace] openFile:_lastVerifyStderrFile];
+    }
+}
+
+- (NSString*)verificationLabelFromAuthority:(NSDictionary*)authority {
+    if (![authority isKindOfClass:[NSDictionary class]]) {
+        return @"Not Run";
+    }
+    if (![authority[@"executed"] boolValue]) {
+        return @"Not Run";
+    }
+    if ([authority[@"passed"] boolValue]) {
+        return @"Passed";
+    }
+    return @"Failed";
+}
+
+- (void)viewDiff:(id)sender {
+    (void)sender;
+    if (_lastDiffFile.length == 0) {
+        return;
+    }
+    if (![[NSFileManager defaultManager] isReadableFileAtPath:_lastDiffFile]) {
+        [self appendTranscriptWithSpeaker:kAgentSpeakerHermes message:@"Diff file not found."];
+        [_viewDiffButton setEnabled:NO];
+        return;
+    }
+    [[NSWorkspace sharedWorkspace] openFile:_lastDiffFile];
 }
 
 - (NSString*)mutationPathLabelFromMode:(NSString*)mode {
@@ -294,6 +375,41 @@ static NSColor* AgentSidebarBackgroundColor(void) {
             [lines addObject:[NSString stringWithFormat:@"Evidence: %@", [evidence componentsJoinedByString:@"; "]]];
         }
     }
+
+    NSDictionary* diffAuthority = payload[@"diffAuthority"];
+    if ([diffAuthority isKindOfClass:[NSDictionary class]]) {
+        NSString* diffFile = diffAuthority[@"diffFile"];
+        if ([diffFile isKindOfClass:[NSString class]] && diffFile.length > 0) {
+            _lastDiffFile = diffFile;
+        }
+        id matches = diffAuthority[@"matchesMutationAuthority"];
+        if (matches != nil) {
+            [lines addObject:[NSString stringWithFormat:@"Diff authority: %@",
+                [matches boolValue] ? @"matches mutation" : @"mismatch — review"]];
+        }
+    }
+    [self updateViewDiffButton];
+
+    NSDictionary* verificationAuthority = payload[@"verificationAuthority"];
+    if ([verificationAuthority isKindOfClass:[NSDictionary class]]) {
+        NSString* stdoutFile = verificationAuthority[@"stdoutFile"];
+        NSString* stderrFile = verificationAuthority[@"stderrFile"];
+        if ([stdoutFile isKindOfClass:[NSString class]] && stdoutFile.length > 0) {
+            _lastVerifyStdoutFile = stdoutFile;
+        }
+        if ([stderrFile isKindOfClass:[NSString class]] && stderrFile.length > 0) {
+            _lastVerifyStderrFile = stderrFile;
+        }
+        [lines addObject:[NSString stringWithFormat:@"Verification: %@",
+            [self verificationLabelFromAuthority:verificationAuthority]]];
+        if ([verificationAuthority[@"executed"] boolValue]) {
+            [lines addObject:[NSString stringWithFormat:@"Verify exit: %@",
+                verificationAuthority[@"exitCode"] ?: @"?"]];
+        }
+    } else {
+        [lines addObject:@"Verification: Not Run"];
+    }
+    [self updateViewVerifyLogButton];
 
     NSDictionary* status = payload[@"status"];
     if ([status isKindOfClass:[NSDictionary class]]) {
@@ -509,6 +625,50 @@ static NSColor* AgentSidebarBackgroundColor(void) {
                                     self->_mutationAuthorityViolated = NO;
                                 }
                             }
+                        }
+                        NSDictionary* diffAuthority = payload[@"diffAuthority"];
+                        if ([diffAuthority isKindOfClass:[NSDictionary class]]) {
+                            NSString* diffFile = diffAuthority[@"diffFile"];
+                            if ([diffFile isKindOfClass:[NSString class]] && diffFile.length > 0) {
+                                self->_lastDiffFile = diffFile;
+                            }
+                            id matches = diffAuthority[@"matchesMutationAuthority"];
+                            if (matches != nil) {
+                                response = [response stringByAppendingFormat:@"%@%@Diff authority: %@",
+                                    response.length > 0 ? @"\n\n" : @"",
+                                    @"",
+                                    [matches boolValue] ? @"matches mutation" : @"mismatch — review"];
+                            }
+                            NSArray* diffChanged = diffAuthority[@"changedFiles"];
+                            if ([diffChanged isKindOfClass:[NSArray class]] && diffChanged.count > 0) {
+                                response = [response stringByAppendingFormat:@"\nDiff files: %@",
+                                    [diffChanged componentsJoinedByString:@", "]];
+                            }
+                            [self updateViewDiffButton];
+                        }
+                        NSDictionary* verificationAuthority = payload[@"verificationAuthority"];
+                        if ([verificationAuthority isKindOfClass:[NSDictionary class]]) {
+                            NSString* stdoutFile = verificationAuthority[@"stdoutFile"];
+                            NSString* stderrFile = verificationAuthority[@"stderrFile"];
+                            if ([stdoutFile isKindOfClass:[NSString class]] && stdoutFile.length > 0) {
+                                self->_lastVerifyStdoutFile = stdoutFile;
+                            }
+                            if ([stderrFile isKindOfClass:[NSString class]] && stderrFile.length > 0) {
+                                self->_lastVerifyStderrFile = stderrFile;
+                            }
+                            NSString* verifyLabel = [self verificationLabelFromAuthority:verificationAuthority];
+                            response = [response stringByAppendingFormat:@"%@%@Verification: %@",
+                                response.length > 0 ? @"\n\n" : @"",
+                                @"",
+                                verifyLabel];
+                            if ([verificationAuthority[@"executed"] boolValue]) {
+                                response = [response stringByAppendingFormat:@" (exit %@)",
+                                    verificationAuthority[@"exitCode"] ?: @"?"];
+                                if (![verificationAuthority[@"passed"] boolValue]) {
+                                    response = [response stringByAppendingString:@"\nWorkspace unverified — review verify logs."];
+                                }
+                            }
+                            [self updateViewVerifyLogButton];
                         }
                         NSDictionary* err = payload[@"error"];
                         if ([err isKindOfClass:[NSDictionary class]]) {

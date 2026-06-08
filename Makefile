@@ -38,6 +38,8 @@ PACKAGED_AGENT_CHAT := $(APP_BIN)/dietcode-agent-chat
 PACKAGED_AGENT_CHAT_PY := $(APP_BIN)/dietcode-agent-chat.py
 PACKAGED_AGENT_BUNDLE_PY := $(APP_BIN)/dietcode_agent_bundle.py
 PACKAGED_MUTATION_AUTHORITY_PY := $(APP_BIN)/dietcode_mutation_authority.py
+PACKAGED_DIFF_AUTHORITY_PY := $(APP_BIN)/dietcode_diff_authority.py
+PACKAGED_VERIFICATION_AUTHORITY_PY := $(APP_BIN)/dietcode_verification_authority.py
 PACKAGED_BUNDLE_MANIFEST := $(APP_RESOURCES)/dietcode-agent-bundle.manifest.json
 BUNDLE_MANIFEST_SRC := resources/dietcode-agent-bundle.manifest.json
 TEST_BIN := $(BUILD_DIR)/test_editor
@@ -110,7 +112,7 @@ MACOS_MM := \
 	src/filesystem/FileWatcher.mm \
 	src/core/LSPClient.mm
 
-AGENT_CHAT_BUNDLE := $(APP_BINARY) $(PACKAGED_BRIDGE) $(PACKAGED_BRIDGE_CLI) $(PACKAGED_HERMES_PLUGIN) $(PACKAGED_ENABLE_AGENT) $(PACKAGED_ENABLE_AGENT_PY) $(PACKAGED_AGENT_CHAT) $(PACKAGED_AGENT_CHAT_PY) $(PACKAGED_AGENT_BUNDLE_PY) $(PACKAGED_MUTATION_AUTHORITY_PY) $(PACKAGED_BUNDLE_MANIFEST)
+AGENT_CHAT_BUNDLE := $(APP_BINARY) $(PACKAGED_BRIDGE) $(PACKAGED_BRIDGE_CLI) $(PACKAGED_HERMES_PLUGIN) $(PACKAGED_ENABLE_AGENT) $(PACKAGED_ENABLE_AGENT_PY) $(PACKAGED_AGENT_CHAT) $(PACKAGED_AGENT_CHAT_PY) $(PACKAGED_AGENT_BUNDLE_PY) $(PACKAGED_MUTATION_AUTHORITY_PY) $(PACKAGED_DIFF_AUTHORITY_PY) $(PACKAGED_VERIFICATION_AUTHORITY_PY) $(PACKAGED_BUNDLE_MANIFEST)
 
 .PHONY: all app agent-chat-bundle agent-bridge agent-bridge-fast run headless ensure-socket restart-agent-server restart-agent-server-fast agent-ready agent-status agent-ping agent-methods agent-capabilities agent-self-test test-agent-offline control-smoke test-task-health test-rpc-transaction test-ergonomics test-grep-diff-tooling test-runtime-determinism test-transaction-kernel test-harness-realism test-deterministic-retrieval test-agent-workflow-smoke test-agent-shell-tooling test-agent-shell-tooling-fast test-agent-shell-workflows test-agent-shell-workflows-fast test-authority-boundaries test-authority-boundaries-fast test-agent-bridge-authority test-cli-agent-failures test-docs-code-drift test-partial-success-closure test-broccoliq-runtime-memory test-broccoliq-runtime-memory-fast test-runtime-native-integration test-runtime-native-integration-fast test-agent-bridge test-agent-bridge-fast test-agent-integration sync-hermes-plugin enable-hermes-agent test-dietcode-enable-agent test-dietcode-agent-chat test-agent-chat-workspace-switch verify-agent-chat-sidebar smoke-agent-chat-live setup-hermes-bridge test-hermes-bridge-audit test-hermes-bridge-workflows hermes-ide-watchdog verify-hermes-bridge agent-integration verify-agent-runtime verify-agent-runtime-fast verify-agent-runtime-full verify-agent-runtime-full-fast benchmark-agent-success benchmark-agent-success-fast benchmark-agent-success-report test-agent-success-report test clean
 
@@ -178,6 +180,12 @@ $(PACKAGED_AGENT_BUNDLE_PY): scripts/dietcode_agent_bundle.py $(APP_BIN)
 
 $(PACKAGED_MUTATION_AUTHORITY_PY): scripts/dietcode_mutation_authority.py $(APP_BIN)
 	cp scripts/dietcode_mutation_authority.py $(PACKAGED_MUTATION_AUTHORITY_PY)
+
+$(PACKAGED_DIFF_AUTHORITY_PY): scripts/dietcode_diff_authority.py $(APP_BIN)
+	cp scripts/dietcode_diff_authority.py $(PACKAGED_DIFF_AUTHORITY_PY)
+
+$(PACKAGED_VERIFICATION_AUTHORITY_PY): scripts/dietcode_verification_authority.py $(APP_BIN)
+	cp scripts/dietcode_verification_authority.py $(PACKAGED_VERIFICATION_AUTHORITY_PY)
 
 sync-hermes-plugin:
 	./scripts/sync-hermes-plugin.sh
@@ -364,7 +372,7 @@ test-dietcode-agent-chat: agent-chat-bundle
 verify-agent-chat-sidebar: agent-chat-bundle
 	python3 scripts/verify_agent_chat_sidebar.py
 
-smoke-agent-chat-live: agent-bridge-fast $(PACKAGED_BRIDGE) $(APP_BINARY) $(PACKAGED_AGENT_CHAT) $(PACKAGED_AGENT_CHAT_PY) $(PACKAGED_AGENT_BUNDLE_PY) $(PACKAGED_MUTATION_AUTHORITY_PY) $(PACKAGED_ENABLE_AGENT_PY) $(PACKAGED_BUNDLE_MANIFEST) $(PACKAGED_BRIDGE_CLI)
+smoke-agent-chat-live: agent-bridge-fast $(PACKAGED_BRIDGE) $(APP_BINARY) $(PACKAGED_AGENT_CHAT) $(PACKAGED_AGENT_CHAT_PY) $(PACKAGED_AGENT_BUNDLE_PY) $(PACKAGED_MUTATION_AUTHORITY_PY) $(PACKAGED_DIFF_AUTHORITY_PY) $(PACKAGED_VERIFICATION_AUTHORITY_PY) $(PACKAGED_ENABLE_AGENT_PY) $(PACKAGED_BUNDLE_MANIFEST) $(PACKAGED_BRIDGE_CLI)
 	PYTHONUNBUFFERED=1 python3 scripts/smoke_agent_chat_live.py --compact
 
 test-agent-chat-workspace-switch: agent-bridge-fast $(PACKAGED_BRIDGE) $(APP_BINARY) $(PACKAGED_AGENT_BUNDLE_PY) $(PACKAGED_BRIDGE_CLI)
@@ -373,6 +381,12 @@ test-agent-chat-workspace-switch: agent-bridge-fast $(PACKAGED_BRIDGE) $(APP_BIN
 test-mutation-authority:
 	python3 scripts/test_mutation_authority.py
 
+test-diff-authority:
+	python3 scripts/test_diff_authority.py
+
+test-verification-authority:
+	python3 scripts/test_verification_authority.py
+
 verify-hermes-bridge: setup-hermes-bridge
 	python3 scripts/test_hermes_bridge_audit.py --compact
 	python3 scripts/test_hermes_bridge_workflows.py --compact
@@ -380,6 +394,8 @@ verify-hermes-bridge: setup-hermes-bridge
 	python3 scripts/test_dietcode_agent_chat.py
 	python3 scripts/test_agent_chat_workspace_switch.py
 	python3 scripts/test_mutation_authority.py
+	python3 scripts/test_diff_authority.py
+	python3 scripts/test_verification_authority.py
 	python3 scripts/verify_agent_chat_sidebar.py
 	python3 scripts/smoke_agent_chat_live.py --skip-live
 

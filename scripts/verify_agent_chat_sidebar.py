@@ -45,7 +45,14 @@ def main() -> int:
     rec.record("bundle.module", (REPO_ROOT / "scripts/dietcode_agent_bundle.py").is_file())
     rec.record("smoke.live_script", (REPO_ROOT / "scripts/smoke_agent_chat_live.py").is_file())
 
-    for name in ("dietcode-agent-chat", "dietcode-agent-chat.py", "dietcode_agent_bundle.py", "dietcode_mutation_authority.py"):
+    for name in (
+        "dietcode-agent-chat",
+        "dietcode-agent-chat.py",
+        "dietcode_agent_bundle.py",
+        "dietcode_mutation_authority.py",
+        "dietcode_diff_authority.py",
+        "dietcode_verification_authority.py",
+    ):
         rec.record(f"bundled.{name}", (BIN / name).is_file(), str(BIN / name))
 
     text = SIDEBAR_MM.read_text(encoding="utf-8") if SIDEBAR_MM.is_file() else ""
@@ -60,6 +67,12 @@ def main() -> int:
     rec.record("sidebar.mutation_violation_guard", "Violation" in text and "mutationAuthority" in text)
     rec.record("mutation.authority_module", (REPO_ROOT / "scripts/dietcode_mutation_authority.py").is_file())
     rec.record("mutation.authority_test", (REPO_ROOT / "scripts/test_mutation_authority.py").is_file())
+    rec.record("diff.authority_module", (REPO_ROOT / "scripts/dietcode_diff_authority.py").is_file())
+    rec.record("diff.authority_test", (REPO_ROOT / "scripts/test_diff_authority.py").is_file())
+    rec.record("sidebar.view_diff_button", "View Diff" in text and "viewDiff:" in text)
+    rec.record("verification.authority_module", (REPO_ROOT / "scripts/dietcode_verification_authority.py").is_file())
+    rec.record("verification.authority_test", (REPO_ROOT / "scripts/test_verification_authority.py").is_file())
+    rec.record("sidebar.view_verify_log_button", "View Verify Log" in text and "viewVerifyLog:" in text)
     rec.record("workspace.switch_test", (REPO_ROOT / "scripts/test_agent_chat_workspace_switch.py").is_file())
     rec.record("sidebar.async_dispatch", "dispatch_get_global_queue" in text)
 

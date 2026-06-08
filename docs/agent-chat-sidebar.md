@@ -130,9 +130,93 @@ Exits nonzero when `mode` is `unknown` or `violated`.
 
 **Invariant:** a successful agent edit is not trusted unless changed files are explained by bridge patch telemetry.
 
+## Diff authority
+
+After each chat run, a unified diff is collected and stored outside the workspace:
+
+```text
+~/.dietcode/agent-chat/runs/<run_id>/diff.patch
+```
+
+Chat JSON includes:
+
+```json
+{
+  "diffAuthority": {
+    "diffFile": "/Users/you/.dietcode/agent-chat/runs/abc123/diff.patch",
+    "changedFiles": ["smoke_probe.py"],
+    "matchesMutationAuthority": true
+  }
+}
+```
+
+`matchesMutationAuthority` is true when `diffAuthority.changedFiles` equals `mutationAuthority.mutatedFiles`.
+
+The sidebar exposes **View Diff** (opens the stored patch) and reports diff authority in status/transcript.
+
+**Trust loop:** correct workspace → approved mutation path → visible diff.
+
+## Verification authority
+
+After mutation and diff authority complete, executable verification runs for the workspace.
+
+Verification order:
+
+1. `./verify.sh` if present in the workspace
+2. fallback from `DIETCODE_AGENT_CHAT_FALLBACK_VERIFY` (optional)
+3. explicit `--verify-command` override
+
+Artifacts per run (outside workspace):
+
+```text
+~/.dietcode/agent-chat/runs/<run_id>/
+  diff.patch
+  verify.stdout.log
+  verify.stderr.log
+  verification.json
+```
+
+```json
+{
+  "verificationAuthority": {
+    "verifyCommand": "./verify.sh",
+    "executed": true,
+    "exitCode": 0,
+    "passed": true,
+    "stdoutFile": "/Users/you/.dietcode/agent-chat/runs/abc123/verify.stdout.log",
+    "stderrFile": "/Users/you/.dietcode/agent-chat/runs/abc123/verify.stderr.log",
+    "checkedAfterMutation": true,
+    "durationMs": 12
+  }
+}
+```
+
+Enforcement (smoke / CI):
+
+```bash
+dietcode-agent-chat --workspace /path --prompt "..." --enforce-verification-authority
+```
+
+**Complete trust loop**
+
+The app can prove:
+
+1. The agent edited the intended workspace
+2. The edit occurred through the approved bridge path
+3. The exact diff is inspectable
+4. Executable verification passed afterward
+
+**Invariant:** a trusted agent mutation is incomplete unless executable verification runs successfully after the final mutation step.
+
+**Limitations**
+
+- Verification quality depends on the workspace `verify.sh` (or override command)
+- `verify.sh` may be incomplete or weak
+- This is verification authority, not formal correctness proof
+
 ## Sidebar UX (v1)
 
-- Status: runtime · bridge · Hermes · workspace requested/active · mutation path · last exit
+- Status: runtime · bridge · Hermes · workspace requested/active · mutation path · verification · last exit
 - Transcript: `You:` / `Hermes:` plain text
 - Send runs `dietcode-agent-chat` off the main thread
 - Stop cancels the active subprocess
@@ -140,6 +224,9 @@ Exits nonzero when `mode` is `unknown` or `violated`.
 - Workspace mismatch → “Workspace mismatch — agent disabled” (Send disabled)
 - Mutation path: Bridge verified / No mutation / Unknown — review run / Violation — agent disabled
 - Mutation violation → Send disabled until workspace changes or status refresh clears state; changed files and evidence appear in transcript
+- **View Diff** opens the last run’s `diff.patch` from `~/.dietcode/agent-chat/runs/<run_id>/`
+- **View Verify Log** opens persisted `verify.stdout.log` / `verify.stderr.log`
+- Verification failed → Send stays enabled (retry allowed); status marks workspace unverified
 
 Not in v1: streaming UI, markdown, model picker, persisted history, diff viewer.
 
@@ -149,6 +236,8 @@ Not in v1: streaming UI, markdown, model picker, persisted history, diff viewer.
 make test-dietcode-agent-chat
 make test-agent-chat-workspace-switch
 make test-mutation-authority
+make test-diff-authority
+make test-verification-authority
 make verify-agent-chat-sidebar
 make verify-hermes-bridge
 ```
@@ -170,7 +259,9 @@ The smoke harness:
 3. Verifies disk + bridge read show `VALUE = 2`
 4. Checks runtime timeline for patch activity
 5. Asserts `mutationAuthority.mode == bridge_only`, `bridgePatchCount >= 1`, `smoke_probe.py` in `mutatedFiles`, `rawWriteSuspected == false`
-6. Prints a compact transcript and cleans up
+6. Asserts `diffAuthority.matchesMutationAuthority == true` and diff includes `smoke_probe.py`
+7. Asserts `verificationAuthority.executed/passed/checkedAfterMutation == true` and verify logs exist
+8. Prints a compact transcript and cleans up
 
 Skip live Hermes (CI / offline): `AGENT_CHAT_LIVE=0 make smoke-agent-chat-live` or `--skip-live`.
 
@@ -184,5 +275,7 @@ The smoke harness forces `workspace.openFolder` on the temp directory (bridge sw
 | `scripts/dietcode_agent_chat.py` | Chat CLI |
 | `scripts/dietcode_agent_bundle.py` | Shared bundle resolution |
 | `scripts/dietcode_mutation_authority.py` | Post-run mutation audit |
+| `scripts/dietcode_diff_authority.py` | Post-run unified diff audit |
+| `scripts/dietcode_verification_authority.py` | Post-mutation executable verification |
 | `agent-bridge/src/telemetry/mutationTelemetry.ts` | Bridge patch event log |
 | `resources/bin/dietcode-agent-chat` | App launcher |
