@@ -86,7 +86,7 @@ MACOS_MM := \
 	src/filesystem/FileWatcher.mm \
 	src/core/LSPClient.mm
 
-.PHONY: all app run headless ensure-socket restart-agent-server agent-ready agent-status agent-ping agent-methods agent-capabilities agent-self-test test-agent-offline control-smoke test-task-health test-rpc-transaction test-ergonomics test-grep-diff-tooling test-runtime-determinism test-transaction-kernel test-harness-realism test-deterministic-retrieval test-agent-workflow-smoke test-cli-agent-failures test-docs-code-drift test-agent-integration agent-integration verify-agent-runtime verify-agent-runtime-full test clean
+.PHONY: all app run headless ensure-socket restart-agent-server agent-ready agent-status agent-ping agent-methods agent-capabilities agent-self-test test-agent-offline control-smoke test-task-health test-rpc-transaction test-ergonomics test-grep-diff-tooling test-runtime-determinism test-transaction-kernel test-harness-realism test-deterministic-retrieval test-agent-workflow-smoke test-cli-agent-failures test-docs-code-drift test-partial-success-closure test-agent-integration agent-integration verify-agent-runtime verify-agent-runtime-full test clean
 
 all: app test
 
@@ -189,6 +189,10 @@ test-cli-agent-failures: restart-agent-server
 
 test-docs-code-drift:
 	python3 scripts/test_docs_code_drift.py --compact
+
+test-partial-success-closure: restart-agent-server
+	python3 scripts/dietcode_agent_client.py --wait-ready --compact --error-json --quiet
+	python3 scripts/test_partial_success_closure.py --compact
 
 test-ergonomics: app
 	python3 scripts/dietcode_agent_client.py --wait-ready --compact --error-json --quiet

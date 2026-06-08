@@ -354,7 +354,7 @@
         response[@"path"] = absPath ?: @"";
         response[@"mode"] = @"literal_unified_diff_hunks";
         response[@"sha256"] = StableHashForString(diff ?: @"");
-        *outResult = response;
+        *outResult = MacControlEnrichDiffHunksResult(response, @"diff.hunks");
         return;
     }
 
@@ -457,9 +457,11 @@
             return;
         }
         NSMutableDictionary* response = [UnifiedDiffHunksResponse(patchStr, maxHunks, hunkOffset, includeLines, maxLinesPerHunk) mutableCopy];
+        response[@"source"] = @"patch";
+        response[@"path"] = @"";
         response[@"mode"] = @"literal_unified_diff_hunks";
         response[@"sha256"] = StableHashForString(patchStr ?: @"");
-        *outResult = response;
+        *outResult = MacControlEnrichDiffHunksResult(response, @"patch.hunks");
         return;
     }
 
@@ -523,7 +525,7 @@
             *outErrMsg = errStr ?: @"Batch patch application failed.";
             return;
         }
-        *outResult = result;
+        *outResult = MacControlEnrichPatchApplyBatchResult(result);
         return;
     }
 

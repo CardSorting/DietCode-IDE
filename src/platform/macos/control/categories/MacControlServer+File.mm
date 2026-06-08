@@ -50,12 +50,12 @@ static const NSInteger kMaxBatchFilePaths = 100;
     }
 
     if ([method isEqualToString:@"workspace.snapshot"]) {
-        *outResult = [_workspaceState snapshotPayloadWithWorkspace:[self safeWorkspacePath] ?: @""
-                                                      sinceRevision:params[@"sinceRevision"]
-                                                              paths:params[@"paths"]
-                                                       snapshotMode:params[@"snapshotMode"]
-                                                           maxFiles:params[@"maxFiles"]
-                                                       windowBridge:_windowBridge];
+        *outResult = MacControlEnrichSnapshotResult([_workspaceState snapshotPayloadWithWorkspace:[self safeWorkspacePath] ?: @""
+                                                                                      sinceRevision:params[@"sinceRevision"]
+                                                                                              paths:params[@"paths"]
+                                                                                       snapshotMode:params[@"snapshotMode"]
+                                                                                           maxFiles:params[@"maxFiles"]
+                                                                                       windowBridge:_windowBridge]);
         return;
     }
 

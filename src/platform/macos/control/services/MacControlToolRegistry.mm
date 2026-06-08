@@ -44,7 +44,6 @@ static NSArray<NSDictionary*>* AgentToolEntries(void) {
             ToolEntry(@"search.todo", @"stable", YES, YES, NO, NO, NO, nil, NO, @"narrow_include_globs", @"search.todo"),
             ToolEntry(@"search.references", @"stable", YES, YES, NO, NO, NO, nil, NO, @"verify_symbol_name", @"search.references"),
             ToolEntry(@"search.semantic", @"deprecated", NO, NO, NO, NO, NO, @"search.literal", YES, @"use_search_literal_or_search_tokens", @"search.literal"),
-            ToolEntry(@"analysis.searchRanked", @"deprecated", NO, NO, NO, NO, NO, @"search.literal", YES, @"use_workspace_grep_or_search_literal", @"workspace.grep"),
             ToolEntry(@"symbols.references", @"stable", YES, YES, NO, NO, NO, nil, NO, @"verify_symbol_name", @"symbols.references"),
             ToolEntry(@"patch.validate", @"stable", YES, YES, NO, NO, NO, nil, NO, @"fix_patch_or_target_path", @"patch.apply"),
             ToolEntry(@"patch.apply", @"stable", YES, YES, YES, YES, YES, nil, NO, @"revalidate_patch_with_patch.validate", @"workspace.revision"),
@@ -104,10 +103,20 @@ NSDictionary* MacControlToolCapabilitiesSummary(void) {
         }
         if ([entry[@"mutatesWorkspace"] boolValue]) [mutating addObject:method];
     }
+    NSMutableArray* internalNamespaces = [NSMutableArray arrayWithArray:@[
+        @"analysis.",
+        @"language.",
+        @"chip.",
+        @"combo.",
+        @"recovery.",
+        @"terminal.run",
+        @"verify.run",
+    ]];
     [agentSafe sortUsingSelector:@selector(compare:)];
     [deprecated sortUsingSelector:@selector(compare:)];
     [deterministicSearch sortUsingSelector:@selector(compare:)];
     [mutating sortUsingSelector:@selector(compare:)];
+    [internalNamespaces sortUsingSelector:@selector(compare:)];
     return @{
         @"mode": @"tool_capabilities",
         @"contractVersion": @"1.0.0",
@@ -115,6 +124,7 @@ NSDictionary* MacControlToolCapabilitiesSummary(void) {
         @"deprecatedMethods": deprecated,
         @"deterministicSearchMethods": deterministicSearch,
         @"mutatingMethods": mutating,
+        @"internalNamespaces": internalNamespaces,
         @"semanticSearchDisabled": @YES,
         @"rankingPolicy": @"none",
         @"scoringDisabled": @YES,

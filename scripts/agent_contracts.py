@@ -261,6 +261,7 @@ TOOL_CAPABILITIES_RESPONSE_KEYS = frozenset({
     "deprecatedMethods",
     "deterministicSearchMethods",
     "mutatingMethods",
+    "internalNamespaces",
     "semanticSearchDisabled",
     "rankingPolicy",
     "scoringDisabled",
@@ -296,11 +297,38 @@ WORKSPACE_SNAPSHOT_KEYS = frozenset({
     "filesHashed",
     "filesSkipped",
     "complete",
+    "partial",
     "truncated",
+    "warnings",
+    "nextRecommendedCommand",
+    "recoveryHint",
     "hashAlgorithm",
     "externalChangeDetected",
     "mode",
 })
+
+# CONTRACT: patch.applyBatch success response keys (applied=true).
+PATCH_APPLY_BATCH_SUCCESS_KEYS = frozenset({
+    "applied",
+    "atomic",
+    "batchMutationReceipt",
+    "complete",
+    "partial",
+    "warnings",
+    "nextRecommendedCommand",
+    "recoveryHint",
+})
+
+# CONTRACT: Internal method namespaces excluded from tool.registry agent-safe surface.
+INTERNAL_METHOD_NAMESPACES = (
+    "analysis.",
+    "language.",
+    "chip.",
+    "combo.",
+    "recovery.",
+    "terminal.run",
+    "verify.run",
+)
 
 # CONTRACT: patch.applyBatch batchMutationReceipt keys.
 BATCH_MUTATION_RECEIPT_KEYS = frozenset({
@@ -392,6 +420,11 @@ DIFF_HUNKS_RESPONSE_KEYS = frozenset({
     "includeLines",
     "maxLinesPerHunk",
     "truncated",
+    "complete",
+    "partial",
+    "warnings",
+    "nextRecommendedCommand",
+    "recoveryHint",
     "mode",
     "source",
     "sha256",
@@ -413,6 +446,7 @@ REQUIRED_MAKE_TARGETS = frozenset({
     "test-cli-agent-failures",
     "test-docs-code-drift",
     "verify-agent-runtime-full",
+    "test-partial-success-closure",
     "agent-integration",
     "verify-agent-runtime",
     "release-check-agent-runtime",
@@ -436,6 +470,7 @@ INTEGRATION_SUITES = {
     "agent_workflow_smoke": "scripts/test_agent_workflow_smoke.py",
     "cli_agent_failures": "scripts/test_cli_agent_failures.py",
     "docs_code_drift": "scripts/test_docs_code_drift.py",
+    "partial_success_closure": "scripts/test_partial_success_closure.py",
 }
 
 
@@ -554,8 +589,10 @@ def validate_partial_success_signals(result: dict[str, Any], *, expect_complete:
         errors.append("partial must be boolean when present")
     if expect_complete is True and result.get("complete") is not True:
         errors.append("complete must be true for fully succeeded read")
+    warnings = result.get("warnings")
+    if warnings is not None and not isinstance(warnings, list):
+        errors.append("warnings must be list when present")
     if result.get("partial") is True:
-        warnings = result.get("warnings")
         if not isinstance(warnings, list) or not warnings:
             errors.append("partial=true requires non-empty warnings list")
     if result.get("partial") is True and result.get("complete") is not True:
@@ -790,6 +827,13 @@ def validate_tool_capabilities_response(result: dict[str, Any]) -> list[str]:
     for method in ("search.literal", "search.tokens", "search.paths"):
         if method not in deterministic:
             errors.append(f"{method} must be in deterministicSearchMethods")
+    internal = result.get("internalNamespaces", [])
+    if not isinstance(internal, list):
+        errors.append("internalNamespaces must be list")
+    else:
+        for prefix in INTERNAL_METHOD_NAMESPACES:
+            if prefix not in internal:
+                errors.append(f"internalNamespaces must include {prefix}")
     return errors
 
 
@@ -816,6 +860,26 @@ def validate_workspace_snapshot(result: dict[str, Any]) -> list[str]:
         errors.append("hashAlgorithm must be fnv1a_16hex")
     if result.get("snapshotMode") not in ("mutated_only", "tracked_files", "explicit_paths"):
         errors.append("snapshotMode must be mutated_only, tracked_files, or explicit_paths")
+    errors.extend(validate_partial_success_signals(result))
+    return errors
+
+
+def validate_patch_apply_batch_success(result: dict[str, Any]) -> list[str]:
+    errors: list[str] = []
+    if result.get("applied") is not True:
+        errors.append("applied must be true")
+    missing = PATCH_APPLY_BATCH_SUCCESS_KEYS - set(result.keys())
+    if missing:
+        errors.append(f"patch.applyBatch success missing keys: {sorted(missing)}")
+    if result.get("complete") is not True:
+        errors.append("complete must be true on successful batch apply")
+    receipt = result.get("batchMutationReceipt")
+    if not isinstance(receipt, dict):
+        errors.append("batchMutationReceipt must be object")
+    else:
+        errors.extend(validate_batch_mutation_receipt(receipt))
+    if result.get("nextRecommendedCommand") != "workspace.revision" and not result.get("idempotentReplay"):
+        errors.append("nextRecommendedCommand must be workspace.revision on fresh batch apply")
     return errors
 
 
@@ -862,6 +926,7 @@ def validate_diff_hunks_response(result: dict[str, Any]) -> list[str]:
         errors.append("nextHunkOffset required when hasMoreHunks is true")
     if not has_more and next_offset is not None:
         errors.append("nextHunkOffset must be null when hasMoreHunks is false")
+    errors.extend(validate_partial_success_signals(result))
     return errors
 
 

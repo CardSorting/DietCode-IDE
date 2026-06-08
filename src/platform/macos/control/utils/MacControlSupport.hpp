@@ -86,5 +86,8 @@ NSArray<NSString*>* ContextLines(const std::vector<std::string>& lines, NSIntege
 NSDictionary* MacControlEnrichReadSearchResult(NSDictionary* result, NSString* methodName);
 NSDictionary* MacControlEnrichPatchValidateResult(NSDictionary* result);
 NSDictionary* MacControlEnrichPatchApplyResult(NSDictionary* result);
+NSDictionary* MacControlEnrichPatchApplyBatchResult(NSDictionary* result);
+NSDictionary* MacControlEnrichSnapshotResult(NSDictionary* result);
+NSDictionary* MacControlEnrichDiffHunksResult(NSDictionary* result, NSString* methodName);
 
 using namespace dietcode::platform::macos;

@@ -440,3 +440,86 @@ NSDictionary* MacControlEnrichPatchApplyResult(NSDictionary* result) {
     }
     return enriched;
 }
+
+NSDictionary* MacControlEnrichPatchApplyBatchResult(NSDictionary* result) {
+    if (![result isKindOfClass:[NSDictionary class]]) return result ?: @{};
+    BOOL applied = [result[@"applied"] boolValue];
+    BOOL dryRun = [result[@"dryRun"] boolValue];
+    BOOL replay = [result[@"idempotentReplay"] boolValue];
+    NSMutableDictionary* enriched = [result mutableCopy];
+
+    if (dryRun && !applied) {
+        enriched[@"complete"] = @NO;
+        enriched[@"partial"] = @YES;
+        enriched[@"warnings"] = @[@"dry_run_only"];
+        enriched[@"nextRecommendedCommand"] = @"patch.applyBatch";
+        enriched[@"recoveryHint"] = @"set_dryRun_false_and_confirm";
+        return enriched;
+    }
+    if (!applied) return enriched;
+
+    enriched[@"complete"] = @YES;
+    enriched[@"partial"] = @(replay);
+    if (replay) {
+        enriched[@"warnings"] = @[@"idempotent_replay"];
+        enriched[@"recoveryHint"] = @"operation_status_if_uncertain";
+        enriched[@"nextRecommendedCommand"] = @"operation.status";
+    } else {
+        enriched[@"warnings"] = @[];
+        enriched[@"nextRecommendedCommand"] = @"workspace.revision";
+        enriched[@"recoveryHint"] = @"verify_revision_and_batch_mutation_receipt";
+    }
+    return enriched;
+}
+
+NSDictionary* MacControlEnrichSnapshotResult(NSDictionary* result) {
+    if (![result isKindOfClass:[NSDictionary class]]) return result ?: @{};
+    BOOL truncated = [result[@"truncated"] boolValue];
+    NSInteger filesSkipped = [result[@"filesSkipped"] integerValue];
+    BOOL complete = result[@"complete"] ? [result[@"complete"] boolValue] : (!truncated && filesSkipped == 0);
+    BOOL partial = !complete || filesSkipped > 0;
+
+    NSMutableDictionary* enriched = [result mutableCopy];
+    enriched[@"complete"] = @(complete);
+    enriched[@"partial"] = @(partial);
+
+    NSMutableArray* warnings = [NSMutableArray array];
+    if (truncated) [warnings addObject:@"snapshot_truncated"];
+    if (filesSkipped > 0) [warnings addObject:@"files_skipped_in_snapshot"];
+    enriched[@"warnings"] = warnings;
+
+    if (!complete) {
+        enriched[@"nextRecommendedCommand"] = @"workspace.snapshot";
+        enriched[@"recoveryHint"] = truncated ? @"narrow_snapshot_paths_or_raise_maxFiles" : @"retry_snapshot_with_explicit_paths";
+    } else {
+        enriched[@"nextRecommendedCommand"] = @"workspace.revision";
+        enriched[@"recoveryHint"] = @"compare_revision_delta";
+    }
+    return enriched;
+}
+
+NSDictionary* MacControlEnrichDiffHunksResult(NSDictionary* result, NSString* methodName) {
+    if (![result isKindOfClass:[NSDictionary class]]) return result ?: @{};
+    BOOL truncated = [result[@"truncated"] boolValue];
+    BOOL hasMore = [result[@"hasMoreHunks"] boolValue];
+    BOOL complete = !truncated && !hasMore;
+    BOOL partial = !complete;
+
+    NSMutableDictionary* enriched = [result mutableCopy];
+    enriched[@"complete"] = @(complete);
+    enriched[@"partial"] = @(partial);
+
+    NSMutableArray* warnings = [NSMutableArray array];
+    if (truncated) [warnings addObject:@"hunks_truncated"];
+    if (hasMore) [warnings addObject:@"more_hunks_available"];
+    enriched[@"warnings"] = warnings;
+
+    if (!complete) {
+        enriched[@"nextRecommendedCommand"] = methodName ?: @"diff.hunks";
+        enriched[@"recoveryHint"] = hasMore ? @"paginate_with_hunkOffset" : @"raise_maxHunks";
+    } else {
+        enriched[@"nextRecommendedCommand"] = @"patch.validate";
+        enriched[@"recoveryHint"] = @"inspect_hunks_before_patch";
+    }
+    return enriched;
+}

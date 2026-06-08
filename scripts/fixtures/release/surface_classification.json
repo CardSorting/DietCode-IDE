@@ -91,6 +91,7 @@
       "test-agent-workflow-smoke",
       "test-cli-agent-failures",
       "test-docs-code-drift",
+      "test-partial-success-closure",
       "verify-agent-runtime",
       "verify-agent-runtime-full",
       "release-check-agent-runtime",
@@ -116,6 +117,7 @@
       "scripts/fixtures/retrieval/tool_registry_golden.json",
       "scripts/fixtures/retrieval/truncation_golden.json",
       "scripts/fixtures/recovery/error_recovery_hints.json",
+      "scripts/fixtures/release/internal_method_namespaces.json",
       "scripts/fixtures/release/surface_classification.json"
     ],
     "experimental": [],

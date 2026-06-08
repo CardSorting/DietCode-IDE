@@ -147,6 +147,9 @@ def check_source_invariants() -> None:
     assert (REPO_ROOT / "scripts/verify_agent_runtime_full.py").is_file(), "verify_agent_runtime_full.py required"
     assert (REPO_ROOT / "scripts/fixtures/recovery/error_recovery_hints.json").is_file(), "recovery hints fixture required"
     assert "MacControlEnrichReadSearchResult" in _read(REPO_ROOT / "src/platform/macos/control/utils/MacControlSupport.mm"), "partial success enrichment required"
+    assert "MacControlEnrichPatchApplyBatchResult" in _read(REPO_ROOT / "src/platform/macos/control/utils/MacControlSupport.mm"), "batch partial success enrichment required"
+    assert (REPO_ROOT / "scripts/test_partial_success_closure.py").is_file(), "test_partial_success_closure.py required"
+    assert (REPO_ROOT / "scripts/fixtures/release/internal_method_namespaces.json").is_file(), "internal namespaces fixture required"
     retrieval_fixtures = REPO_ROOT / "scripts" / "fixtures" / "retrieval"
     for name in (
         "search_literal_golden.json",

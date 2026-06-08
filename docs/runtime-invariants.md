@@ -90,7 +90,10 @@ Read and mutation success payloads may include:
 
 Errors include `nextRecommendedCommand` alongside `recovery_hint`.
 
+Enriched surfaces: `patch.applyBatch` (success), `workspace.snapshot`, `diff.hunks`, `patch.hunks`.
+
 ```bash
+make test-partial-success-closure
 make test-agent-workflow-smoke
 make test-cli-agent-failures
 ```

@@ -141,6 +141,27 @@ make verify-agent-runtime-full
 
 CLI additions: `--search-literal`, improved JSON parse errors, stderr `hint:` lines for partial success.
 
+`patch.applyBatch`, `workspace.snapshot`, and `diff.hunks` now expose the same `complete` / `partial` / `warnings` / `nextRecommendedCommand` fields as `patch.apply` and read-search surfaces.
+
+---
+
+## Internal (non-agent-safe) namespaces
+
+`analysis.*` and `language.*` remain **outside** `tool.registry`. They are IDE-assisted surfaces (workspace analysis, LSP hover/completions) and are not classified as deterministic agent-safe tooling.
+
+`tool.capabilities` exposes `internalNamespaces`:
+
+| Prefix | Reason |
+|--------|--------|
+| `analysis.` | Heuristic workspace/file analysis |
+| `language.` | LSP-backed editor assistance |
+| `chip.` | Internal chip executor metadata |
+| `combo.` | Multi-step combo runtime |
+| `recovery.` | Backup/rollback operator surface |
+| `terminal.run` / `verify.run` | Process execution |
+
+Fixture: `scripts/fixtures/release/internal_method_namespaces.json`
+
 ---
 
 ## Deterministic retrieval (pass 5)

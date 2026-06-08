@@ -26,6 +26,8 @@
 - [ ] `make test-cli-agent-failures` passes (CLI bad JSON, deprecation, error-json envelopes)
 - [ ] `make test-docs-code-drift` passes (docs match contracts and recovery hints)
 - [ ] `make verify-agent-runtime-full` passes (full release ladder)
+- [ ] `make test-partial-success-closure` passes (batch/snapshot/diff partial-success parity)
+- [ ] `analysis.*` / `language.*` documented as internal (not in `tool.registry`)
 - [ ] Partial success fields (`complete`, `partial`, `warnings`) present on truncated reads
 - [ ] Error envelopes include `nextRecommendedCommand`
 - [ ] Runtime invariants documented in [Runtime Invariants](runtime-invariants.md)

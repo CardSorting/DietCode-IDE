@@ -15,6 +15,7 @@ from pathlib import Path
 from agent_contracts import (
     ERROR_RECOVERY_HINTS,
     GREP_RESPONSE_KEYS,
+    INTERNAL_METHOD_NAMESPACES,
     REQUIRED_MAKE_TARGETS,
     SEARCH_LITERAL_RESPONSE_KEYS,
     TOOL_REGISTRY_ENTRY_KEYS,
@@ -53,6 +54,14 @@ def test_agent_tooling_doc_lists_methods() -> None:
     text = (DOCS / "agent-tooling.md").read_text(encoding="utf-8")
     for method in ("search.literal", "search.tokens", "tool.registry", "tool.capabilities", "patch.validate"):
         assert method in text, f"agent-tooling.md missing {method}"
+
+
+def test_internal_namespaces_documented() -> None:
+    fixture = json.loads((FIXTURES / "release" / "internal_method_namespaces.json").read_text(encoding="utf-8"))
+    assert fixture["internalNamespaces"] == list(INTERNAL_METHOD_NAMESPACES)
+    tooling = (DOCS / "agent-tooling.md").read_text(encoding="utf-8")
+    for prefix in INTERNAL_METHOD_NAMESPACES:
+        assert prefix in tooling, f"agent-tooling.md must document internal namespace {prefix}"
 
 
 def test_testing_checklist_has_verify_commands() -> None:
@@ -94,6 +103,7 @@ def main() -> int:
         ("drift.recovery_fixture", test_recovery_fixture_matches_contract),
         ("drift.runtime_diagnostics_source", test_runtime_diagnostics_source_has_hints),
         ("drift.agent_tooling_doc", test_agent_tooling_doc_lists_methods),
+        ("drift.internal_namespaces", test_internal_namespaces_documented),
         ("drift.testing_checklist", test_testing_checklist_has_verify_commands),
         ("drift.makefile_targets", test_makefile_has_required_targets),
         ("drift.contract_key_sets", test_contract_key_sets_documented),
