@@ -1,5 +1,12 @@
 import type { ServerResponse } from 'node:http';
 
+import {
+  getSessionMeta,
+  recordSessionEvent,
+  setSessionBridgeSequence,
+  setSessionKernelSequence,
+} from './sessionStore.js';
+
 export interface StreamEvent {
   id: string;
   sequence: number;
@@ -12,8 +19,16 @@ export interface StreamEvent {
 }
 
 const sseClients = new Set<ServerResponse>();
-let bridgeEventSequence = 1_000_000;
-let lastKernelEventSequence = 0;
+let bridgeEventSequence = getSessionMeta().bridgeEventSequence;
+let lastKernelEventSequence = getSessionMeta().lastKernelEventSequence;
+
+export function hydrateEventSequences(meta: {
+  bridgeEventSequence: number;
+  lastKernelEventSequence: number;
+}): void {
+  bridgeEventSequence = Math.max(bridgeEventSequence, meta.bridgeEventSequence);
+  lastKernelEventSequence = Math.max(lastKernelEventSequence, meta.lastKernelEventSequence);
+}
 
 export function registerSseClient(res: ServerResponse): void {
   sseClients.add(res);
@@ -30,10 +45,12 @@ export function getLastKernelEventSequence(): number {
 export function setLastKernelEventSequence(sequence: number): void {
   if (sequence > lastKernelEventSequence) {
     lastKernelEventSequence = sequence;
+    setSessionKernelSequence(sequence);
   }
 }
 
 export function broadcastEvent(event: StreamEvent): void {
+  recordSessionEvent(event);
   const frame = `data: ${JSON.stringify(event)}\n\n`;
   for (const client of sseClients) {
     client.write(frame);
@@ -57,6 +74,7 @@ export function emitBridgeEvent(
     taskId,
   };
   bridgeEventSequence += 1;
+  setSessionBridgeSequence(bridgeEventSequence);
   broadcastEvent(event);
   return event;
 }
@@ -66,11 +84,18 @@ export function normalizeKernelEvent(raw: Record<string, unknown>): StreamEvent 
     raw.payload && typeof raw.payload === 'object'
       ? (raw.payload as Record<string, unknown>)
       : undefined;
+  const approval =
+    payload?.approval && typeof payload.approval === 'object'
+      ? (payload.approval as Record<string, unknown>)
+      : undefined;
+  const resolution =
+    payload?.resolution && typeof payload.resolution === 'object'
+      ? (payload.resolution as Record<string, unknown>)
+      : undefined;
   const taskId =
     (typeof payload?.taskId === 'string' && payload.taskId) ||
-    (typeof payload?.approval?.taskId === 'string' && (payload.approval as Record<string, unknown>).taskId) ||
-    (typeof payload?.resolution?.taskId === 'string' &&
-      (payload.resolution as Record<string, unknown>).taskId) ||
+    (typeof approval?.taskId === 'string' && approval.taskId) ||
+    (typeof resolution?.taskId === 'string' && resolution.taskId) ||
     undefined;
 
   return {
@@ -103,7 +128,11 @@ export function normalizeTaskRunnerRecord(record: Record<string, unknown>): Stre
 
   return {
     id: `task-${taskId}-${bridgeEventSequence}`,
-    sequence: bridgeEventSequence++,
+    sequence: (() => {
+      const seq = bridgeEventSequence++;
+      setSessionBridgeSequence(bridgeEventSequence);
+      return seq;
+    })(),
     timestamp: String(record.timestamp ?? new Date().toISOString()),
     type,
     source: String(record.source ?? 'governed-task'),

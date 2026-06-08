@@ -111,4 +111,6 @@ cd cockpit && npm install && npm run dev
 
 Open cockpit, submit a task from Chat, watch Task Timeline and Approvals.
 
+Session state is ephemeral with bounded recovery snapshots — not a full run ledger. See [session-recovery.md](./session-recovery.md).
+
 See also: [approval-lifecycle.md](./approval-lifecycle.md), [kernel-cockpit-architecture.md](./kernel-cockpit-architecture.md).

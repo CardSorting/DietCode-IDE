@@ -16,6 +16,12 @@ import {
 } from './events.js';
 import { createTask, getTask, listTasks } from './taskRegistry.js';
 import { startGovernedTask } from './taskRunner.js';
+import {
+  bootstrapSessionRecovery,
+  getSessionState,
+  syncPendingApprovalsFromKernel,
+} from './sessionRecovery.js';
+import { exportSessionBundle } from './sessionStore.js';
 
 const PORT = Number(process.env.COCKPIT_BRIDGE_PORT ?? 9477);
 const SOCKET_PATH = process.env.DIETCODE_SOCKET_PATH ?? join(homedir(), '.dietcode', 'control.sock');
@@ -102,10 +108,9 @@ async function pollKernelEvents(): Promise<void> {
           ...event,
           type: event.type === 'verify.complete' ? 'verify.completed' : event.type,
         });
-      } else if (event.type === 'approval.resolved') {
+      } else if (event.type === 'approval.resolved' || event.type === 'approval.required') {
         broadcastEvent(event);
-      } else if (event.type === 'approval.required') {
-        broadcastEvent(event);
+        void syncPendingApprovalsFromKernel(rpcCall);
       } else {
         broadcastEvent(event);
       }
@@ -158,6 +163,24 @@ const server = createServer(async (req, res) => {
     registerSseClient(res);
     req.on('close', () => unregisterSseClient(res));
     void pollKernelEvents();
+    return;
+  }
+
+  if (req.url === '/api/session' && req.method === 'GET') {
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify(getSessionState()));
+    return;
+  }
+
+  if (req.url === '/api/session/export' && req.method === 'POST') {
+    try {
+      const path = await exportSessionBundle(listTasks());
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ ok: true, path, mode: 'session_export' }));
+    } catch (err) {
+      res.writeHead(500, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: String(err) }));
+    }
     return;
   }
 
@@ -303,6 +326,7 @@ const server = createServer(async (req, res) => {
           reason: parsed.reason,
           resolvedBy: parsed.resolvedBy ?? 'cockpit',
         })) as Record<string, unknown>;
+        await syncPendingApprovalsFromKernel(rpcCall);
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify(result));
       } catch (err) {
@@ -317,8 +341,13 @@ const server = createServer(async (req, res) => {
   res.end(JSON.stringify({ error: 'not_found' }));
 });
 
-server.listen(PORT, '127.0.0.1', () => {
-  console.log(`DietCode cockpit bridge listening on http://127.0.0.1:${PORT}`);
-  console.log(`Kernel socket: ${SOCKET_PATH}`);
-  startEventPolling();
-});
+async function main(): Promise<void> {
+  await bootstrapSessionRecovery(rpcCall);
+  server.listen(PORT, '127.0.0.1', () => {
+    console.log(`DietCode cockpit bridge listening on http://127.0.0.1:${PORT}`);
+    console.log(`Kernel socket: ${SOCKET_PATH}`);
+    startEventPolling();
+  });
+}
+
+void main();

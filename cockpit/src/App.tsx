@@ -3,12 +3,20 @@ import { ChatPanel } from './components/ChatPanel';
 import { DiffPanel } from './components/DiffPanel';
 import { LogStream } from './components/LogStream';
 import { TaskTimeline } from './components/TaskTimeline';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useKernel } from './hooks/useKernel';
 
 export default function App() {
-  const { status, events } = useKernel();
-  const [activeTaskId, setActiveTaskId] = useState<string | null>(null);
+  const { status, events, session } = useKernel();
+  const [activeTaskId, setActiveTaskId] = useState<string | null>(
+    session.activeTaskId ?? null,
+  );
+
+  useEffect(() => {
+    if (session.activeTaskId) {
+      setActiveTaskId(session.activeTaskId);
+    }
+  }, [session.activeTaskId]);
 
   return (
     <div className="app">
@@ -42,7 +50,7 @@ export default function App() {
           </div>
           <div className="panel-header">Diffs</div>
           <div className="panel-body">
-            <DiffPanel />
+            <DiffPanel sessionDiffs={session.recentDiffs} />
           </div>
         </section>
 

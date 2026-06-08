@@ -138,6 +138,17 @@ Cockpit chat submits Hermes **tasks** (not raw chat):
 
 Events (`task.started`, `agent.message`, `tool.call.*`, `approval.*`, `file.diff`, `task.completed`) stream over SSE. See [governed-tasks.md](./governed-tasks.md).
 
+## Session recovery (ephemeral)
+
+Cockpit session state is **in-memory first** with bounded snapshots in `~/.dietcode/session/` for reload recovery — not a permanent audit trail.
+
+| Endpoint | Purpose |
+|----------|---------|
+| `GET /api/session` | Restore timeline, tasks, approvals cache, recent diffs |
+| `POST /api/session/export` | Optional explicit export |
+
+See [session-recovery.md](./session-recovery.md).
+
 ## Legacy native UI
 
 The original AppKit editor shell is preserved in `legacy_ui/` for optional editor integration:

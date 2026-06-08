@@ -18,10 +18,15 @@ export interface KernelStatus {
   error?: string;
 }
 
+export interface SessionState {
+  activeTaskId?: string;
+  recentDiffs?: Array<{ path: string; preview?: string; taskId?: string; timestamp: string }>;
+}
+
 export function useKernel() {
   const [status, setStatus] = useState<KernelStatus>({ connected: false });
   const [events, setEvents] = useState<KernelEvent[]>([]);
-  const [timeline, setTimeline] = useState<unknown[]>([]);
+  const [session, setSession] = useState<SessionState>({});
 
   const refreshStatus = useCallback(async () => {
     try {
@@ -43,41 +48,42 @@ export function useKernel() {
     }
   }, []);
 
-  const refreshTimeline = useCallback(async () => {
+  const restoreSession = useCallback(async () => {
     try {
-      const res = await fetch('/api/rpc', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ method: 'runtime.timeline', params: { limit: 30, compact: true } }),
+      const res = await fetch('/api/session');
+      if (!res.ok) return;
+      const data = (await res.json()) as {
+        events?: KernelEvent[];
+        activeTaskId?: string;
+        recentDiffs?: SessionState['recentDiffs'];
+      };
+      if (data.events?.length) {
+        setEvents(data.events.slice(-299));
+      }
+      setSession({
+        activeTaskId: data.activeTaskId,
+        recentDiffs: data.recentDiffs,
       });
-      const data = (await res.json()) as { result?: { events?: unknown[] } };
-      setTimeline(data.result?.events ?? []);
     } catch {
-      setTimeline([]);
+      // bridge may still be starting
     }
   }, []);
 
   useEffect(() => {
     void refreshStatus();
-    void refreshTimeline();
+    void restoreSession();
     const statusTimer = setInterval(() => {
       void refreshStatus();
     }, 5000);
-    const timelineTimer = setInterval(() => {
-      void refreshTimeline();
-    }, 10000);
-    return () => {
-      clearInterval(statusTimer);
-      clearInterval(timelineTimer);
-    };
-  }, [refreshStatus, refreshTimeline]);
+    return () => clearInterval(statusTimer);
+  }, [refreshStatus, restoreSession]);
 
   useEffect(() => {
     const source = new EventSource('/events');
     source.onmessage = (msg) => {
       try {
         const event = JSON.parse(msg.data) as KernelEvent;
-        setEvents((prev) => [...prev.slice(-199), event]);
+        setEvents((prev) => [...prev.slice(-299), event]);
       } catch {
         // ignore malformed frames
       }
@@ -85,5 +91,5 @@ export function useKernel() {
     return () => source.close();
   }, []);
 
-  return { status, events, timeline, refreshStatus, refreshTimeline };
+  return { status, events, session, refreshStatus, restoreSession };
 }
