@@ -1,21 +1,15 @@
 import { randomUUID } from 'node:crypto';
 import { applyPatch, validatePatch } from '../adapters/patchAdapter.js';
 import { fetchOperationStatus, fetchWorkspaceRevision } from '../adapters/runtimeAdapter.js';
-import { isBridgeError } from '../client/RpcTransport.js';
-import { mapRpcError } from '../contracts/errors.js';
+import { isBridgeError } from '../contracts/BridgeError.js';
+import { bridgeError } from '../contracts/errors.js';
 import { buildStaleRecoveryResponse } from './stalePatchRecovery.js';
+import { verifyAfterMutation } from './verifyAfterMutation.js';
 export async function safePatchFile(transport, path, unifiedDiff, options = {}) {
     const idempotencyKey = options.idempotencyKey ?? `bridge-patch:${randomUUID()}`;
     const validation = await validatePatch(transport, path, unifiedDiff);
     if (!validation.ok) {
-        const err = {
-            code: 'patch_failed',
-            message: 'patch validation failed before apply',
-            recoveryHint: 'run_patch_preview_or_patch_validate',
-            nextRecommendedCommand: 'patch.validate',
-            retrySafe: false,
-        };
-        throw err;
+        throw bridgeError('patch_failed', 'patch validation failed before apply');
     }
     const revisionBefore = await fetchWorkspaceRevision(transport);
     try {
@@ -24,12 +18,12 @@ export async function safePatchFile(transport, path, unifiedDiff, options = {}) 
             idempotencyKey,
         });
         const receipt = applied.result.mutationReceipt;
-        const revisionAfter = await fetchWorkspaceRevision(transport);
+        const verified = await verifyAfterMutation(transport, revisionBefore, receipt);
         return {
             applied: true,
             mutationReceipt: receipt,
-            revisionBefore,
-            revisionAfter,
+            revisionBefore: verified.revisionBefore,
+            revisionAfter: verified.revisionAfter,
             idempotencyKey,
             nextRecommendedCommand: applied.nextRecommendedCommand ?? 'workspace.revision',
         };
@@ -51,12 +45,6 @@ export async function safePatchFile(transport, path, unifiedDiff, options = {}) 
                 };
             }
             throw error;
-        }
-        if (typeof error === 'object' &&
-            error !== null &&
-            'ok' in error &&
-            error.ok === false) {
-            throw mapRpcError(error);
         }
         throw error;
     }

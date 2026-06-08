@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { applyPatchBatch, validatePatch } from '../adapters/patchAdapter.js';
 import { fetchFileStat } from '../adapters/diagnosticsAdapter.js';
 import { fetchOperationStatus, fetchWorkspaceRevision } from '../adapters/runtimeAdapter.js';
-import { isBridgeError } from '../client/RpcTransport.js';
+import { isBridgeError } from '../contracts/BridgeError.js';
 export async function safePatchBatch(transport, patches, options = {}) {
     const idempotencyKey = options.idempotencyKey ?? `bridge-batch:${randomUUID()}`;
     const rpcPatches = [];
@@ -63,22 +63,31 @@ export async function safePatchBatch(transport, patches, options = {}) {
             throw error;
         }
         const filesVerifiedUnchanged = await verifyFilesUnchanged(transport, hashesBefore);
-        const failedPath = isBridgeError(error) && error.rawError?.path
-            ? String(error.rawError.path)
-            : rpcPatches[0]?.path;
+        const failedPath = isBridgeError(error) ? inferFailedPath(error, rpcPatches) : rpcPatches[0]?.path;
         return {
             applied: false,
             atomic: true,
             rolledBack: true,
             failedPath,
             idempotencyKey,
-            recoveryHint: isBridgeError(error) ? error.recoveryHint : 'revalidate_batch_with_patch.validate',
+            recoveryHint: isBridgeError(error)
+                ? error.code === 'stale_content'
+                    ? 'revalidate_patch_with_patch.validate'
+                    : error.recoveryHint
+                : 'revalidate_batch_with_patch.validate',
             nextRecommendedCommand: isBridgeError(error)
                 ? error.nextRecommendedCommand
                 : 'patch.validate',
             filesVerifiedUnchanged,
+            ...(isBridgeError(error) && error.code === 'stale_content' ? { stale: true } : {}),
         };
     }
+}
+function inferFailedPath(error, patches) {
+    if (error.rawError?.path) {
+        return String(error.rawError.path);
+    }
+    return patches[0]?.path;
 }
 async function verifyFilesUnchanged(transport, hashesBefore) {
     for (const [path, beforeHash] of hashesBefore) {

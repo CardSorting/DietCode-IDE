@@ -121,6 +121,7 @@ export interface SafeBatchPatchFailure {
   applied: false;
   atomic: true;
   rolledBack: true;
+  stale?: boolean;
   failedPath?: string;
   idempotencyKey: string;
   recoveryHint: string;
@@ -209,6 +210,12 @@ export interface TransportOptions {
   tokenPath?: string;
   schemaVersion?: string;
   requestTimeoutMs?: number;
+  connectTimeoutMs?: number;
+  transportRetries?: number;
   startApp?: boolean;
   appPath?: string;
+  agentId?: string;
+  rationale?: string;
+  workspaceRoot?: string;
+  ensureWorkspace?: boolean;
 }

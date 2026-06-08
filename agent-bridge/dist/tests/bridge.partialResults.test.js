@@ -6,7 +6,8 @@ import { describe, it } from 'node:test';
 import { spawn } from 'node:child_process';
 import { searchLiteral } from '../adapters/searchAdapter.js';
 import { extractPartialMeta, mapRpcError, normalizeBridgeResult } from '../index.js';
-import { MockRpcTransport } from '../client/RpcTransport.js';
+import { DietCodeBridgeError } from '../contracts/BridgeError.js';
+import { MockRpcTransport } from '../testing/MockRpcTransport.js';
 const here = dirname(fileURLToPath(import.meta.url));
 const bridgeRoot = join(here, '..', '..');
 const repoRoot = join(bridgeRoot, '..');
@@ -42,6 +43,7 @@ describe('bridge.partialResults', () => {
         assert.equal(err.code, 'semantic_disabled');
         assert.equal(err.nextRecommendedCommand, 'search.literal');
         assert.equal(err.retrySafe, false);
+        assert.ok(err instanceof DietCodeBridgeError);
     });
     it('search adapter preserves partial metadata', async () => {
         const fixture = JSON.parse(await readFile(join(bridgeRoot, 'tests', 'fixtures', 'partial_search.json'), 'utf8'));

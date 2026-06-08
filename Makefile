@@ -251,9 +251,13 @@ test-ergonomics: app
 test-agent-bridge-fast: agent-bridge-fast
 	cd $(AGENT_BRIDGE_DIR) && npm run test:fast
 
+test-agent-bridge-audit: app
+	python3 scripts/test_agent_bridge_audit.py --compact
+
 test-agent-bridge: restart-agent-server
 	cd $(AGENT_BRIDGE_DIR) && npm test
-	BRIDGE_LIVE=1 cd $(AGENT_BRIDGE_DIR) && npm run test:live
+	cd $(AGENT_BRIDGE_DIR) && BRIDGE_LIVE=1 npm run test:live
+	python3 scripts/test_agent_bridge_audit.py --compact
 
 agent-integration: app
 	python3 scripts/dietcode_agent_client.py --wait-ready --compact --error-json --quiet

@@ -27,6 +27,7 @@ NEXT_COMMANDS = {
     "live_broccoliq_runtime_memory": "make test-broccoliq-runtime-memory",
     "live_runtime_native_integration": "make test-runtime-native-integration",
     "live_agent_bridge": "make test-agent-bridge",
+    "live_agent_bridge_audit": "python3 scripts/test_agent_bridge_audit.py --compact",
     "live_verify_agent_runtime": "make verify-agent-runtime",
 }
 

@@ -648,6 +648,7 @@ REQUIRED_MAKE_TARGETS = frozenset({
     "control-smoke",
     "test-agent-bridge",
     "test-agent-bridge-fast",
+    "test-agent-bridge-audit",
 })
 
 # CONTRACT: Live integration suite registry (name → script path).

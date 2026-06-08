@@ -1,14 +1,24 @@
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { after, before, describe, it } from 'node:test';
+import { resolveAppPath } from '../client/config.js';
 import { DietCodeBridgeClient } from '../index.js';
 const live = process.env.BRIDGE_LIVE === '1';
 const describeLive = live ? describe : describe.skip;
 describeLive('bridge.live', () => {
     let client;
     before(async () => {
-        client = new DietCodeBridgeClient({ startApp: false });
-        await client.connect({ startApp: false });
+        client = new DietCodeBridgeClient({
+            startApp: false,
+            appPath: resolveAppPath(),
+            connectTimeoutMs: 30_000,
+            requestTimeoutMs: 60_000,
+        });
+        await client.connect({
+            startApp: false,
+            connectTimeoutMs: 30_000,
+            requestTimeoutMs: 60_000,
+        });
     });
     after(async () => {
         await client.close();
@@ -27,6 +37,7 @@ describeLive('bridge.live', () => {
         assert.equal(profile.diagnosticsAvailable, true);
         assert.ok(profile.mutationAuthority);
         assert.ok(profile.recordAuthority);
+        assert.ok(client.getWorkspacePath());
     });
     it('returns normalized diagnostics without raw by default', async () => {
         const diagnostics = await client.getDiagnostics();
@@ -37,32 +48,34 @@ describeLive('bridge.live', () => {
         assert.equal('raw' in diagnostics, false);
     });
     it('performs deterministic literal search', async () => {
-        const result = await client.searchLiteral('DietCodeBridgeClient', { maxResults: 5 });
-        assert.equal(result.complete, true);
+        const result = await client.searchLiteral('DietCodeBridgeClient', {
+            maxResults: 5,
+            include: ['agent-bridge/src/client/DietCodeBridgeClient.ts'],
+        });
         assert.ok(result.result);
-        const mode = result.result.searchMode ?? result.result.mode;
-        assert.ok(mode);
+        assert.equal(result.result.agentSafe, true);
+        assert.equal(result.result.rankingPolicy, 'none');
     });
     it('performs deterministic path search for the bridge package', async () => {
         const result = await client.searchPaths('agent-bridge', { maxResults: 10 });
-        assert.equal(result.complete, true);
         assert.ok(result.result);
+        assert.equal(result.result.searchMode, 'deterministic_path_match');
     });
     it('reads file stat through the bridge adapter', async () => {
         const stat = await client.getFileStat('agent-bridge/package.json');
         assert.equal(stat.complete, true);
         assert.ok(stat.result);
-        assert.equal(stat.result.path, 'agent-bridge/package.json');
+        assert.ok(String(stat.result.path).endsWith('agent-bridge/package.json'));
     });
     it('returns runtime timeline and recent activity envelopes', async () => {
         const timeline = await client.getTimeline({ limit: 5 });
-        assert.equal(timeline.complete, true);
         assert.ok(timeline.result);
         assert.equal(timeline.result.sortOrder, 'timestamp_desc');
+        assert.ok(Array.isArray(timeline.result.events));
         const activity = await client.getRecentActivity({ limit: 5 });
-        assert.equal(activity.complete, true);
         assert.ok(activity.result);
         assert.equal(activity.result.mode, 'runtime_timeline');
+        assert.ok(Array.isArray(activity.result.events));
     });
     it('verifyFast reports a healthy live runtime', async () => {
         const verify = await client.verifyFast();

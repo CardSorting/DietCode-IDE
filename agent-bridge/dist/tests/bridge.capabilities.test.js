@@ -4,7 +4,8 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, it } from 'node:test';
 import { assertRequiredCapabilities, detectRuntimeCapabilities, unsupportedCapabilityError, } from '../index.js';
-import { MockRpcTransport } from '../client/RpcTransport.js';
+import { DietCodeBridgeError } from '../contracts/BridgeError.js';
+import { MockRpcTransport } from '../testing/MockRpcTransport.js';
 const here = dirname(fileURLToPath(import.meta.url));
 const fixtures = join(here, '..', '..', 'tests', 'fixtures');
 async function loadFixture(name) {
@@ -37,6 +38,7 @@ describe('bridge.capabilities', () => {
             'runtime.diagnostics': () => ok('runtime.diagnostics', diagnostics),
         });
         await assert.rejects(() => detectRuntimeCapabilities(transport), (error) => {
+            assert.ok(error instanceof DietCodeBridgeError);
             assert.equal(error.code, 'unsupported_runtime_capability');
             return true;
         });

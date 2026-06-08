@@ -1,5 +1,10 @@
 import { mapRpcError } from '../contracts/errors.js';
-import { assertBatchReceipt, assertMutationReceipt, normalizeRpcSuccess } from '../contracts/schemas.js';
+import {
+  assertBatchReceipt,
+  assertMutationReceipt,
+  normalizeRpcSuccess,
+} from '../contracts/schemas.js';
+import { validateBatchMutationReceipt, validateMutationReceipt } from '../contracts/validators.js';
 import type { RpcCaller } from '../client/RpcTransport.js';
 import type { BatchPatchOptions, BridgeResult, PatchOptions } from '../contracts/types.js';
 
@@ -53,6 +58,13 @@ export async function applyPatch(
   const receipt = envelope.result.mutationReceipt;
   if (receipt && typeof receipt === 'object') {
     assertMutationReceipt(receipt as Record<string, unknown>);
+    const errors = validateMutationReceipt(receipt as Record<string, unknown>);
+    if (errors.length > 0) {
+      throw mapRpcError(
+        { id: envelope.id, ok: false, error: { code: -32000, message: errors.join('; ') } },
+        'applyPatch',
+      );
+    }
   }
   return normalizeRpcSuccess(envelope, options.includeRaw);
 }
@@ -84,6 +96,13 @@ export async function applyPatchBatch(
   const receipt = envelope.result.batchMutationReceipt;
   if (receipt && typeof receipt === 'object') {
     assertBatchReceipt(receipt as Record<string, unknown>);
+    const errors = validateBatchMutationReceipt(receipt as Record<string, unknown>);
+    if (errors.length > 0) {
+      throw mapRpcError(
+        { id: envelope.id, ok: false, error: { code: -32000, message: errors.join('; ') } },
+        'applyPatchBatch',
+      );
+    }
   }
   return normalizeRpcSuccess(envelope, options.includeRaw);
 }

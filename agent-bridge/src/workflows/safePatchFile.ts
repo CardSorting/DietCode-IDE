@@ -2,17 +2,12 @@ import { randomUUID } from 'node:crypto';
 
 import { applyPatch, validatePatch } from '../adapters/patchAdapter.js';
 import { fetchOperationStatus, fetchWorkspaceRevision } from '../adapters/runtimeAdapter.js';
-import { isBridgeError } from '../client/RpcTransport.js';
+import { isBridgeError } from '../contracts/BridgeError.js';
+import { bridgeError } from '../contracts/errors.js';
 import type { RpcCaller } from '../client/RpcTransport.js';
-import { mapRpcError } from '../contracts/errors.js';
-import type {
-  BridgeError,
-  RpcEnvelope,
-  MutationReceipt,
-  PatchOptions,
-  SafePatchResult,
-} from '../contracts/types.js';
+import type { MutationReceipt, PatchOptions, SafePatchResult } from '../contracts/types.js';
 import { buildStaleRecoveryResponse } from './stalePatchRecovery.js';
+import { verifyAfterMutation } from './verifyAfterMutation.js';
 
 export async function safePatchFile(
   transport: RpcCaller,
@@ -24,14 +19,7 @@ export async function safePatchFile(
 
   const validation = await validatePatch(transport, path, unifiedDiff);
   if (!validation.ok) {
-    const err: BridgeError = {
-      code: 'patch_failed',
-      message: 'patch validation failed before apply',
-      recoveryHint: 'run_patch_preview_or_patch_validate',
-      nextRecommendedCommand: 'patch.validate',
-      retrySafe: false,
-    };
-    throw err;
+    throw bridgeError('patch_failed', 'patch validation failed before apply');
   }
 
   const revisionBefore = await fetchWorkspaceRevision(transport);
@@ -43,13 +31,13 @@ export async function safePatchFile(
     });
 
     const receipt = applied.result.mutationReceipt as MutationReceipt;
-    const revisionAfter = await fetchWorkspaceRevision(transport);
+    const verified = await verifyAfterMutation(transport, revisionBefore, receipt);
 
     return {
       applied: true,
       mutationReceipt: receipt,
-      revisionBefore,
-      revisionAfter,
+      revisionBefore: verified.revisionBefore,
+      revisionAfter: verified.revisionAfter,
       idempotencyKey,
       nextRecommendedCommand: applied.nextRecommendedCommand ?? 'workspace.revision',
     };
@@ -76,15 +64,6 @@ export async function safePatchFile(
         };
       }
       throw error;
-    }
-
-    if (
-      typeof error === 'object' &&
-      error !== null &&
-      'ok' in error &&
-      (error as { ok?: boolean }).ok === false
-    ) {
-      throw mapRpcError(error as RpcEnvelope);
     }
 
     throw error;

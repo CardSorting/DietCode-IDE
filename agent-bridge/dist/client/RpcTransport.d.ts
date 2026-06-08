@@ -1,49 +1,39 @@
-import type { BridgeError, RpcEnvelope, TransportOptions } from '../contracts/types.js';
-export declare const CLIENT_SCHEMA_VERSION = "1.6.2";
-export declare const DEFAULT_SOCKET_PATH: string;
-export declare const DEFAULT_TOKEN_PATH: string;
+import { isBridgeError } from '../contracts/BridgeError.js';
+import type { RpcEnvelope, TransportOptions } from '../contracts/types.js';
+export { CLIENT_SCHEMA_VERSION, DEFAULT_SOCKET_PATH, DEFAULT_TOKEN_PATH } from './config.js';
 export interface RpcCaller {
     call(method: string, params?: Record<string, unknown>, options?: {
         requestId?: string;
         timeoutMs?: number;
+        agentId?: string;
+        rationale?: string;
     }): Promise<RpcEnvelope>;
+    connect(options?: TransportOptions): Promise<void>;
+    close(): Promise<void>;
 }
 export declare class RpcTransport implements RpcCaller {
     private socket;
     private buffer;
-    private readonly pending;
     private token;
-    private readonly socketPath;
-    private readonly tokenPath;
-    private readonly schemaVersion;
-    private readonly appPath?;
-    private readonly autoStart;
-    private defaultTimeoutMs;
+    private readonly config;
+    private callChain;
+    private closed;
     constructor(options?: TransportOptions);
     connect(options?: TransportOptions): Promise<void>;
     close(): Promise<void>;
+    reconnect(options?: TransportOptions): Promise<void>;
     call(method: string, params?: Record<string, unknown>, options?: {
         requestId?: string;
         timeoutMs?: number;
+        agentId?: string;
+        rationale?: string;
     }): Promise<RpcEnvelope>;
-    private onData;
-    private dispatchFrame;
-    private rejectAll;
+    private callUnlocked;
+    private sendAndReceive;
+    private readJsonFrame;
+    private readSocketChunk;
     private ensureSocket;
     private socketProbe;
 }
-/** In-memory transport for offline bridge tests. */
-export declare class MockRpcTransport implements RpcCaller {
-    private readonly handlers;
-    calls: Array<{
-        method: string;
-        params: Record<string, unknown>;
-    }>;
-    constructor(handlers?: Record<string, (params: Record<string, unknown>) => RpcEnvelope>);
-    connect(): Promise<void>;
-    close(): Promise<void>;
-    call(method: string, params?: Record<string, unknown>): Promise<RpcEnvelope>;
-    setHandler(method: string, handler: (params: Record<string, unknown>) => RpcEnvelope): void;
-}
-export declare function isBridgeError(value: unknown): value is BridgeError;
+export { isBridgeError };
 //# sourceMappingURL=RpcTransport.d.ts.map

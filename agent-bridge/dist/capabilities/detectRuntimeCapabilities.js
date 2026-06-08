@@ -1,6 +1,7 @@
-import { unsupportedCapabilityError } from '../contracts/errors.js';
+import { CLIENT_SCHEMA_VERSION } from '../client/config.js';
 import { buildRuntimeProfile } from '../client/RuntimeProfile.js';
-import { CLIENT_SCHEMA_VERSION } from '../client/RpcTransport.js';
+import { unsupportedCapabilityError } from '../contracts/errors.js';
+import { validateRuntimeDiagnostics, validateToolCapabilities, } from '../contracts/validators.js';
 const REQUIRED_FEATURES = [
     { key: 'deterministicSearch', label: 'deterministic search (search.literal/tokens/paths)' },
     { key: 'patchReceipts', label: 'patch receipts (patch.apply)' },
@@ -21,6 +22,14 @@ export async function detectRuntimeCapabilities(transport) {
     if (!diagnosticsEnvelope.ok || !diagnosticsEnvelope.result) {
         throw unsupportedCapabilityError('runtime.diagnostics', diagnosticsEnvelope.error?.message ?? 'call failed');
     }
+    const capabilityErrors = validateToolCapabilities(capabilitiesEnvelope.result);
+    if (capabilityErrors.length > 0) {
+        throw unsupportedCapabilityError('tool.capabilities contract', capabilityErrors.join('; '));
+    }
+    const diagnosticsErrors = validateRuntimeDiagnostics(diagnosticsEnvelope.result);
+    if (diagnosticsErrors.length > 0) {
+        throw unsupportedCapabilityError('runtime.diagnostics contract', diagnosticsErrors.join('; '));
+    }
     const profile = buildRuntimeProfile({
         capabilitiesRaw: capabilitiesEnvelope.result,
         diagnosticsRaw: diagnosticsEnvelope.result,
@@ -37,8 +46,7 @@ export function assertRequiredCapabilities(capabilities) {
         }
     }
     if (missing.length > 0) {
-        const err = unsupportedCapabilityError('required runtime features', missing.join('; '));
-        throw err;
+        throw unsupportedCapabilityError('required runtime features', missing.join('; '));
     }
 }
 export function listRequiredFeatures() {

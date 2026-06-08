@@ -9,7 +9,8 @@ import {
   detectRuntimeCapabilities,
   unsupportedCapabilityError,
 } from '../dist/index.js';
-import { MockRpcTransport } from '../dist/client/RpcTransport.js';
+import { DietCodeBridgeError } from '../dist/contracts/BridgeError.js';
+import { MockRpcTransport } from '../dist/testing/MockRpcTransport.js';
 import type { RpcEnvelope } from '../dist/contracts/types.js';
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -52,7 +53,8 @@ describe('bridge.capabilities', () => {
     await assert.rejects(
       () => detectRuntimeCapabilities(transport),
       (error: unknown) => {
-        assert.equal((error as { code: string }).code, 'unsupported_runtime_capability');
+        assert.ok(error instanceof DietCodeBridgeError);
+        assert.equal(error.code, 'unsupported_runtime_capability');
         return true;
       },
     );

@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
 import { safePatchFile } from '../dist/workflows/safePatchFile.js';
-import { MockRpcTransport } from '../dist/client/RpcTransport.js';
+import { MockRpcTransport } from '../dist/testing/MockRpcTransport.js';
 import type { RpcEnvelope } from '../dist/contracts/types.js';
 
 const PATH = 'stale_probe.py';

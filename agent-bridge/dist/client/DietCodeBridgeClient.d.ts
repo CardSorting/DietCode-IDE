@@ -2,11 +2,16 @@ import type { ActivityOptions, BatchPatchOptions, BridgeResult, OperationStatusR
 export declare class DietCodeBridgeClient {
     private readonly transport;
     private profile;
+    private workspacePath;
+    private readonly defaultOptions;
     constructor(options?: TransportOptions);
-    /** Establish transport and detect runtime capabilities. */
+    /** Establish transport, wait for RPC readiness, detect capabilities, optionally open workspace. */
     connect(options?: TransportOptions): Promise<RuntimeProfile>;
+    reconnect(options?: TransportOptions): Promise<RuntimeProfile>;
     close(): Promise<void>;
+    [Symbol.asyncDispose](): Promise<void>;
     getRuntimeProfile(): RuntimeProfile;
+    getWorkspacePath(): string | undefined;
     getDiagnostics(includeRaw?: boolean): Promise<BridgeResult<Record<string, unknown>>>;
     searchLiteral(query: string, options?: SearchOptions): Promise<BridgeResult<Record<string, unknown>>>;
     searchTokens(tokens: string[], options?: SearchOptions): Promise<BridgeResult<Record<string, unknown>>>;

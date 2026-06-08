@@ -1,7 +1,8 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import { safePatchFile } from '../workflows/safePatchFile.js';
-import { MockRpcTransport } from '../client/RpcTransport.js';
+import { DietCodeBridgeError } from '../contracts/BridgeError.js';
+import { MockRpcTransport } from '../testing/MockRpcTransport.js';
 const PATH = 'probe.py';
 const DIFF = `--- probe.py\n+++ probe.py\n@@ -1 +1 @@\n-old\n+new\n`;
 const BEFORE_HASH = 'abc123hash000001';
@@ -74,14 +75,8 @@ describe('bridge.safePatchFile', () => {
                 },
             }),
             'workspace.revision': () => ok('workspace.revision', { revisionId: 5 }),
-            'patch.apply': () => {
-                throw {
-                    code: 'nested_call_timeout',
-                    message: 'timed out',
-                    recoveryHint: 'reduce_concurrency_or_retry_later',
-                    nextRecommendedCommand: 'operation.status',
-                    retrySafe: true,
-                };
+            'patch.apply': async () => {
+                throw new DietCodeBridgeError('nested_call_timeout', 'timed out');
             },
             'operation.status': () => ok('operation.status', {
                 status: 'completed',

@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import { safePatchFile } from '../workflows/safePatchFile.js';
-import { MockRpcTransport } from '../client/RpcTransport.js';
+import { MockRpcTransport } from '../testing/MockRpcTransport.js';
 const PATH = 'stale_probe.py';
 const DIFF = `--- stale_probe.py\n+++ stale_probe.py\n@@ -1 +1 @@\n-old\n+new\n`;
 const BEFORE_HASH = 'beforehash000001';

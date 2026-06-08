@@ -1,8 +1,12 @@
-import { unsupportedCapabilityError } from '../contracts/errors.js';
+import { CLIENT_SCHEMA_VERSION } from '../client/config.js';
 import { buildRuntimeProfile } from '../client/RuntimeProfile.js';
 import type { RpcCaller } from '../client/RpcTransport.js';
-import { CLIENT_SCHEMA_VERSION } from '../client/RpcTransport.js';
-import type { BridgeError, RuntimeCapabilities, RuntimeProfile } from '../contracts/types.js';
+import { unsupportedCapabilityError } from '../contracts/errors.js';
+import {
+  validateRuntimeDiagnostics,
+  validateToolCapabilities,
+} from '../contracts/validators.js';
+import type { RuntimeCapabilities, RuntimeProfile } from '../contracts/types.js';
 
 const REQUIRED_FEATURES: Array<{ key: keyof RuntimeCapabilities; label: string }> = [
   { key: 'deterministicSearch', label: 'deterministic search (search.literal/tokens/paths)' },
@@ -36,6 +40,16 @@ export async function detectRuntimeCapabilities(
     );
   }
 
+  const capabilityErrors = validateToolCapabilities(capabilitiesEnvelope.result);
+  if (capabilityErrors.length > 0) {
+    throw unsupportedCapabilityError('tool.capabilities contract', capabilityErrors.join('; '));
+  }
+
+  const diagnosticsErrors = validateRuntimeDiagnostics(diagnosticsEnvelope.result);
+  if (diagnosticsErrors.length > 0) {
+    throw unsupportedCapabilityError('runtime.diagnostics contract', diagnosticsErrors.join('; '));
+  }
+
   const profile = buildRuntimeProfile({
     capabilitiesRaw: capabilitiesEnvelope.result,
     diagnosticsRaw: diagnosticsEnvelope.result,
@@ -54,11 +68,7 @@ export function assertRequiredCapabilities(capabilities: RuntimeCapabilities): v
     }
   }
   if (missing.length > 0) {
-    const err: BridgeError = unsupportedCapabilityError(
-      'required runtime features',
-      missing.join('; '),
-    );
-    throw err;
+    throw unsupportedCapabilityError('required runtime features', missing.join('; '));
   }
 }
 

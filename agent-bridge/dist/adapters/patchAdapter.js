@@ -1,5 +1,6 @@
 import { mapRpcError } from '../contracts/errors.js';
-import { assertBatchReceipt, assertMutationReceipt, normalizeRpcSuccess } from '../contracts/schemas.js';
+import { assertBatchReceipt, assertMutationReceipt, normalizeRpcSuccess, } from '../contracts/schemas.js';
+import { validateBatchMutationReceipt, validateMutationReceipt } from '../contracts/validators.js';
 export async function validatePatch(transport, path, unifiedDiff) {
     const envelope = await transport.call('patch.validate', { path, patch: unifiedDiff });
     if (!envelope.ok || !envelope.result) {
@@ -28,6 +29,10 @@ export async function applyPatch(transport, path, unifiedDiff, expectBeforeHash,
     const receipt = envelope.result.mutationReceipt;
     if (receipt && typeof receipt === 'object') {
         assertMutationReceipt(receipt);
+        const errors = validateMutationReceipt(receipt);
+        if (errors.length > 0) {
+            throw mapRpcError({ id: envelope.id, ok: false, error: { code: -32000, message: errors.join('; ') } }, 'applyPatch');
+        }
     }
     return normalizeRpcSuccess(envelope, options.includeRaw);
 }
@@ -44,6 +49,10 @@ export async function applyPatchBatch(transport, patches, options = {}) {
     const receipt = envelope.result.batchMutationReceipt;
     if (receipt && typeof receipt === 'object') {
         assertBatchReceipt(receipt);
+        const errors = validateBatchMutationReceipt(receipt);
+        if (errors.length > 0) {
+            throw mapRpcError({ id: envelope.id, ok: false, error: { code: -32000, message: errors.join('; ') } }, 'applyPatchBatch');
+        }
     }
     return normalizeRpcSuccess(envelope, options.includeRaw);
 }

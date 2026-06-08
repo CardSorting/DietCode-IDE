@@ -184,6 +184,30 @@ Live tests are skipped unless `BRIDGE_LIVE=1` is set (the Makefile sets this for
 
 ---
 
+## Production hardening (audit pass II)
+
+| Control | Implementation |
+|---------|----------------|
+| RPC serialization | `RpcTransport` serializes calls via `callChain`; no interleaved frames |
+| Frame matching | Reads until matching `requestId`; skips server push notifications |
+| Transport retry | Configurable `transportRetries` with reconnect on transport failures |
+| Token refresh | Reloads session token once on `permission_denied` |
+| Throwable errors | `DietCodeBridgeError extends Error` with `toJSON()` recovery metadata |
+| Contract validation | `validators.ts` mirrors frozen Python `agent_contracts.py` keys |
+| Workspace bootstrap | `ensureWorkspaceRoot` on `connect()` when no folder is open |
+| App path resolution | Bundled binary discovery, `DIETCODE_APP_PATH`, repo `build/` fallback |
+| Test boundary | `MockRpcTransport` exported only from `@dietcode/agent-bridge/testing` |
+| Live workflows | `bridge.live.workflows.test.ts` mirrors Python workflow smoke A–D |
+| Audit harness | `scripts/test_agent_bridge_audit.py` + `make test-agent-bridge` |
+
+```bash
+make test-agent-bridge-fast     # offline contract + workflow mocks
+make test-agent-bridge          # live socket + packaging + audit harness
+python3 scripts/test_agent_bridge_audit.py --compact
+```
+
+---
+
 ## Related
 
 - [Runtime Native Integration](runtime-native-integration.md) — timeline, identity, diagnostics parity
