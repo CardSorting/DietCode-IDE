@@ -5,7 +5,7 @@ from __future__ import annotations
 
 TRACE_SCHEMA_VERSION = "1.0"
 BENCHMARK_VERSION = "1.2"
-RUNTIME_VERSION = "1.6.5"
+RUNTIME_VERSION = "1.6.6"
 
 # JSONL task_result — stable core fields (Phase 4.1).
 JSONL_CORE_FIELDS: frozenset[str] = frozenset(

@@ -367,7 +367,7 @@ static const void* kDietCodeReadQueueKey = &kDietCodeReadQueueKey;
                 @synchronized(self) {
                     if (!_isRunning) {
                         close(clientFd);
-                    } else if (_activeConnections.count >= kMaxActiveConnections) {
+                    } else if ((NSInteger)_activeConnections.count >= kMaxActiveConnections) {
                         [self logRuntimeDiagnostic:@"unknown" method:@"connection" phase:@"connection_rejected" ok:NO stringCode:@"connection_limit_exceeded" queue:nil durationMs:-1];
                         close(clientFd);
                     } else {

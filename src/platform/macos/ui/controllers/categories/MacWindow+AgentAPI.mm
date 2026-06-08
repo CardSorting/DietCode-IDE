@@ -159,12 +159,6 @@ using namespace dietcode::platform::macos;
     }
 }
 
-- (void)jumpToLine:(NSInteger)line column:(NSInteger)column {
-    if (self.activeTab.path) {
-        [self openFileAtPath:self.activeTab.path line:line column:column];
-    }
-}
-
 - (pid_t)terminalPid {
     return terminalPid_;
 }

@@ -177,6 +177,10 @@ using namespace dietcode::platform::macos;
     }
 }
 
+@end
+
+@implementation DietCodeWindowController (Core)
+
 - (void)jumpToLine:(NSInteger)lineNumber {
     [self jumpToLine:lineNumber column:1];
 }

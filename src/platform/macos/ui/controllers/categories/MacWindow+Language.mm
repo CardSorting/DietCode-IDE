@@ -380,6 +380,35 @@ using namespace dietcode::utils;
     return diags;
 }
 
+- (void)goToDefinitionClicked:(id)sender {
+    if (!self.activeTab.path || !self.textView) return;
+
+    NSRange selected = self.textView.selectedRange;
+    NSString* content = self.textView.string ?: @"";
+    NSUInteger line = 1, col = 1, idx = 0;
+    while (idx < selected.location && idx < content.length) {
+        if ([content characterAtIndex:idx] == '\n') { line++; col = 1; }
+        else col++;
+        idx++;
+    }
+
+    NSString* language = [self detectLanguage:self.activeTab.path];
+    dietcode::lsp::LSPClient* client = [self lspClientForLanguage:language];
+    if (!client || !client->isRunning()) {
+        [self showErrorAlert:@"Go to Definition" message:@"Language server is not running for this file."];
+        return;
+    }
+
+    auto def = client->getDefinition(StdStringFromNSString(self.activeTab.path), (int)line, (int)col);
+    if (def.line < 1) {
+        [self showErrorAlert:@"Go to Definition" message:@"No definition found at the cursor."];
+        return;
+    }
+
+    NSString* targetPath = NSStringFromStdString(def.filePath);
+    [self openFileAtPath:targetPath line:def.line column:def.column];
+}
+
 - (void)handleMouseHoverInTextView:(NSTextView*)textView atPoint:(NSPoint)point {
     if (!self.activeTab || !self.activeTab.path) return;
     

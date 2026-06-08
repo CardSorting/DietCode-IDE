@@ -40,7 +40,7 @@ const NSInteger kSocketListenBacklog = dietcode::domain::control::kSocketListenB
 const NSUInteger kMaxRuntimeDiagnosticLogBytes = dietcode::domain::control::kMaxRuntimeDiagnosticLogBytes;
 const NSUInteger kMaxAuditLogBytes = dietcode::domain::control::kMaxAuditLogBytes;
 const NSUInteger kMaxFailureBundleBytes = dietcode::domain::control::kMaxFailureBundleBytes;
-NSString* const kDietCodeAppVersion = @"1.6.5";
+NSString* const kDietCodeAppVersion = @"1.6.6";
 NSString* const kDietCodeTerminalOutputDidUpdateNotification = @"kDietCodeTerminalOutputDidUpdateNotification";
 
 NSString* NSStringFromStdString(const std::string& value) {

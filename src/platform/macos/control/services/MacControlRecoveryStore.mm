@@ -715,7 +715,6 @@ using namespace dietcode::platform::macos;
             NSString* relPath = fileEntry[@"workspaceRelativePath"];
             NSString* absPath = currentWs.length > 0 ? AbsolutePathForRPCPath(relPath, currentWs) : nil;
             NSString* expectedPostHash = fileEntry[@"expectedPostimageHash"];
-            NSString* preimageHash = fileEntry[@"preimageHash"];
             NSString* blobHash = fileEntry[@"backupBlobHash"];
             BOOL wasMissing = [fileEntry[@"wasMissing"] boolValue];
             

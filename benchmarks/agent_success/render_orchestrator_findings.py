@@ -16,7 +16,7 @@ def render_orchestrator_findings(
     *,
     generated_at: str,
     input_file: str,
-    dietcode_version: str = "1.6.5",
+    dietcode_version: str = "1.6.6",
     benchmark_version: str = "v1.2",
 ) -> str:
     passed = sum(1 for r in rows if r.get("taskSuccess") and r.get("verifyPassed"))

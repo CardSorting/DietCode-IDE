@@ -21,7 +21,7 @@ def get_sha256(data):
     return hashlib.sha256(data).hexdigest()
 
 def main():
-    print("=== DietCode v1.6.5 Release Constant Hygiene Verification Suite ===")
+    print("=== DietCode v1.6.6 Release Constant Hygiene Verification Suite ===")
 
     with connect() as sock:
         token = load_token()
@@ -41,7 +41,7 @@ def main():
         os.makedirs(BACKUPS_DIR, exist_ok=True)
 
         # Create target test file
-        test_file_path = os.path.join(workspace_root, "test_target_v1_6_5.txt")
+        test_file_path = os.path.join(workspace_root, "test_target_v1_6_6.txt")
         with open(test_file_path, "w") as f:
             f.write("Line 1: base content\n")
 
@@ -184,7 +184,7 @@ def main():
                     "maxFilesTouched": 2
                 },
                 "scope": {
-                    "include": ["test_target_v1_6_5.txt"]
+                    "include": ["test_target_v1_6_6.txt"]
                 },
                 "steps": [
                     {
@@ -262,10 +262,10 @@ def main():
             print(f"rpc.version result: {v_res}")
             assert v_res.get("ok"), "rpc.version failed"
             app_version = v_res.get("result", {}).get("appVersion")
-            assert app_version == "1.6.5", f"Expected 1.6.5, got {app_version}"
+            assert app_version == "1.6.6", f"Expected 1.6.6, got {app_version}"
 
             ping_res = call(sock, token, "rpc.ping")
-            assert ping_res.get("result", {}).get("version") == "1.6.5"
+            assert ping_res.get("result", {}).get("version") == "1.6.6"
 
             # Check Info.plist in build directory
             plist_path = "build/DietCode.app/Contents/Info.plist"
@@ -274,9 +274,9 @@ def main():
                 plist = plistlib.load(f)
             plist_version = plist.get("CFBundleShortVersionString")
             print(f"Info.plist CFBundleShortVersionString: {plist_version}")
-            assert plist_version == "1.6.5", f"Info.plist version mismatch! Got {plist_version}"
+            assert plist_version == "1.6.6", f"Info.plist version mismatch! Got {plist_version}"
 
-            print("\nAll v1.6.5 Release Constant Hygiene Verification Cases Passed Successfully!")
+            print("\nAll v1.6.6 Release Constant Hygiene Verification Cases Passed Successfully!")
             return 0
 
         finally:
