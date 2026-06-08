@@ -36,6 +36,7 @@ class RunMetrics:
     task_id: str
     mode: str
     executor: str = "reference"
+    agent_profile: str | None = None
     task_success: bool = False
     verify_passed: bool = False
     wrong_file_edited: bool = False
@@ -55,9 +56,11 @@ class RunMetrics:
     api_shape_preserved: bool = False
     second_invariant_passed: bool = False
     final_verify_passed: bool = False
+    contract_coverage: dict[str, Any] = field(default_factory=dict)
+    contract_reliability_index: int = 100
 
     def to_json(self) -> dict[str, Any]:
-        return {
+        payload: dict[str, Any] = {
             "type": "task_result",
             "taskId": self.task_id,
             "mode": self.mode,
@@ -81,8 +84,13 @@ class RunMetrics:
             "searchReadMismatchDetected": self.search_read_mismatch_detected,
             "apiShapePreserved": self.api_shape_preserved,
             "secondInvariantPassed": self.second_invariant_passed,
+            "contractCoverage": self.contract_coverage,
+            "contractReliabilityIndex": self.contract_reliability_index,
             "timestamp": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
         }
+        if self.agent_profile:
+            payload["agentProfile"] = self.agent_profile
+        return payload
 
 
 @dataclass
@@ -91,6 +99,7 @@ class WorkflowContext:
     meta: dict[str, Any]
     patch: str
     metrics: RunMetrics
+    agent_profile: str = "grep_only"
     tool_calls: int = 0
     retries: int = 0
     hints: list[str] = field(default_factory=list)
@@ -996,10 +1005,21 @@ def run_task_bridge(workspace: Path, ctx: WorkflowContext) -> None:
     _sync_metrics_from_ctx(ctx)
 
 
-def run_single_task(task_id: str, mode: str, *, executor: str = "reference") -> RunMetrics:
-    metrics = RunMetrics(task_id=task_id, mode=mode, executor=executor)
+def run_single_task(
+    task_id: str,
+    mode: str,
+    *,
+    executor: str = "reference",
+    agent_profile: str = "grep_only",
+) -> RunMetrics:
+    from contract_ladder import compute_cri, contract_coverage
+
+    metrics = RunMetrics(task_id=task_id, mode=mode, executor=executor, agent_profile=agent_profile)
+    if executor == "agent":
+        metrics.contract_coverage = contract_coverage(agent_profile)
     started = time.monotonic()
     workspace: Path | None = None
+    ctx: WorkflowContext | None = None
     try:
         meta = load_task(task_id)
         meta["id"] = task_id
@@ -1016,7 +1036,7 @@ def run_single_task(task_id: str, mode: str, *, executor: str = "reference") -> 
         elif executor == "agent":
             from agent_driver import run_agent_task
 
-            run_agent_task(workspace, task_id, mode, ctx)
+            run_agent_task(workspace, task_id, mode, ctx, profile=agent_profile)
             _sync_metrics_from_ctx(ctx)
         else:
             raise ValueError(f"unknown executor: {executor}")
@@ -1024,6 +1044,8 @@ def run_single_task(task_id: str, mode: str, *, executor: str = "reference") -> 
     except Exception as exc:
         metrics.failure_code = metrics.failure_code or type(exc).__name__
     finally:
+        if ctx is not None and executor == "agent":
+            _sync_metrics_from_ctx(ctx)
         metrics.duration_ms = (time.monotonic() - started) * 1000.0
         if workspace and metrics.task_success:
             try:
@@ -1039,9 +1061,16 @@ def run_single_task(task_id: str, mode: str, *, executor: str = "reference") -> 
                 finalize_nightmare_metrics(workspace, meta, metrics)
                 if not metrics.verify_passed:
                     metrics.task_success = False
+                metrics.contract_reliability_index = compute_cri(metrics.to_json(), meta=meta)
             except Exception:
                 metrics.verify_passed = False
                 metrics.task_success = False
+        elif workspace:
+            try:
+                meta = load_task(task_id)
+                metrics.contract_reliability_index = compute_cri(metrics.to_json(), meta=meta)
+            except Exception:
+                pass
         if workspace and WORKSPACES_DIR in workspace.parents:
             shutil.rmtree(workspace, ignore_errors=True)
     return metrics
@@ -1059,7 +1088,7 @@ def write_results(results: list[RunMetrics], run_id: str) -> Path:
     with open(out, "w", encoding="utf-8") as handle:
         for item in results:
             handle.write(json.dumps(item.to_json(), separators=(",", ":")) + "\n")
-        summary = {
+        summary: dict[str, Any] = {
             "type": "summary",
             "runId": run_id,
             "tasks": len(results),
@@ -1069,6 +1098,9 @@ def write_results(results: list[RunMetrics], run_id: str) -> Path:
             "executors": sorted({r.executor for r in results}),
             "timestamp": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
         }
+        profiles = sorted({r.agent_profile for r in results if r.agent_profile})
+        if profiles:
+            summary["agentProfiles"] = profiles
         handle.write(json.dumps(summary, separators=(",", ":")) + "\n")
     return out
 
@@ -1085,6 +1117,12 @@ def main() -> int:
     parser.add_argument("--task", action="append", help="Run specific task id (repeatable).")
     parser.add_argument("--assume-server-ready", action="store_true")
     parser.add_argument("--run-id", help="Results filename stem.")
+    parser.add_argument(
+        "--agent-profile",
+        choices=["grep_only", "verify_exec", "invariant_aware", "trace_aware", "contract_full", "recovery_aware"],
+        default="grep_only",
+        help="Runtime Contract Evaluation profile (agent executor only).",
+    )
     args = parser.parse_args()
 
     if not args.assume_server_ready:
@@ -1101,7 +1139,12 @@ def main() -> int:
 
     for task_id in tasks:
         for mode in modes:
-            metrics = run_single_task(task_id, mode, executor=args.executor)
+            metrics = run_single_task(
+                task_id,
+                mode,
+                executor=args.executor,
+                agent_profile=args.agent_profile,
+            )
             results.append(metrics)
             print(json.dumps(metrics.to_json(), separators=(",", ":")))
 

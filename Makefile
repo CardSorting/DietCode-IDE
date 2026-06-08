@@ -320,6 +320,13 @@ benchmark-agent-success-report:
 test-agent-success-report:
 	python3 benchmarks/agent_success/test_report_results.py
 
+# Runtime Contract Evaluation Ladder — nightmare tasks × agent profiles.
+benchmark-contract-ladder: agent-bridge-fast
+	DIETCODE_REPO_ROOT=$(CURDIR) python3 benchmarks/agent_success/run_contract_ladder.py --assume-server-ready
+
+test-contract-ladder:
+	python3 benchmarks/agent_success/test_contract_ladder.py
+
 # Agent success benchmark: fast iteration — assumes server/binary/bridge already match HEAD.
 benchmark-agent-success-fast: agent-bridge-fast
 	DIETCODE_REPO_ROOT=$(CURDIR) python3 benchmarks/agent_success/run_benchmark.py --assume-server-ready

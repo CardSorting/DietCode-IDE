@@ -2,7 +2,7 @@
 
 End-to-end benchmark harness for DietCode agent workflows.
 
-**Whitepaper:** [WHITEPAPER.md](WHITEPAPER.md) · **Results:** [RESULTS.md](RESULTS.md) · **Nightmare results:** [NIGHTMARE_RESULTS.md](NIGHTMARE_RESULTS.md)
+**Whitepaper:** [WHITEPAPER.md](WHITEPAPER.md) · **Results:** [RESULTS.md](RESULTS.md) · **Nightmare:** [NIGHTMARE_RESULTS.md](NIGHTMARE_RESULTS.md) · **Contract ladder:** [RESULTS_CONTRACT_LADDER.md](RESULTS_CONTRACT_LADDER.md)
 
 Each task exercises a
 realistic agent pattern (search → inspect → patch, stale recovery, symlink safety,
@@ -34,6 +34,22 @@ benchmarks/agent_success/
 |----------|------|-------------|
 | **reference** (default) | `--executor reference` | Deterministic workflow baseline (control) |
 | **agent** | `--executor agent` | README + verify-driven driver (`agent_driver.py`) |
+
+### Runtime Contract Evaluation Ladder (agent profiles)
+
+| Profile | Allowed contract visibility |
+|---------|----------------------------|
+| `grep_only` (default) | README + parsed grep checks |
+| `verify_exec` | + run `verify.sh` / shell checks |
+| `invariant_aware` | + `verify_invariant.sh` |
+| `trace_aware` | + declared trace scripts |
+| `contract_full` | + all executable checks (no metadata) |
+| `recovery_aware` | + rollback/retry transactional loop |
+
+```bash
+python3 benchmarks/agent_success/run_benchmark.py --executor agent --agent-profile invariant_aware --mode bridge
+make benchmark-contract-ladder   # nightmare tasks × all profiles → RESULTS_CONTRACT_LADDER.md
+```
 
 Override the built-in agent with an external script:
 
@@ -70,6 +86,7 @@ Each task/mode run emits one line to `results/<run-id>.jsonl`:
 - Nightmare contract: `destructiveCommandBlocked`, `sidecarRollbackClean`,
   `concurrentMutationDetected`, `searchReadMismatchDetected`, `apiShapePreserved`,
   `secondInvariantPassed`, `finalVerifyPassed`
+- Contract ladder: `contractCoverage`, `contractReliabilityIndex`, `agentProfile`
 
 ## Task categories (40 tasks)
 

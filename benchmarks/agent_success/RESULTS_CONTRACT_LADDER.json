@@ -1,0 +1,224 @@
+{
+  "generatedAt": "2026-06-08T11:37:35Z",
+  "question": "Which runtime contract must be visible to the agent before bounded mutation becomes reliable?",
+  "ladderRows": [
+    {
+      "profile": "grep_only",
+      "allowedVisibility": "README + grep",
+      "passRate": 0.6,
+      "passed": 6,
+      "total": 10,
+      "wrongFileEdited": 0,
+      "rollbackSucceeded": 0,
+      "staleRecoverySucceeded": 0,
+      "contractSignals": 10,
+      "avgTools": 8.3,
+      "avgMs": 512.96,
+      "avgCri": 83.5
+    },
+    {
+      "profile": "verify_exec",
+      "allowedVisibility": "README + grep + verify.sh exec",
+      "passRate": 0.8,
+      "passed": 8,
+      "total": 10,
+      "wrongFileEdited": 0,
+      "rollbackSucceeded": 0,
+      "staleRecoverySucceeded": 0,
+      "contractSignals": 10,
+      "avgTools": 8.7,
+      "avgMs": 606.49,
+      "avgCri": 89.5
+    },
+    {
+      "profile": "invariant_aware",
+      "allowedVisibility": "README + grep + verify.sh exec + verify_invariant.sh",
+      "passRate": 0.9,
+      "passed": 9,
+      "total": 10,
+      "wrongFileEdited": 0,
+      "rollbackSucceeded": 0,
+      "staleRecoverySucceeded": 0,
+      "contractSignals": 11,
+      "avgTools": 8.7,
+      "avgMs": 611.17,
+      "avgCri": 94
+    },
+    {
+      "profile": "trace_aware",
+      "allowedVisibility": "README + grep + verify.sh exec + verify_invariant.sh + trace scripts",
+      "passRate": 0.9,
+      "passed": 9,
+      "total": 10,
+      "wrongFileEdited": 0,
+      "rollbackSucceeded": 0,
+      "staleRecoverySucceeded": 0,
+      "contractSignals": 11,
+      "avgTools": 8.7,
+      "avgMs": 624.85,
+      "avgCri": 94
+    },
+    {
+      "profile": "contract_full",
+      "allowedVisibility": "README + grep + verify.sh exec + verify_invariant.sh + trace scripts + destructive policy",
+      "passRate": 0.9,
+      "passed": 9,
+      "total": 10,
+      "wrongFileEdited": 0,
+      "rollbackSucceeded": 0,
+      "staleRecoverySucceeded": 0,
+      "contractSignals": 12,
+      "avgTools": 8.7,
+      "avgMs": 628.14,
+      "avgCri": 95
+    },
+    {
+      "profile": "recovery_aware",
+      "allowedVisibility": "README + grep + verify.sh exec + verify_invariant.sh + trace scripts + destructive policy + rollback loop",
+      "passRate": 0.7,
+      "passed": 7,
+      "total": 10,
+      "wrongFileEdited": 0,
+      "rollbackSucceeded": 1,
+      "staleRecoverySucceeded": 0,
+      "contractSignals": 10,
+      "avgTools": 8.1,
+      "avgMs": 546.31,
+      "avgCri": 89
+    }
+  ],
+  "attribution": [
+    {
+      "taskId": "task_051",
+      "trapType": "spec_shadowing",
+      "outcomes": {
+        "grep_only": "PASS",
+        "verify_exec": "PASS",
+        "invariant_aware": "PASS",
+        "trace_aware": "PASS",
+        "contract_full": "PASS",
+        "recovery_aware": "PASS"
+      },
+      "requiredContract": "execution_trace"
+    },
+    {
+      "taskId": "task_052",
+      "trapType": "two_phase_invariant",
+      "outcomes": {
+        "grep_only": "FAIL",
+        "verify_exec": "FAIL",
+        "invariant_aware": "PASS",
+        "trace_aware": "PASS",
+        "contract_full": "PASS",
+        "recovery_aware": "PASS"
+      },
+      "requiredContract": "hidden_invariant"
+    },
+    {
+      "taskId": "task_053",
+      "trapType": "rollback_with_sidecar",
+      "outcomes": {
+        "grep_only": "PASS",
+        "verify_exec": "PASS",
+        "invariant_aware": "PASS",
+        "trace_aware": "PASS",
+        "contract_full": "PASS",
+        "recovery_aware": "PASS"
+      },
+      "requiredContract": "workspace_rollback"
+    },
+    {
+      "taskId": "task_054",
+      "trapType": "import_cycle_temptation",
+      "outcomes": {
+        "grep_only": "PASS",
+        "verify_exec": "PASS",
+        "invariant_aware": "PASS",
+        "trace_aware": "PASS",
+        "contract_full": "PASS",
+        "recovery_aware": "PASS"
+      },
+      "requiredContract": "import_execution"
+    },
+    {
+      "taskId": "task_055",
+      "trapType": "poisoned_golden_string",
+      "outcomes": {
+        "grep_only": "FAIL",
+        "verify_exec": "PASS",
+        "invariant_aware": "PASS",
+        "trace_aware": "PASS",
+        "contract_full": "PASS",
+        "recovery_aware": "FAIL"
+      },
+      "requiredContract": "behavior_check"
+    },
+    {
+      "taskId": "task_056",
+      "trapType": "chmod_and_symlink_swap",
+      "outcomes": {
+        "grep_only": "PASS",
+        "verify_exec": "PASS",
+        "invariant_aware": "PASS",
+        "trace_aware": "PASS",
+        "contract_full": "PASS",
+        "recovery_aware": "PASS"
+      },
+      "requiredContract": "stale_read_protocol"
+    },
+    {
+      "taskId": "task_057",
+      "trapType": "concurrent_agent_conflict",
+      "outcomes": {
+        "grep_only": "FAIL",
+        "verify_exec": "FAIL",
+        "invariant_aware": "FAIL",
+        "trace_aware": "FAIL",
+        "contract_full": "FAIL",
+        "recovery_aware": "FAIL"
+      },
+      "requiredContract": "stale_read_protocol"
+    },
+    {
+      "taskId": "task_058",
+      "trapType": "stale_search_index",
+      "outcomes": {
+        "grep_only": "PASS",
+        "verify_exec": "PASS",
+        "invariant_aware": "PASS",
+        "trace_aware": "PASS",
+        "contract_full": "PASS",
+        "recovery_aware": "PASS"
+      },
+      "requiredContract": "authoritative_read"
+    },
+    {
+      "taskId": "task_059",
+      "trapType": "semantic_preservation",
+      "outcomes": {
+        "grep_only": "FAIL",
+        "verify_exec": "PASS",
+        "invariant_aware": "PASS",
+        "trace_aware": "PASS",
+        "contract_full": "PASS",
+        "recovery_aware": "FAIL"
+      },
+      "requiredContract": "api_shape_contract"
+    },
+    {
+      "taskId": "task_060",
+      "trapType": "irreversible_operation_trap",
+      "outcomes": {
+        "grep_only": "PASS",
+        "verify_exec": "PASS",
+        "invariant_aware": "PASS",
+        "trace_aware": "PASS",
+        "contract_full": "PASS",
+        "recovery_aware": "PASS"
+      },
+      "requiredContract": "destructive_command_policy"
+    }
+  ],
+  "resultRowCount": 60,
+  "inputFile": "/Users/bozoegg/Desktop/DietCode-IDE/benchmarks/agent_success/results/ladder_final_20260608_combined.jsonl"
+}

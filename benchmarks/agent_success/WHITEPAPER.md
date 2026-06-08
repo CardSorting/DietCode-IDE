@@ -233,6 +233,28 @@ Additional JSONL metrics: `destructiveCommandBlocked`, `sidecarRollbackClean`, `
 
 Empirical results: [NIGHTMARE_RESULTS.md](NIGHTMARE_RESULTS.md)
 
+### 6.4 Runtime Contract Evaluation Ladder
+
+Phase 2 profiles diagnose **which contract must be visible** before bounded mutation becomes reliable:
+
+| Profile | Contract visibility |
+|---------|---------------------|
+| `grep_only` | README + parsed grep checks |
+| `verify_exec` | + run `verify.sh`, inspect failure output |
+| `invariant_aware` | + `verify_invariant.sh` |
+| `trace_aware` | + declared trace scripts |
+| `contract_full` | + all executable checks (no metadata/golden patch) |
+| `recovery_aware` | + validate → apply → verify → rollback/retry loop |
+
+Each agent JSONL row includes `contractCoverage` and `contractReliabilityIndex` (CRI). Reports add a **Failure Attribution Matrix** mapping task × profile → PASS/FAIL with `requiredContract`.
+
+```bash
+python3 benchmarks/agent_success/run_benchmark.py --executor agent --agent-profile invariant_aware --mode bridge
+make benchmark-contract-ladder   # full nightmare × profile sweep
+```
+
+Results: [RESULTS_CONTRACT_LADDER.md](RESULTS_CONTRACT_LADDER.md)
+
 ---
 
 ## 7. Metrics
