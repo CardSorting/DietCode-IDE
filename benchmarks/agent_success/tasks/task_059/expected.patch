@@ -1,0 +1,7 @@
+--- lib/public.py
++++ lib/public.py
+@@ -3,3 +3,3 @@
+
+ def compute():
+-    return format_result(0)
++    return format_result(1)

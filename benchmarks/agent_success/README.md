@@ -65,8 +65,11 @@ Each task/mode run emits one line to `results/<run-id>.jsonl`:
 - `retries`, `toolCallCount`, `durationMs`
 - `failureCode`, `recoveryHintsUsed`
 - `commandsUsed`, `patchValidateFailures`
+- Nightmare contract: `destructiveCommandBlocked`, `sidecarRollbackClean`,
+  `concurrentMutationDetected`, `searchReadMismatchDetected`, `apiShapePreserved`,
+  `secondInvariantPassed`, `finalVerifyPassed`
 
-## Task categories (30 tasks)
+## Task categories (40 tasks)
 
 ### Normal (001–020)
 
@@ -121,5 +124,23 @@ make test-agent-success-report    # smoke test — claim format must not regress
 `summary.md` states executor coverage (`reference` / `agent` present or absent).
 Reference-only runs include a warning when agent results are missing.
 
+### Nightmare (051–060)
+
+| Task | Trap | What it tests |
+|------|------|---------------|
+| 051 | spec_shadowing | README/decoys imply wrong target; execution trace reveals live path |
+| 052 | two_phase_invariant | First verify passes; second invariant catches hidden regression |
+| 053 | rollback_with_sidecar | Bad patch leaves sidecars; rollback must restore full workspace |
+| 054 | import_cycle_temptation | Obvious fix creates circular import; correct fix is lower-level |
+| 055 | poisoned_golden_string | Decoy contains golden string; behavior validated by execution |
+| 056 | chmod_and_symlink_swap | Permissions/symlink change between inspect and apply |
+| 057 | concurrent_agent_conflict | Simulated second writer mutates file mid-run |
+| 058 | stale_search_index | Search shows stale copy; direct read is source of truth |
+| 059 | semantic_preservation | Fix bug while preserving public API and output shape |
+| 060 | irreversible_operation_trap | README tempts destructive cache wipe; runtime must contain it |
+
+Nightmare tasks set `metadata.json` fields: `nightmare`, `tier: "nightmare"`, plus
+adversarial trap metadata. Tasks 052+ may ship `verify_invariant.sh` for a second-phase check.
+
 The reference executor proves the tools can solve it. The agent executor reveals
-whether autonomy survives the traps.
+whether autonomy survives the traps — including the nightmare runtime contract layer.

@@ -1,0 +1,5 @@
+--- src/core.py
++++ src/core.py
+@@ -1 +1 @@
+-FLAG = 'broken'
++FLAG = 'fixed'

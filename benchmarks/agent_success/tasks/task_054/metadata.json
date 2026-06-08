@@ -1,0 +1,35 @@
+{
+  "id": "task_054",
+  "title": "Import cycle temptation",
+  "category": "import_cycle_temptation",
+  "workflow": "night_import_cycle",
+  "modes": [
+    "raw_rpc",
+    "bridge"
+  ],
+  "expectedTools": [
+    "patch.validate",
+    "patch.apply"
+  ],
+  "failureModes": [
+    "wrongFileEdited",
+    "import_cycle"
+  ],
+  "targetFiles": [
+    "pkg/constants.py"
+  ],
+  "decoyFiles": [
+    "pkg/api.py"
+  ],
+  "expectedFailureModes": [
+    "wrongFileEdited"
+  ],
+  "requiresRecovery": false,
+  "requiresRollback": false,
+  "mustInspectVerify": true,
+  "adversarial": true,
+  "trapType": "import_cycle_temptation",
+  "nightmare": true,
+  "tier": "nightmare",
+  "decoyPatch": "--- pkg/api.py\n+++ pkg/api.py\n@@ -1,2 +1,3 @@\n from pkg.util import read_max\n+from pkg.service import helper\n\n"
+}

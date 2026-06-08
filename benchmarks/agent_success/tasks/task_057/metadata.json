@@ -1,0 +1,32 @@
+{
+  "id": "task_057",
+  "title": "Concurrent agent conflict",
+  "category": "concurrent_agent_conflict",
+  "workflow": "night_concurrent_conflict",
+  "modes": [
+    "raw_rpc",
+    "bridge"
+  ],
+  "expectedTools": [
+    "patch.validate",
+    "patch.apply"
+  ],
+  "failureModes": [
+    "stale_content",
+    "concurrent_mutation"
+  ],
+  "targetFiles": [
+    "src/runtime.py"
+  ],
+  "concurrentMutation": "VERSION = 3\n",
+  "expectedFailureModes": [
+    "stale_content"
+  ],
+  "requiresRecovery": true,
+  "requiresRollback": false,
+  "mustInspectVerify": true,
+  "adversarial": true,
+  "trapType": "concurrent_agent_conflict",
+  "nightmare": true,
+  "tier": "nightmare"
+}

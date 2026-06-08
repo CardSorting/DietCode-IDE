@@ -1,0 +1,5 @@
+--- src/runtime.py
++++ src/runtime.py
+@@ -1 +1 @@
+-VALUE = 1
++VALUE = 10

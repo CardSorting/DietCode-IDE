@@ -1,0 +1,6 @@
+--- real/handler.py
++++ real/handler.py
+@@ -1,2 +1,2 @@
+ def run():
+-    return 0
++    return 42

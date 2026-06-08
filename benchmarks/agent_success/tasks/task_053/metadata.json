@@ -1,0 +1,36 @@
+{
+  "id": "task_053",
+  "title": "Rollback with sidecar",
+  "category": "rollback_with_sidecar",
+  "workflow": "night_rollback_sidecar",
+  "modes": [
+    "raw_rpc",
+    "bridge"
+  ],
+  "expectedTools": [
+    "patch.validate",
+    "patch.apply"
+  ],
+  "failureModes": [
+    "rollback_required",
+    "patch_failed"
+  ],
+  "targetFiles": [
+    "src/runtime.py"
+  ],
+  "sidecarFiles": [
+    "src/runtime.py.bak",
+    ".cache/agent_tmp.json"
+  ],
+  "expectedFailureModes": [
+    "rollback_required"
+  ],
+  "requiresRecovery": false,
+  "requiresRollback": true,
+  "mustInspectVerify": true,
+  "adversarial": true,
+  "trapType": "rollback_with_sidecar",
+  "nightmare": true,
+  "tier": "nightmare",
+  "badPatch": "--- src/runtime.py\n+++ src/runtime.py\n@@ -1 +1 @@\n-VALUE = 1\n+VALUE = broken\n"
+}

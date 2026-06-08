@@ -1,0 +1,2 @@
+# ACTIVE CONFIG (deprecated)
+TIMEOUT_MS = 1000

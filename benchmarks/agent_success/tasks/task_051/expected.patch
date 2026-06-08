@@ -1,0 +1,6 @@
+--- src/runtime/live_config.py
++++ src/runtime/live_config.py
+@@ -1,2 +1,2 @@
+ # live runtime path
+-TIMEOUT_MS = 1000
++TIMEOUT_MS = 2500

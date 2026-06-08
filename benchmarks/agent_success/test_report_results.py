@@ -66,10 +66,33 @@ class ReportResultsSmokeTest(unittest.TestCase):
             self.assertIn("## Adversarial Trap Matrix", md)
             self.assertIn("| trapType | passRate | wrongFileEdited | rollbackSucceeded |", md)
             self.assertIn("wrong_file_decoy", md)
+            self.assertIn("Nightmare tasks (051–060)", md)
             self.assertIn(
                 "DietCode evaluates bounded agent code mutation as a transactional runtime problem",
                 md,
             )
+
+    def test_nightmare_matrix_when_nightmare_rows_present(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            jsonl = Path(tmp) / "nightmare.jsonl"
+            row = _task_row(task_id="task_051", mode="bridge")
+            row.update(
+                {
+                    "destructiveCommandBlocked": False,
+                    "sidecarRollbackClean": False,
+                    "concurrentMutationDetected": False,
+                    "searchReadMismatchDetected": False,
+                    "apiShapePreserved": False,
+                    "secondInvariantPassed": True,
+                    "finalVerifyPassed": True,
+                }
+            )
+            jsonl.write_text(json.dumps(row) + "\n", encoding="utf-8")
+
+            md = render_markdown(build_summary(load_task_results([jsonl]), load_task_meta(), [jsonl]))
+
+            self.assertIn("## Nightmare Runtime Contract Matrix", md)
+            self.assertIn("spec_shadowing", md)
 
     def test_mixed_executor_summary_includes_agent_line(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

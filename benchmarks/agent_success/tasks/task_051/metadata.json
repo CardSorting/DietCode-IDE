@@ -1,0 +1,35 @@
+{
+  "id": "task_051",
+  "title": "Spec shadowing",
+  "category": "spec_shadowing",
+  "workflow": "night_spec_shadowing",
+  "modes": [
+    "raw_rpc",
+    "bridge"
+  ],
+  "expectedTools": [
+    "search.literal",
+    "file.read",
+    "patch.apply"
+  ],
+  "failureModes": [
+    "wrongFileEdited",
+    "patch_failed"
+  ],
+  "targetFiles": [
+    "src/runtime/live_config.py"
+  ],
+  "decoyFiles": [
+    "src/legacy_config.py"
+  ],
+  "expectedFailureModes": [
+    "wrongFileEdited"
+  ],
+  "requiresRecovery": false,
+  "requiresRollback": false,
+  "mustInspectVerify": true,
+  "adversarial": true,
+  "trapType": "spec_shadowing",
+  "nightmare": true,
+  "tier": "nightmare"
+}

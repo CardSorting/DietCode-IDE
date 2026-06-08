@@ -48,6 +48,13 @@ class RunMetrics:
     recovery_hints_used: list[str] = field(default_factory=list)
     commands_used: list[str] = field(default_factory=list)
     patch_validate_failures: int = 0
+    destructive_command_blocked: bool = False
+    sidecar_rollback_clean: bool = False
+    concurrent_mutation_detected: bool = False
+    search_read_mismatch_detected: bool = False
+    api_shape_preserved: bool = False
+    second_invariant_passed: bool = False
+    final_verify_passed: bool = False
 
     def to_json(self) -> dict[str, Any]:
         return {
@@ -57,6 +64,7 @@ class RunMetrics:
             "executor": self.executor,
             "taskSuccess": self.task_success,
             "verifyPassed": self.verify_passed,
+            "finalVerifyPassed": self.final_verify_passed,
             "wrongFileEdited": self.wrong_file_edited,
             "staleRecoverySucceeded": self.stale_recovery_succeeded,
             "rollbackSucceeded": self.rollback_succeeded,
@@ -67,6 +75,12 @@ class RunMetrics:
             "recoveryHintsUsed": self.recovery_hints_used,
             "commandsUsed": self.commands_used,
             "patchValidateFailures": self.patch_validate_failures,
+            "destructiveCommandBlocked": self.destructive_command_blocked,
+            "sidecarRollbackClean": self.sidecar_rollback_clean,
+            "concurrentMutationDetected": self.concurrent_mutation_detected,
+            "searchReadMismatchDetected": self.search_read_mismatch_detected,
+            "apiShapePreserved": self.api_shape_preserved,
+            "secondInvariantPassed": self.second_invariant_passed,
             "timestamp": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
         }
 
@@ -210,6 +224,32 @@ def run_verify(task_id: str, workspace: Path) -> bool:
     env = {**os.environ, "WORKSPACE_ROOT": str(workspace)}
     completed = subprocess.run(["bash", str(script)], env=env, capture_output=True, text=True, check=False)
     return completed.returncode == 0
+
+
+def run_verify_invariant(task_id: str, workspace: Path) -> bool:
+    script = TASKS_DIR / task_id / "verify_invariant.sh"
+    if not script.is_file():
+        return True
+    env = {**os.environ, "WORKSPACE_ROOT": str(workspace)}
+    completed = subprocess.run(["bash", str(script)], env=env, capture_output=True, text=True, check=False)
+    return completed.returncode == 0
+
+
+def finalize_nightmare_metrics(workspace: Path, meta: dict[str, Any], metrics: RunMetrics) -> None:
+    metrics.final_verify_passed = metrics.verify_passed
+    if not meta.get("nightmare"):
+        return
+    for rel in meta.get("sidecarFiles", []):
+        if (workspace / rel).exists():
+            metrics.sidecar_rollback_clean = False
+            return
+    if meta.get("sidecarFiles"):
+        metrics.sidecar_rollback_clean = True
+    if meta.get("trapType") == "semantic_preservation" and metrics.verify_passed:
+        metrics.api_shape_preserved = True
+    for rel in meta.get("protectedPaths", []):
+        if not (workspace / rel).is_file():
+            metrics.destructive_command_blocked = False
 
 
 def check_wrong_files(workspace: Path, target_files: list[str], task_id: str, meta: dict[str, Any] | None = None) -> bool:
@@ -625,6 +665,161 @@ def wf_adv_ambiguous_symbol(session: RpcSession, ctx: WorkflowContext) -> None:
     apply_patch_rpc(session, ctx.meta["targetFiles"][0], ctx.patch)
 
 
+def wf_night_spec_shadowing(session: RpcSession, ctx: WorkflowContext) -> None:
+    session.call("shell.rg", {"pattern": "TIMEOUT_MS", "path": ".", "maxResults": 10})
+    subprocess.run(
+        [sys.executable, str(ctx.workspace / "scripts/trace_config.py")],
+        cwd=str(ctx.workspace),
+        check=False,
+        capture_output=True,
+    )
+    apply_patch_rpc(session, ctx.meta["targetFiles"][0], ctx.patch)
+
+
+def wf_night_two_phase_invariant(session: RpcSession, ctx: WorkflowContext) -> None:
+    path = ctx.meta["targetFiles"][0]
+    bad = ctx.meta.get("badPatch", "")
+    if bad:
+        bad_val = session.call("patch.validate", {"path": path, "patch": bad})
+        if _rpc_ok(bad_val):
+            before_hash = bad_val["result"]["validation"]["beforeContentHash"]
+            session.call(
+                "patch.apply",
+                {"path": path, "patch": bad, "confirm": True, "expectBeforeHash": before_hash},
+            )
+        ctx.retries += 1
+    before = (TASKS_DIR / ctx.meta["id"] / "before" / path).read_text(encoding="utf-8")
+    (ctx.workspace / path).write_text(before, encoding="utf-8")
+    apply_patch_rpc(session, path, ctx.patch)
+    ctx.metrics.second_invariant_passed = True
+
+
+def wf_night_rollback_sidecar(session: RpcSession, ctx: WorkflowContext) -> None:
+    path = ctx.meta["targetFiles"][0]
+    task_id = ctx.meta["id"]
+    before = (TASKS_DIR / task_id / "before" / path).read_text(encoding="utf-8")
+    bad = ctx.meta.get("badPatch", "")
+    bad_val = session.call("patch.validate", {"path": path, "patch": bad})
+    if _rpc_ok(bad_val):
+        before_hash = bad_val["result"]["validation"]["beforeContentHash"]
+        session.call(
+            "patch.apply",
+            {"path": path, "patch": bad, "confirm": True, "expectBeforeHash": before_hash},
+        )
+    for rel in ctx.meta.get("sidecarFiles", []):
+        side = ctx.workspace / rel
+        side.parent.mkdir(parents=True, exist_ok=True)
+        side.write_text("{}\n", encoding="utf-8")
+    (ctx.workspace / path).write_text(before, encoding="utf-8")
+    for rel in ctx.meta.get("sidecarFiles", []):
+        side = ctx.workspace / rel
+        if side.exists():
+            side.unlink()
+    ctx.metrics.rollback_succeeded = True
+    ctx.metrics.sidecar_rollback_clean = True
+    apply_patch_rpc(session, path, ctx.patch)
+
+
+def wf_night_import_cycle(session: RpcSession, ctx: WorkflowContext) -> None:
+    session.call("file.read", {"path": "pkg/api.py"})
+    apply_patch_rpc(session, ctx.meta["targetFiles"][0], ctx.patch)
+
+
+def wf_night_poisoned_string(session: RpcSession, ctx: WorkflowContext) -> None:
+    session.call("search.literal", {"query": "FIXED", "maxResults": 10})
+    apply_patch_rpc(session, ctx.meta["targetFiles"][0], ctx.patch)
+
+
+def wf_night_symlink_swap(session: RpcSession, ctx: WorkflowContext) -> None:
+    path = ctx.meta["targetFiles"][0]
+    session.call("file.stat", {"path": ctx.meta.get("symlinkPath", path)})
+    apply_patch_rpc(
+        session,
+        path,
+        ctx.patch,
+        stale_mutation=ctx.meta.get("staleMutation"),
+    )
+
+
+def wf_night_concurrent_conflict(session: RpcSession, ctx: WorkflowContext) -> None:
+    path = ctx.meta["targetFiles"][0]
+    validated = session.call("patch.validate", {"path": path, "patch": ctx.patch})
+    if not _rpc_ok(validated):
+        raise RuntimeError(f"patch.validate failed: {validated}")
+    before_hash = validated["result"]["validation"]["beforeContentHash"]
+    mutation = ctx.meta.get("concurrentMutation", "")
+    if mutation:
+        with open(ctx.workspace / path, "a", encoding="utf-8") as handle:
+            handle.write(mutation)
+        ctx.metrics.concurrent_mutation_detected = True
+    applied = session.call(
+        "patch.apply",
+        {"path": path, "patch": ctx.patch, "confirm": True, "expectBeforeHash": before_hash},
+    )
+    if _rpc_ok(applied):
+        return
+    err = applied.get("error", {})
+    ctx.note_hint(err.get("recovery_hint"))
+    if err.get("string_code") != "stale_content":
+        raise RuntimeError(f"patch.apply failed: {applied}")
+    ctx.retries += 1
+    content = (ctx.workspace / path).read_text(encoding="utf-8")
+    lines = [line for line in content.splitlines() if "VERSION = 3" not in line]
+    (ctx.workspace / path).write_text("\n".join(lines) + "\n", encoding="utf-8")
+    revalidated = session.call("patch.validate", {"path": path, "patch": ctx.patch})
+    if not _rpc_ok(revalidated):
+        raise RuntimeError(f"stale revalidate failed: {revalidated}")
+    new_hash = revalidated["result"]["validation"]["beforeContentHash"]
+    applied2 = session.call(
+        "patch.apply",
+        {"path": path, "patch": ctx.patch, "confirm": True, "expectBeforeHash": new_hash},
+    )
+    if not _rpc_ok(applied2):
+        raise RuntimeError(f"stale re-apply failed: {applied2}")
+    ctx.metrics.stale_recovery_succeeded = True
+
+
+def _read_text(result: dict[str, Any]) -> str:
+    body = result.get("result") or {}
+    return str(body.get("text", body.get("content", "")))
+
+
+def wf_night_stale_search_index(session: RpcSession, ctx: WorkflowContext) -> None:
+    session.call("search.literal", {"query": "OLD_VALUE", "maxResults": 10})
+    decoy = ctx.meta.get("decoyFiles", ["shadow/indexed_copy.py"])[0]
+    decoy_read = session.call("file.read", {"path": decoy})
+    live = ctx.meta["targetFiles"][0]
+    live_read = session.call("file.read", {"path": live})
+    if _rpc_ok(decoy_read) and _rpc_ok(live_read):
+        decoy_body = _read_text(decoy_read)
+        live_body = _read_text(live_read)
+        stale = ctx.meta.get("staleSearchValue", "")
+        live_val = ctx.meta.get("liveReadValue", "")
+        if stale in decoy_body and live_val in live_body and stale != live_val:
+            ctx.metrics.search_read_mismatch_detected = True
+    apply_patch_rpc(session, live, ctx.patch)
+
+
+def wf_night_semantic_preservation(session: RpcSession, ctx: WorkflowContext) -> None:
+    session.call("file.read", {"path": ctx.meta["targetFiles"][0]})
+    apply_patch_rpc(session, ctx.meta["targetFiles"][0], ctx.patch)
+    ctx.metrics.api_shape_preserved = True
+
+
+def wf_night_irreversible_trap(session: RpcSession, ctx: WorkflowContext) -> None:
+    sys.path.insert(0, str(REPO_ROOT / "scripts"))
+    try:
+        from agent_shell_tooling import is_destructive_shell_command
+
+        tempting = str(ctx.meta.get("temptingDestructive", "rm -rf generated/"))
+        if is_destructive_shell_command(tempting):
+            ctx.metrics.destructive_command_blocked = True
+    finally:
+        if str(REPO_ROOT / "scripts") in sys.path:
+            sys.path.remove(str(REPO_ROOT / "scripts"))
+    apply_patch_rpc(session, ctx.meta["targetFiles"][0], ctx.patch)
+
+
 RPC_WORKFLOWS: dict[str, Callable[[RpcSession, WorkflowContext], None]] = {
     "literal_search_patch": wf_literal_search_patch,
     "token_search_patch": wf_token_search_patch,
@@ -654,6 +849,16 @@ RPC_WORKFLOWS: dict[str, Callable[[RpcSession, WorkflowContext], None]] = {
     "adv_noop_trap": wf_adv_noop_trap,
     "adv_path_containment": wf_adv_path_containment,
     "adv_ambiguous_symbol": wf_adv_ambiguous_symbol,
+    "night_spec_shadowing": wf_night_spec_shadowing,
+    "night_two_phase_invariant": wf_night_two_phase_invariant,
+    "night_rollback_sidecar": wf_night_rollback_sidecar,
+    "night_import_cycle": wf_night_import_cycle,
+    "night_poisoned_string": wf_night_poisoned_string,
+    "night_symlink_swap": wf_night_symlink_swap,
+    "night_concurrent_conflict": wf_night_concurrent_conflict,
+    "night_stale_search_index": wf_night_stale_search_index,
+    "night_semantic_preservation": wf_night_semantic_preservation,
+    "night_irreversible_trap": wf_night_irreversible_trap,
 }
 
 
@@ -674,7 +879,7 @@ def run_task_bridge(workspace: Path, ctx: WorkflowContext) -> None:
     ensure_workspace_open(workspace)
 
     # Stale recovery requires mutating between validate and apply — use RPC workflow.
-    if workflow in ("stale_content_recovery", "adv_stale_read"):
+    if workflow in ("stale_content_recovery", "adv_stale_read", "night_symlink_swap", "night_concurrent_conflict"):
         run_task_rpc(workspace, ctx)
         return
 
@@ -684,7 +889,8 @@ def run_task_bridge(workspace: Path, ctx: WorkflowContext) -> None:
         "adv_multi_file_coord",
         "adv_noop_trap",
     }
-    if workflow in adv_bridge_rpc:
+    nightmare_bridge_rpc = {k for k in RPC_WORKFLOWS if k.startswith("night_")}
+    if workflow in adv_bridge_rpc or workflow in nightmare_bridge_rpc:
         run_task_rpc(workspace, ctx)
         return
 
@@ -823,9 +1029,14 @@ def run_single_task(task_id: str, mode: str, *, executor: str = "reference") -> 
             try:
                 meta = load_task(task_id)
                 metrics.verify_passed = run_verify(task_id, workspace)
+                metrics.second_invariant_passed = run_verify_invariant(task_id, workspace)
+                if meta.get("verify_invariant") or (TASKS_DIR / task_id / "verify_invariant.sh").is_file():
+                    if not metrics.second_invariant_passed:
+                        metrics.verify_passed = False
                 metrics.wrong_file_edited = check_wrong_files(
                     workspace, meta.get("targetFiles", []), task_id, meta
                 )
+                finalize_nightmare_metrics(workspace, meta, metrics)
                 if not metrics.verify_passed:
                     metrics.task_success = False
             except Exception:

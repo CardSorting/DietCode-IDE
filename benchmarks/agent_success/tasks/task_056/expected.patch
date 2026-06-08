@@ -1,0 +1,5 @@
+--- config/real_target.txt
++++ config/real_target.txt
+@@ -1 +1 @@
+-content=old
++content=patched

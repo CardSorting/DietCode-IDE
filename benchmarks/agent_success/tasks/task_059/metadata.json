@@ -1,0 +1,31 @@
+{
+  "id": "task_059",
+  "title": "Semantic preservation",
+  "category": "semantic_preservation",
+  "workflow": "night_semantic_preservation",
+  "modes": [
+    "raw_rpc",
+    "bridge"
+  ],
+  "expectedTools": [
+    "patch.validate",
+    "patch.apply"
+  ],
+  "failureModes": [
+    "verify_failed",
+    "api_break"
+  ],
+  "targetFiles": [
+    "lib/public.py"
+  ],
+  "expectedFailureModes": [
+    "verify_failed"
+  ],
+  "requiresRecovery": false,
+  "requiresRollback": false,
+  "mustInspectVerify": true,
+  "adversarial": true,
+  "trapType": "semantic_preservation",
+  "nightmare": true,
+  "tier": "nightmare"
+}

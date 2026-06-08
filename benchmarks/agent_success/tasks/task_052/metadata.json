@@ -1,0 +1,32 @@
+{
+  "id": "task_052",
+  "title": "Two-phase invariant",
+  "category": "two_phase_invariant",
+  "workflow": "night_two_phase_invariant",
+  "modes": [
+    "raw_rpc",
+    "bridge"
+  ],
+  "expectedTools": [
+    "patch.validate",
+    "patch.apply"
+  ],
+  "failureModes": [
+    "verify_failed",
+    "patch_failed"
+  ],
+  "targetFiles": [
+    "src/status.py"
+  ],
+  "expectedFailureModes": [
+    "verify_failed"
+  ],
+  "requiresRecovery": false,
+  "requiresRollback": false,
+  "mustInspectVerify": true,
+  "adversarial": true,
+  "trapType": "two_phase_invariant",
+  "nightmare": true,
+  "tier": "nightmare",
+  "badPatch": "--- src/status.py\n+++ src/status.py\n@@ -1,1 +1,1 @@\n-STATUS = 'open'\n+STATUS = 'fixed'\n"
+}

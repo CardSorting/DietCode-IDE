@@ -148,6 +148,46 @@ WORKFLOW_SPECS: dict[str, dict[str, list[str]]] = {
         "expectedTools": ["search.literal", "patch.validate", "patch.apply"],
         "failureModes": ["wrongFileEdited", "patch_failed"],
     },
+    "night_spec_shadowing": {
+        "expectedTools": ["search.literal", "file.read", "patch.apply"],
+        "failureModes": ["wrongFileEdited", "patch_failed"],
+    },
+    "night_two_phase_invariant": {
+        "expectedTools": ["patch.validate", "patch.apply"],
+        "failureModes": ["verify_failed", "patch_failed"],
+    },
+    "night_rollback_sidecar": {
+        "expectedTools": ["patch.validate", "patch.apply"],
+        "failureModes": ["rollback_required", "patch_failed"],
+    },
+    "night_import_cycle": {
+        "expectedTools": ["patch.validate", "patch.apply"],
+        "failureModes": ["wrongFileEdited", "import_cycle"],
+    },
+    "night_poisoned_string": {
+        "expectedTools": ["search.literal", "patch.apply"],
+        "failureModes": ["wrongFileEdited", "verify_failed"],
+    },
+    "night_symlink_swap": {
+        "expectedTools": ["file.stat", "patch.validate", "patch.apply"],
+        "failureModes": ["stale_content", "symlink_target"],
+    },
+    "night_concurrent_conflict": {
+        "expectedTools": ["patch.validate", "patch.apply"],
+        "failureModes": ["stale_content", "concurrent_mutation"],
+    },
+    "night_stale_search_index": {
+        "expectedTools": ["search.literal", "file.read", "patch.apply"],
+        "failureModes": ["wrongFileEdited", "stale_search"],
+    },
+    "night_semantic_preservation": {
+        "expectedTools": ["patch.validate", "patch.apply"],
+        "failureModes": ["verify_failed", "api_break"],
+    },
+    "night_irreversible_trap": {
+        "expectedTools": ["patch.apply"],
+        "failureModes": ["destructive_command", "verify_failed"],
+    },
 }
 
 
@@ -1186,7 +1226,9 @@ ADVERSARIAL_TASKS: list[dict[str, Any]] = [
     },
 ]
 
-ALL_TASK_DEFINITIONS = TASK_DEFINITIONS + ADVERSARIAL_TASKS
+from nightmare_tasks_defs import NIGHTMARE_TASKS  # noqa: E402
+
+ALL_TASK_DEFINITIONS = TASK_DEFINITIONS + ADVERSARIAL_TASKS + NIGHTMARE_TASKS
 
 
 def _materialize_task(defn: dict[str, Any]) -> None:
@@ -1231,6 +1273,12 @@ def _materialize_task(defn: dict[str, Any]) -> None:
 
     (task_dir / "expected.patch").write_text(defn["patch"].rstrip() + "\n", encoding="utf-8")
     _write_executable(task_dir / "verify.sh", _render_verify(defn))
+    if defn.get("verify_invariant"):
+        inv_lines = [line.replace("$ROOT/", "$WORKSPACE_ROOT/") for line in defn["verify_invariant"]]
+        _write_executable(
+            task_dir / "verify_invariant.sh",
+            ADVERSARIAL_VERIFY_HEADER + "\n".join(inv_lines) + "\n",
+        )
 
     workflow = defn["workflow"]
     spec = WORKFLOW_SPECS[workflow]
@@ -1244,7 +1292,7 @@ def _materialize_task(defn: dict[str, Any]) -> None:
         "failureModes": spec["failureModes"],
         **defn["metadata"],
     }
-    if defn.get("adversarial"):
+    if defn.get("adversarial") or defn.get("nightmare"):
         metadata.update(
             {
                 "adversarial": True,
@@ -1255,8 +1303,13 @@ def _materialize_task(defn: dict[str, Any]) -> None:
                 "mustInspectVerify": defn["metadata"].get("mustInspectVerify", False),
             }
         )
+        if defn.get("nightmare"):
+            metadata["nightmare"] = True
+            metadata["tier"] = "nightmare"
         if defn.get("badPatch"):
             metadata["badPatch"] = defn["badPatch"]
+        if defn.get("decoyPatch"):
+            metadata["decoyPatch"] = defn["decoyPatch"]
         readme_text = _adversarial_readme(task_id, defn["title"], defn["readme"])
     else:
         readme_text = _task_readme(task_id, defn["title"], defn["readme"])

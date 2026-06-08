@@ -1,0 +1,9 @@
+--- src/status.py
++++ src/status.py
+@@ -1,1 +1,1 @@
+-STATUS = 'open'
++STATUS = 'fixed'
+@@ -6,2 +6,2 @@
+ def _checksum():
+-    return 41
++    return 42

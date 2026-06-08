@@ -1,0 +1,35 @@
+{
+  "id": "task_056",
+  "title": "Chmod and symlink swap",
+  "category": "chmod_and_symlink_swap",
+  "workflow": "night_symlink_swap",
+  "modes": [
+    "raw_rpc",
+    "bridge"
+  ],
+  "expectedTools": [
+    "file.stat",
+    "patch.validate",
+    "patch.apply"
+  ],
+  "failureModes": [
+    "stale_content",
+    "symlink_target"
+  ],
+  "targetFiles": [
+    "config/real_target.txt"
+  ],
+  "symlinkPath": "config/target.txt",
+  "staleMutation": "content=stale\n",
+  "expectedFailureModes": [
+    "stale_content",
+    "symlink_target"
+  ],
+  "requiresRecovery": true,
+  "requiresRollback": false,
+  "mustInspectVerify": true,
+  "adversarial": true,
+  "trapType": "chmod_and_symlink_swap",
+  "nightmare": true,
+  "tier": "nightmare"
+}

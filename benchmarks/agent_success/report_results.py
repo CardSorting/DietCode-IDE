@@ -89,6 +89,20 @@ def aggregate(rows: list[dict[str, Any]], task_meta: dict[str, dict[str, Any]], 
 
     normal_rows: list[dict[str, Any]] = []
     adversarial_rows: list[dict[str, Any]] = []
+    nightmare_rows: list[dict[str, Any]] = []
+    by_nightmare_trap_mode: dict[str, dict[str, list[dict[str, Any]]]] = defaultdict(
+        lambda: defaultdict(list)
+    )
+    nightmare_metric_keys = (
+        "destructiveCommandBlocked",
+        "sidecarRollbackClean",
+        "concurrentMutationDetected",
+        "searchReadMismatchDetected",
+        "apiShapePreserved",
+        "secondInvariantPassed",
+        "finalVerifyPassed",
+    )
+    nightmare_metric_by_mode: dict[str, dict[str, int]] = defaultdict(lambda: defaultdict(int))
 
     for row in rows:
         mode_key = _mode_key(row)
@@ -99,7 +113,15 @@ def aggregate(rows: list[dict[str, Any]], task_meta: dict[str, dict[str, Any]], 
         category = str(meta.get("category", "unknown"))
         by_category_mode[category][mode_key].append(row)
 
-        if meta.get("adversarial"):
+        if meta.get("nightmare"):
+            nightmare_rows.append(row)
+            trap = str(meta.get("trapType", "unknown"))
+            by_nightmare_trap_mode[trap][mode_key].append(row)
+            by_trap_mode[trap][mode_key].append(row)
+            for key in nightmare_metric_keys:
+                if row.get(key):
+                    nightmare_metric_by_mode[mode_key][key] += 1
+        elif meta.get("adversarial"):
             adversarial_rows.append(row)
             trap = str(meta.get("trapType", "unknown"))
             by_trap_mode[trap][mode_key].append(row)
@@ -149,6 +171,10 @@ def aggregate(rows: list[dict[str, Any]], task_meta: dict[str, dict[str, Any]], 
         mode: _pass_rate([row for row in adversarial_rows if _mode_key(row) == mode])
         for mode in sorted(by_mode)
     }
+    nightmare_pass_rate = {
+        mode: _pass_rate([row for row in nightmare_rows if _mode_key(row) == mode])
+        for mode in sorted(by_mode)
+    }
     normal_pass_rate = {
         mode: _pass_rate([row for row in normal_rows if _mode_key(row) == mode])
         for mode in sorted(by_mode)
@@ -176,6 +202,31 @@ def aggregate(rows: list[dict[str, Any]], task_meta: dict[str, dict[str, Any]], 
                 "wrongFileEdited": sum(1 for row in group if row.get("wrongFileEdited")),
                 "rollbackSucceeded": sum(1 for row in group if row.get("rollbackSucceeded")),
                 "recoverySucceeded": sum(1 for row in group if row.get("staleRecoverySucceeded")),
+                "avgRetries": round(mean(row.get("retries", 0) for row in group), 2) if group else 0.0,
+            }
+        )
+
+    nightmare_trap_matrix: list[dict[str, Any]] = []
+    for trap in sorted(by_nightmare_trap_mode):
+        group: list[dict[str, Any]] = []
+        for mode_group in by_nightmare_trap_mode[trap].values():
+            group.extend(mode_group)
+        nightmare_trap_matrix.append(
+            {
+                "trapType": trap,
+                "passRate": _pass_rate(group),
+                "passed": sum(1 for row in group if passed(row)),
+                "total": len(group),
+                "wrongFileEdited": sum(1 for row in group if row.get("wrongFileEdited")),
+                "rollbackSucceeded": sum(1 for row in group if row.get("rollbackSucceeded")),
+                "recoverySucceeded": sum(1 for row in group if row.get("staleRecoverySucceeded")),
+                "destructiveCommandBlocked": sum(1 for row in group if row.get("destructiveCommandBlocked")),
+                "sidecarRollbackClean": sum(1 for row in group if row.get("sidecarRollbackClean")),
+                "concurrentMutationDetected": sum(1 for row in group if row.get("concurrentMutationDetected")),
+                "searchReadMismatchDetected": sum(1 for row in group if row.get("searchReadMismatchDetected")),
+                "apiShapePreserved": sum(1 for row in group if row.get("apiShapePreserved")),
+                "secondInvariantPassed": sum(1 for row in group if row.get("secondInvariantPassed")),
+                "finalVerifyPassed": sum(1 for row in group if row.get("finalVerifyPassed")),
                 "avgRetries": round(mean(row.get("retries", 0) for row in group), 2) if group else 0.0,
             }
         )
@@ -209,6 +260,7 @@ def aggregate(rows: list[dict[str, Any]], task_meta: dict[str, dict[str, Any]], 
                 "executorMode": mode,
                 "normalPassRate": normal_pass_rate.get(mode, 0.0),
                 "adversarialPassRate": adversarial_pass_rate.get(mode, 0.0),
+                "nightmarePassRate": nightmare_pass_rate.get(mode, 0.0),
                 "wrongFileEdited": sum(1 for row in group if row.get("wrongFileEdited")),
                 "rollbackSucceeded": sum(1 for row in group if row.get("rollbackSucceeded")),
                 "recoverySucceeded": sum(1 for row in group if row.get("staleRecoverySucceeded")),
@@ -222,11 +274,17 @@ def aggregate(rows: list[dict[str, Any]], task_meta: dict[str, dict[str, Any]], 
         "taskResultCount": len(rows),
         "normalTaskCount": len(normal_rows),
         "adversarialTaskCount": len(adversarial_rows),
+        "nightmareTaskCount": len(nightmare_rows),
         "overallByMode": overall_by_mode,
         "normalPassRate": normal_pass_rate,
         "adversarialPassRate": adversarial_pass_rate,
+        "nightmarePassRate": nightmare_pass_rate,
         "trapTypePassRate": trap_type_pass_rate,
         "adversarialTrapMatrix": adversarial_trap_matrix,
+        "nightmareTrapMatrix": nightmare_trap_matrix,
+        "nightmareContractMetricsByMode": {
+            mode: dict(counts) for mode, counts in sorted(nightmare_metric_by_mode.items())
+        },
         "evaluationClaim": evaluation_claim,
         "moneyTable": money_table,
         "byCategory": by_category,
@@ -267,6 +325,12 @@ def _render_evaluation_claim(claim: dict[str, Any]) -> list[str]:
             "Adversarial tasks measure whether bounded autonomy fails predictably under decoys, "
             "stale reads, rollback scenarios, ambiguous symbols, and verify-only requirements."
         ),
+        "",
+        (
+            "Nightmare tasks (051–060) extend the adversarial runtime contract: contradictory specs, "
+            "concurrent writers, sidecar rollback, stale search indexes, semantic preservation, "
+            "and destructive-command containment."
+        ),
     ]
     if claim.get("hasAgentResults"):
         agent_passed = claim["agentPassed"]
@@ -305,7 +369,8 @@ def render_markdown(summary: dict[str, Any]) -> str:
         "# Agent Success Benchmark Report",
         "",
         f"Task results: **{summary['taskResultCount']}** "
-        f"(normal: {summary['normalTaskCount']}, adversarial: {summary['adversarialTaskCount']})",
+        f"(normal: {summary['normalTaskCount']}, adversarial: {summary['adversarialTaskCount']}, "
+        f"nightmare: {summary.get('nightmareTaskCount', 0)})",
         "",
     ]
     lines.extend(_render_executor_coverage(summary.get("executorCoverage", {})))
@@ -314,8 +379,8 @@ def render_markdown(summary: dict[str, Any]) -> str:
         [
             "## Money table",
             "",
-            "| executor | mode | normal pass | adversarial pass | wrong file | rollback | recovery |",
-            "|----------|------|------------:|-----------------:|-----------:|---------:|---------:|",
+            "| executor | mode | normal pass | adversarial pass | nightmare pass | wrong file | rollback | recovery |",
+            "|----------|------|------------:|-----------------:|---------------:|-----------:|---------:|---------:|",
         ]
     )
 
@@ -327,9 +392,27 @@ def render_markdown(summary: dict[str, Any]) -> str:
             executor, mode = "reference", em
         lines.append(
             f"| {executor} | {mode} | {_fmt_rate(row['normalPassRate'])} | "
-            f"{_fmt_rate(row['adversarialPassRate'])} | {row['wrongFileEdited']} | "
-            f"{row['rollbackSucceeded']} | {row['recoverySucceeded']} |"
+            f"{_fmt_rate(row['adversarialPassRate'])} | {_fmt_rate(row.get('nightmarePassRate', 0.0))} | "
+            f"{row['wrongFileEdited']} | {row['rollbackSucceeded']} | {row['recoverySucceeded']} |"
         )
+
+    nightmare_matrix = summary.get("nightmareTrapMatrix", [])
+    if nightmare_matrix:
+        lines.extend(["", "## Nightmare Runtime Contract Matrix", ""])
+        lines.append(
+            "| trapType | passRate | destructiveBlocked | sidecarClean | concurrentDetected | "
+            "searchMismatch | apiPreserved | secondInvariant | finalVerify |"
+        )
+        lines.append("|---|---:|---:|---:|---:|---:|---:|---:|---:|")
+        for row in nightmare_matrix:
+            lines.append(
+                f"| {row['trapType']} | {_fmt_rate(row['passRate'])} | "
+                f"{row['destructiveCommandBlocked']} | {row['sidecarRollbackClean']} | "
+                f"{row['concurrentMutationDetected']} | {row['searchReadMismatchDetected']} | "
+                f"{row['apiShapePreserved']} | {row['secondInvariantPassed']} | "
+                f"{row['finalVerifyPassed']} |"
+            )
+        lines.append("")
 
     lines.extend(["", "## Adversarial Trap Matrix", ""])
     matrix = summary.get("adversarialTrapMatrix", [])

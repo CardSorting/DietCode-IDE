@@ -1,0 +1,37 @@
+{
+  "id": "task_058",
+  "title": "Stale search index",
+  "category": "stale_search_index",
+  "workflow": "night_stale_search_index",
+  "modes": [
+    "raw_rpc",
+    "bridge"
+  ],
+  "expectedTools": [
+    "search.literal",
+    "file.read",
+    "patch.apply"
+  ],
+  "failureModes": [
+    "wrongFileEdited",
+    "stale_search"
+  ],
+  "targetFiles": [
+    "src/active.py"
+  ],
+  "decoyFiles": [
+    "shadow/indexed_copy.py"
+  ],
+  "staleSearchValue": "OLD_VALUE = 1",
+  "liveReadValue": "OLD_VALUE = 2",
+  "expectedFailureModes": [
+    "wrongFileEdited"
+  ],
+  "requiresRecovery": false,
+  "requiresRollback": false,
+  "mustInspectVerify": true,
+  "adversarial": true,
+  "trapType": "stale_search_index",
+  "nightmare": true,
+  "tier": "nightmare"
+}
