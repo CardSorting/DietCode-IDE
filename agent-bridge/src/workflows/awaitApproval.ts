@@ -12,6 +12,10 @@ function isSupervisedMode(): boolean {
   );
 }
 
+function isHeadlessAutoApprove(): boolean {
+  return process.env.DIETCODE_HEADLESS_AUTO_APPROVE === '1';
+}
+
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -62,6 +66,33 @@ export async function waitForApprovalResolution(
   throw bridgeError('approval_timeout', `Timed out waiting for approval ${approvalId}`);
 }
 
+async function resolveApprovalHeadless(
+  transport: RpcCaller,
+  approvalId: string,
+): Promise<Record<string, unknown>> {
+  const envelope = await transport.call('approval.resolve', {
+    approvalId,
+    decision: 'approved',
+    reason: 'headless auto-approve',
+    resolvedBy: 'dietcode_bridge',
+  });
+  if (!envelope.ok || !envelope.result) {
+    throw bridgeError('approval_invalid', `approval.resolve failed for ${approvalId}`);
+  }
+  const resolution = (envelope.result.resolution ?? {}) as Record<string, unknown>;
+  if (resolution.executionErrorCode) {
+    throw bridgeError(
+      'patch_failed',
+      String(resolution.executionError ?? 'Approved mutation failed during execution'),
+    );
+  }
+  const execResult = resolution.executionResult;
+  if (execResult && typeof execResult === 'object') {
+    return execResult as Record<string, unknown>;
+  }
+  return envelope.result as Record<string, unknown>;
+}
+
 export async function completeApprovedMutation(
   transport: RpcCaller,
   pendingResult: Record<string, unknown>,
@@ -69,19 +100,34 @@ export async function completeApprovedMutation(
   params: Record<string, unknown>,
   options: { pollMs?: number; timeoutMs?: number } = {},
 ): Promise<RpcEnvelope> {
-  if (!isSupervisedMode()) {
-    throw bridgeError(
-      'approval_required',
-      'Destructive mutation requires cockpit approval',
-      undefined,
-      { recoveryHint: 'approval.resolve via cockpit' },
-    );
-  }
-
   const approval = (pendingResult.approval ?? {}) as Record<string, unknown>;
   const approvalId = String(approval.approvalId ?? '');
   if (!approvalId) {
     throw bridgeError('approval_invalid', 'approvalRequired response missing approvalId');
+  }
+
+  if (!isSupervisedMode()) {
+    if (!isHeadlessAutoApprove()) {
+      throw bridgeError(
+        'approval_required',
+        'Destructive mutation requires cockpit approval',
+        undefined,
+        { recoveryHint: 'approval.resolve via cockpit' },
+      );
+    }
+    const resolved = await resolveApprovalHeadless(transport, approvalId);
+    if (resolved.mutationReceipt) {
+      return {
+        id: `approval:${approvalId}`,
+        ok: true,
+        result: resolved,
+      };
+    }
+    const retry = await transport.call(method, {
+      ...params,
+      approvalId,
+    });
+    return retry;
   }
 
   const resolved = await waitForApprovalResolution(transport, approvalId, options);

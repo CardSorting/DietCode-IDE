@@ -36,6 +36,7 @@ BUNDLED_MANIFEST = REPO_ROOT / "build" / "DietCode.app" / "Contents" / "Resource
 
 REQUIRED_PLUGIN_FILES = (
     "lib/agent/ide_bridge_client.py",
+    "lib/agent/coherence_patch.py",
     "lib/runtime/ide_hooks.py",
     "lib/tools/ide_bridge_tools.py",
 )

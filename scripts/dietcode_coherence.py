@@ -76,6 +76,12 @@ def build_line_replacement_patch_for_content(
     lines = content.splitlines()
     idx = next((i for i, line in enumerate(lines) if line.strip() == search.strip()), -1)
     if idx < 0:
+        match = re.match(r"^(\w+)\s*=", search.strip())
+        if match:
+            name = match.group(1)
+            pattern = re.compile(rf"^{re.escape(name)}\s*=")
+            idx = next((i for i, line in enumerate(lines) if pattern.search(line.strip())), -1)
+    if idx < 0:
         raise RuntimeError(f"search line not found in {rel_path}: {search!r}")
     line_no = idx + 1
     return (

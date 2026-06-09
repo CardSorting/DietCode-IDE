@@ -6,7 +6,9 @@ import logging
 import os
 import shutil
 import subprocess
+import tempfile
 import time
+import uuid
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Optional
@@ -647,6 +649,66 @@ _RETRYABLE_CODES = frozenset({
 })
 
 
+def _append_coherence_cli_flags(
+    cmd: list[str],
+    *,
+    task_id: Optional[str] = None,
+    coherence_retry: bool = False,
+    line_search: Optional[str] = None,
+    line_replace: Optional[str] = None,
+) -> None:
+    if task_id:
+        cmd.extend(["--task-id", task_id])
+    if coherence_retry:
+        cmd.append("--coherence-retry")
+    if line_search:
+        cmd.extend(["--line-search", line_search])
+    if line_replace:
+        cmd.extend(["--line-replace", line_replace])
+
+
+def run_safe_file_patch(
+    path: str,
+    unified_diff: str,
+    *,
+    workspace: Optional[str] = None,
+    idempotency_key: Optional[str] = None,
+    line_search: str = "",
+    line_replace: str = "",
+    coherence_retry: Optional[bool] = None,
+    timeout: float = 180.0,
+) -> dict[str, Any]:
+    """Hermes-facing safe-file patch with governed coherence auto-retry."""
+    from .coherence_patch import coherence_patch_bridge_kwargs
+
+    rel_path = path.strip()
+    if not rel_path:
+        raise IdeBridgeError("path required for safe-file patch", code="invalid_params")
+    if not unified_diff.strip():
+        raise IdeBridgeError("unified_diff required for safe-file patch", code="invalid_params")
+
+    key = idempotency_key or f"hermes:patch:{rel_path}:{uuid.uuid4().hex[:12]}"
+    coherence_kwargs = coherence_patch_bridge_kwargs(
+        unified_diff,
+        line_search=line_search,
+        line_replace=line_replace,
+        coherence_retry=coherence_retry,
+    )
+    with tempfile.NamedTemporaryFile("w", suffix=".patch", delete=False, encoding="utf-8") as handle:
+        handle.write(unified_diff)
+        diff_path = handle.name
+    try:
+        return run_bridge(
+            ["patch", "safe-file", rel_path, diff_path],
+            workspace=workspace,
+            idempotency_key=key,
+            timeout=timeout,
+            **coherence_kwargs,
+        )
+    finally:
+        Path(diff_path).unlink(missing_ok=True)
+
+
 def _execute_bridge_call(
     args: list[str],
     *,
@@ -656,6 +718,10 @@ def _execute_bridge_call(
     timeout: Optional[float] = None,
     max_results: Optional[int] = None,
     idempotency_key: Optional[str] = None,
+    task_id: Optional[str] = None,
+    coherence_retry: bool = False,
+    line_search: Optional[str] = None,
+    line_replace: Optional[str] = None,
 ) -> dict[str, Any]:
     """Invoke bridge CLI once (no preflight/retry wrapper)."""
     ide_cfg = _load_ide_config()
@@ -683,6 +749,13 @@ def _execute_bridge_call(
         cmd.extend(["--max-results", str(max_results)])
     if idempotency_key:
         cmd.extend(["--idempotency-key", idempotency_key])
+    _append_coherence_cli_flags(
+        cmd,
+        task_id=task_id,
+        coherence_retry=coherence_retry,
+        line_search=line_search,
+        line_replace=line_replace,
+    )
     cmd.extend(["--workspace", root, *args])
 
     action_label = " ".join(args[:3]) if args else "bridge"
@@ -819,6 +892,10 @@ def run_bridge(
     timeout: Optional[float] = None,
     max_results: Optional[int] = None,
     idempotency_key: Optional[str] = None,
+    task_id: Optional[str] = None,
+    coherence_retry: bool = False,
+    line_search: Optional[str] = None,
+    line_replace: Optional[str] = None,
     retry_on_failure: bool = True,
 ) -> dict[str, Any]:
     """Run ``dietcode-agent-client`` with preflight and one transport reconnect retry."""
@@ -844,6 +921,10 @@ def run_bridge(
             timeout=timeout,
             max_results=max_results,
             idempotency_key=idempotency_key,
+            task_id=task_id,
+            coherence_retry=coherence_retry,
+            line_search=line_search,
+            line_replace=line_replace,
         )
     except IdeBridgeError as exc:
         if not retry_on_failure or not exc.retry_safe or exc.code not in _RETRYABLE_CODES:
@@ -858,4 +939,8 @@ def run_bridge(
             timeout=timeout,
             max_results=max_results,
             idempotency_key=idempotency_key,
+            task_id=task_id,
+            coherence_retry=coherence_retry,
+            line_search=line_search,
+            line_replace=line_replace,
         )

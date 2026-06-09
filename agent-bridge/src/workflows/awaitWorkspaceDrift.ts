@@ -28,6 +28,19 @@ export async function waitForWorkspaceContextRefresh(
   throw bridgeError('workspace_drift', 'Timed out waiting for workspace context refresh');
 }
 
+function isHeadlessAutoResolve(): boolean {
+  return process.env.DIETCODE_HEADLESS_AUTO_APPROVE === '1';
+}
+
+async function refreshWorkspaceAnchor(transport: RpcCaller): Promise<number> {
+  const envelope = await transport.call('workspace.refreshAnchor', {});
+  if (!envelope.ok || !envelope.result) {
+    throw bridgeError('workspace_drift', 'workspace.refreshAnchor failed during headless recovery');
+  }
+  const status = envelope.result as Record<string, unknown>;
+  return Number(status.contextRefreshId ?? 0);
+}
+
 export async function completeAfterWorkspaceRefresh(
   transport: RpcCaller,
   driftResult: Record<string, unknown>,
@@ -40,10 +53,9 @@ export async function completeAfterWorkspaceRefresh(
     throw bridgeError('workspace_drift', 'workspaceDriftRequired response missing workspace status');
   }
 
-  const contextRefreshId = await waitForWorkspaceContextRefresh(
-    transport,
-    options.timeoutMs ?? DEFAULT_TIMEOUT_MS,
-  );
+  const contextRefreshId = isHeadlessAutoResolve()
+    ? await refreshWorkspaceAnchor(transport)
+    : await waitForWorkspaceContextRefresh(transport, options.timeoutMs ?? DEFAULT_TIMEOUT_MS);
 
   return transport.call(method, {
     ...params,

@@ -69,5 +69,7 @@ export {
 export {
   buildLineReplacementPatch,
   buildLineReplacementPatchFromContent,
+  parseSingleLineReplacement,
 } from './utils/unifiedDiff.js';
+export type { LineReplacement } from './utils/unifiedDiff.js';
 export { createTaskCoherenceLogger } from './telemetry/coherenceEvents.js';

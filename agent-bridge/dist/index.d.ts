@@ -11,6 +11,7 @@ export { validateMutationReceipt, validateBatchMutationReceipt, validateToolCapa
 export type { BridgeError, BridgeErrorCode, BridgeEnvelope, BridgeResult, RecoverySource, HashAuthority, RuntimeProfile, RuntimeCapabilities, SafePatchResult, SafeBatchPatchResult, PatchBatchEntry, SearchOptions, PatchOptions, BatchPatchOptions, TimelineOptions, ActivityOptions, OperationStatusResult, VerifyFastResult, TransportOptions, MutationReceipt, BatchMutationReceipt, StalePatchRecovery, CoherenceToken, CoherenceRecoveryEvent, CoherenceStaleRecovery, CoherenceOperatorRequired, } from './contracts/types.js';
 export { readFileWithCoherence } from './adapters/fileAdapter.js';
 export { parseCoherenceMismatch, refreshCoherenceContext, buildCoherenceStaleRecovery, buildCoherenceOperatorRequired, } from './workflows/coherenceRecovery.js';
-export { buildLineReplacementPatch, buildLineReplacementPatchFromContent, } from './utils/unifiedDiff.js';
+export { buildLineReplacementPatch, buildLineReplacementPatchFromContent, parseSingleLineReplacement, } from './utils/unifiedDiff.js';
+export type { LineReplacement } from './utils/unifiedDiff.js';
 export { createTaskCoherenceLogger } from './telemetry/coherenceEvents.js';
 //# sourceMappingURL=index.d.ts.map

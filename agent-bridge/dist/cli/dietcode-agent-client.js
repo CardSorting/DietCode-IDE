@@ -3,7 +3,35 @@ import { readFile } from 'node:fs/promises';
 import { DietCodeBridgeClient } from '../client/DietCodeBridgeClient.js';
 import { resolveAppPath } from '../client/config.js';
 import { isBridgeError } from '../contracts/BridgeError.js';
-import { buildLineReplacementPatchFromContent } from '../utils/unifiedDiff.js';
+import { buildLineReplacementPatchFromContent, parseSingleLineReplacement, } from '../utils/unifiedDiff.js';
+function resolvePatchOptions(flags, unifiedDiff) {
+    const taskId = flags.taskId ?? (process.env.DIETCODE_TASK_ID?.trim() || undefined);
+    const coherenceRetry = flags.coherenceRetry ?? Boolean(taskId);
+    const patchOptions = {
+        ...(flags.idempotencyKey ? { idempotencyKey: flags.idempotencyKey } : {}),
+        ...(taskId ? { taskId } : {}),
+    };
+    if (!coherenceRetry) {
+        return patchOptions;
+    }
+    const search = flags.lineSearch?.trim();
+    const replace = flags.lineReplace?.trim();
+    if (search && replace) {
+        patchOptions.lineReplacement = { search, replace };
+        return patchOptions;
+    }
+    if (search) {
+        patchOptions.buildPatchFromContent = ({ path, content }) => buildLineReplacementPatchFromContent(path, content, search, replace ?? search);
+        return patchOptions;
+    }
+    if (unifiedDiff) {
+        const parsed = parseSingleLineReplacement(unifiedDiff);
+        if (parsed) {
+            patchOptions.lineReplacement = parsed;
+        }
+    }
+    return patchOptions;
+}
 function parseFlags(argv) {
     const flags = {
         pretty: false,
@@ -140,23 +168,6 @@ async function main() {
         const [command, subcommand, ...rest] = args;
         let result;
         const searchOptions = flags.maxResults && flags.maxResults > 0 ? { maxResults: flags.maxResults } : undefined;
-        const patchOptions = {
-            ...(flags.idempotencyKey ? { idempotencyKey: flags.idempotencyKey } : {}),
-            ...(flags.taskId || process.env.DIETCODE_TASK_ID
-                ? { taskId: flags.taskId ?? process.env.DIETCODE_TASK_ID?.trim() }
-                : {}),
-        };
-        if (flags.coherenceRetry && flags.lineSearch && flags.lineReplace) {
-            patchOptions.lineReplacement = {
-                search: flags.lineSearch,
-                replace: flags.lineReplace,
-            };
-        }
-        else if (flags.coherenceRetry && flags.lineSearch) {
-            const search = flags.lineSearch;
-            const replace = flags.lineReplace ?? flags.lineSearch;
-            patchOptions.buildPatchFromContent = ({ path, content }) => buildLineReplacementPatchFromContent(path, content, search, replace);
-        }
         switch (command) {
             case 'profile':
                 result = client.getRuntimeProfile();
@@ -190,11 +201,11 @@ async function main() {
             case 'patch': {
                 if (subcommand === 'safe-file' && rest[0] && rest[1]) {
                     const diff = await readFile(rest[1], 'utf8');
-                    result = await client.safePatchFile(rest[0], diff, patchOptions);
+                    result = await client.safePatchFile(rest[0], diff, resolvePatchOptions(flags, diff));
                 }
                 else if (subcommand === 'safe-batch' && rest[0]) {
                     const parsed = JSON.parse(rest[0]);
-                    result = await client.safePatchBatch(parsed, patchOptions);
+                    result = await client.safePatchBatch(parsed, resolvePatchOptions(flags));
                 }
                 else {
                     usage();

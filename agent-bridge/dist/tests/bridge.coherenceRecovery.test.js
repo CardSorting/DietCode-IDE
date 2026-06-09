@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
+import { parseSingleLineReplacement } from '../utils/unifiedDiff.js';
 import { safePatchFile } from '../workflows/safePatchFile.js';
 import { MockRpcTransport } from '../testing/MockRpcTransport.js';
 const PATH = 'coherence_probe.py';
@@ -183,6 +184,57 @@ describe('bridge.coherenceRecovery', () => {
             assert.equal(result.operatorInterventionRequired, false);
         }
         assert.equal(transport.calls.filter((c) => c.method === 'patch.apply').length, 1);
+    });
+    it('recovers when initial patch.validate fails under governed task', async () => {
+        const fileText = 'VALUE = 3\n';
+        const events = [];
+        const transport = new MockRpcTransport({
+            'patch.validate': (params) => {
+                const patch = String(params.patch ?? '');
+                if (patch.includes('VALUE = 1')) {
+                    return ok('patch.validate', {
+                        validation: { ok: false, beforeContentHash: LIVE_HASH_V3 },
+                    });
+                }
+                return ok('patch.validate', {
+                    validation: { ok: true, beforeContentHash: LIVE_HASH_V3 },
+                });
+            },
+            'file.read': () => ok('file.read', {
+                text: fileText,
+                coherence: {
+                    tokenId: 'coh_refresh',
+                    workspaceRevision: 2,
+                    verifyRevision: 0,
+                    anchors: {},
+                },
+            }),
+            'patch.apply': () => ok('patch.apply', {
+                applied: true,
+                mutationReceipt: {
+                    path: PATH,
+                    beforeContentHash: LIVE_HASH_V3,
+                    postContentHash: POST_HASH,
+                    patchFingerprint: 'fp1',
+                    readSourceBefore: 'disk',
+                    applyChannel: 'disk',
+                    atomic: true,
+                },
+            }),
+            'workspace.revision': () => ok('workspace.revision', { revisionId: 2 }),
+        });
+        const result = await safePatchFile(transport, PATH, patchForValue(1, 2), {
+            taskId: TASK_ID,
+            buildPatchFromContent: ({ content }) => patchForValue(Number(content.match(/VALUE = (\d+)/)?.[1] ?? 3), 2),
+            onCoherenceEvent: (event) => events.push(event),
+        });
+        assert.equal(result.applied, true);
+        assert.ok(events.some((e) => e.type === 'context.stale'));
+        assert.ok(events.some((e) => e.type === 'coherence.retry'));
+    });
+    it('parses single-line replacement from unified diff', () => {
+        const parsed = parseSingleLineReplacement(patchForValue(3, 2));
+        assert.deepEqual(parsed, { search: 'VALUE = 3', replace: 'VALUE = 2' });
     });
 });
 //# sourceMappingURL=bridge.coherenceRecovery.test.js.map

@@ -15,6 +15,7 @@ import {
   buildCoherenceStaleRecovery,
   parseCoherenceMismatch,
   refreshCoherenceContext,
+  type CoherenceMismatchDetail,
 } from './coherenceRecovery.js';
 import { buildStaleRecoveryResponse } from './stalePatchRecovery.js';
 import { verifyAfterMutation } from './verifyAfterMutation.js';
@@ -117,68 +118,85 @@ export async function safePatchFile(
     }
   };
 
+  const recoverAndRetryCoherence = async (
+    detail: CoherenceMismatchDetail,
+    rawError?: Record<string, unknown>,
+  ): Promise<SafePatchResult> => {
+    emit({
+      type: 'context.stale',
+      path,
+      taskId: resolved.taskId,
+      reason: detail.reason,
+      changedPaths: detail.changedPaths,
+    });
+
+    if (!resolved.taskId || !resolved.buildPatchFromContent) {
+      return buildCoherenceStaleRecovery(path, idempotencyKey, detail, rawError);
+    }
+
+    const refreshPaths = detail.changedPaths.length > 0 ? detail.changedPaths : [path];
+    const refreshed = await refreshCoherenceContext(
+      transport,
+      resolved.taskId,
+      refreshPaths,
+      emit,
+    );
+    const regenerated = resolved.buildPatchFromContent({
+      path,
+      content: refreshed.text,
+    });
+
+    emit({
+      type: 'coherence.retry',
+      path,
+      taskId: resolved.taskId,
+      attempt: 1,
+      tokenId: refreshed.coherence.tokenId,
+    });
+
+    try {
+      return await applyOnce(regenerated, {
+        ...resolved,
+        coherenceTokenId: refreshed.coherence.tokenId,
+        expectedWorkspaceRevision: refreshed.coherence.workspaceRevision,
+      });
+    } catch (retryError) {
+      if (isBridgeError(retryError) && retryError.code === 'coherence_mismatch') {
+        const retryDetail = parseCoherenceMismatch(retryError.rawError);
+        emit({
+          type: 'coherence.operator_required',
+          path,
+          taskId: resolved.taskId,
+          reason: retryDetail.reason,
+          changedPaths: retryDetail.changedPaths,
+        });
+        return buildCoherenceOperatorRequired(
+          path,
+          idempotencyKey,
+          retryDetail,
+          retryError.rawError,
+        );
+      }
+      throw retryError;
+    }
+  };
+
+  const initialValidation = await validatePatch(transport, path, unifiedDiff);
+  if (!initialValidation.ok) {
+    if (resolved.taskId && resolved.buildPatchFromContent) {
+      return recoverAndRetryCoherence({
+        reason: 'patch_validate_failed',
+        changedPaths: [path],
+      });
+    }
+    throw bridgeError('patch_failed', 'patch validation failed before apply');
+  }
+
   try {
     return await applyOnce(unifiedDiff, resolved);
   } catch (error) {
     if (isBridgeError(error) && error.code === 'coherence_mismatch') {
-      const detail = parseCoherenceMismatch(error.rawError);
-      emit({
-        type: 'context.stale',
-        path,
-        taskId: resolved.taskId,
-        reason: detail.reason,
-        changedPaths: detail.changedPaths,
-      });
-
-      if (!resolved.taskId || !resolved.buildPatchFromContent) {
-        return buildCoherenceStaleRecovery(path, idempotencyKey, detail, error.rawError);
-      }
-
-      const refreshPaths = detail.changedPaths.length > 0 ? detail.changedPaths : [path];
-      const refreshed = await refreshCoherenceContext(
-        transport,
-        resolved.taskId,
-        refreshPaths,
-        emit,
-      );
-      const regenerated = resolved.buildPatchFromContent({
-        path,
-        content: refreshed.text,
-      });
-
-      emit({
-        type: 'coherence.retry',
-        path,
-        taskId: resolved.taskId,
-        attempt: 1,
-        tokenId: refreshed.coherence.tokenId,
-      });
-
-      try {
-        return await applyOnce(regenerated, {
-          ...resolved,
-          coherenceTokenId: refreshed.coherence.tokenId,
-          expectedWorkspaceRevision: refreshed.coherence.workspaceRevision,
-        });
-      } catch (retryError) {
-        if (isBridgeError(retryError) && retryError.code === 'coherence_mismatch') {
-          const retryDetail = parseCoherenceMismatch(retryError.rawError);
-          emit({
-            type: 'coherence.operator_required',
-            path,
-            taskId: resolved.taskId,
-            reason: retryDetail.reason,
-            changedPaths: retryDetail.changedPaths,
-          });
-          return buildCoherenceOperatorRequired(
-            path,
-            idempotencyKey,
-            retryDetail,
-            retryError.rawError,
-          );
-        }
-        throw retryError;
-      }
+      return recoverAndRetryCoherence(parseCoherenceMismatch(error.rawError), error.rawError);
     }
 
     if (isBridgeError(error) && error.code === 'nested_call_timeout') {

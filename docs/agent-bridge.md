@@ -32,7 +32,11 @@ CLI launcher: `build/resources/bin/dietcode-agent-client` (when `make app`).
 | `awaitWorkspaceDrift` | 2 Drift |
 | `awaitApproval` | 3 Approval |
 
-When `DIETCODE_TASK_ID` is set, the bridge injects `taskId` into destructive RPC params.
+When `DIETCODE_TASK_ID` is set, the bridge injects `taskId` into destructive RPC params and
+enables one automatic coherence recovery retry on `safePatchFile` (re-read → regenerate patch).
+
+Hermes `dietcode_ide(action='patch')` routes through `run_safe_file_patch` with the same behavior.
+Headless harnesses may set `DIETCODE_HEADLESS_AUTO_APPROVE=1` for governed approval gates.
 
 ## Public API (summary)
 

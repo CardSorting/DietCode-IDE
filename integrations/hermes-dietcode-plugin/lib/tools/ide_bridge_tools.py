@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import json
-import tempfile
 import uuid
 from pathlib import Path
 from typing import Optional
@@ -119,21 +118,19 @@ def dietcode_ide(
                 return tool_error("path required for patch")
             if not unified_diff.strip():
                 return tool_error("unified_diff required for patch")
-            key = idempotency_key.strip() or _default_idempotency_key(path.strip())
-            with tempfile.NamedTemporaryFile("w", suffix=".patch", delete=False, encoding="utf-8") as handle:
-                handle.write(unified_diff)
-                diff_path = handle.name
-            try:
-                return json.dumps(
-                    run_bridge(
-                        ["patch", "safe-file", path.strip(), diff_path],
-                        idempotency_key=key,
-                        timeout=180.0,
-                        workspace=workspace,
-                    )
-                )
-            finally:
-                Path(diff_path).unlink(missing_ok=True)
+            from plugins.dietcode.lib.agent.ide_bridge_client import run_safe_file_patch
+
+            key = idempotency_key.strip() or None
+            return json.dumps(
+                run_safe_file_patch(
+                    path.strip(),
+                    unified_diff,
+                    idempotency_key=key,
+                    timeout=180.0,
+                    workspace=workspace,
+                ),
+                ensure_ascii=False,
+            )
 
         if act == "patch_batch":
             if not patch_batch_json.strip():
