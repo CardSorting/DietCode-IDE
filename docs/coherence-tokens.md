@@ -21,7 +21,29 @@ No graph. No ledger. Caps: **40 tasks**, **100 anchors/task**, **30 min TTL**. H
 
 ## Read response
 
-Issued on `file.read*`, `file.stat`, and `workspace.status` when `taskId` is set:
+Issued on `file.read`, `file.readBatch`, `file.readRange`, `file.readAround`, `file.stat`, and `workspace.status` when `taskId` is set:
+
+Batch reads return one task-scoped token at the top level:
+
+```json
+{
+  "results": {
+    "src/a.ts": { "ok": true, "text": "..." },
+    "src/b.ts": { "ok": true, "text": "..." }
+  },
+  "coherence": {
+    "tokenId": "coh_123",
+    "workspaceRevision": 41,
+    "verifyRevision": 7,
+    "anchors": {
+      "src/a.ts": "fnv1a:...",
+      "src/b.ts": "fnv1a:..."
+    }
+  }
+}
+```
+
+Single-file reads embed `coherence` beside `text`:
 
 ```json
 {
@@ -92,6 +114,23 @@ await safePatchFile(transport, path, diff, {
 ```
 
 Smoke: `make coherence-recovery-smoke`
+
+## Release gate
+
+Tag when green:
+
+```bash
+make coherence-core-v0.1
+```
+
+| Step | Proves |
+|------|--------|
+| `test-coherence-tokens` | Kernel issuance + enforcement (incl. `file.readBatch`) |
+| `coherence-recovery-smoke-fast` | Python recovery vertical |
+| `hermes-coherence-recovery-smoke-fast` | Hermes `dietcode_ide` patch path |
+| `cockpit-smoke` | Full checkpoint loop still passes |
+
+Tag: **coherence-core-v0.1**
 
 ## Agent loop
 

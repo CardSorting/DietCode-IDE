@@ -36,7 +36,7 @@ See [agent-environment.md](agent-environment.md) for paths and env vars.
 
 | Method | Permission | Notes |
 |--------|------------|-------|
-| `file.read` / `file.readRange` | Read | Sets hash anchors; returns `coherence` when `taskId` set |
+| `file.read` / `file.readRange` / `file.readAround` / `file.readBatch` | Read | Sets hash anchors; returns `coherence` when `taskId` set |
 | `file.stat` | Read | Metadata + content hash; optional `coherence` with `taskId` |
 | `workspace.status` | Read | Drift snapshot; optional `coherence` with `taskId` |
 | `workspace.snapshot` | Read | Point-in-time hashes |
@@ -53,7 +53,7 @@ See [agent-environment.md](agent-environment.md) for paths and env vars.
 
 Edit/Destructive RPCs return `workspaceDriftRequired` when drift blocks.
 
-When `taskId` is set, mutating RPCs also require a valid **coherence token** from the latest read. See [coherence-tokens.md](./coherence-tokens.md).
+When `taskId` is set, mutating RPCs also require a valid **coherence token** from the latest read. Stale tokens return `coherence_mismatch` (before drift). See [coherence-tokens.md](./coherence-tokens.md).
 
 ### Approval (checkpoint 3)
 

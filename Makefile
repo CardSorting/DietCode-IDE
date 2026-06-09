@@ -451,6 +451,12 @@ hermes-coherence-recovery-smoke: agent-bridge-fast restart-agent-server
 hermes-coherence-recovery-smoke-fast: agent-bridge-fast
 	DIETCODE_REPO_ROOT=$(CURDIR) PYTHONUNBUFFERED=1 python3 scripts/hermes_coherence_recovery_smoke.py --compact
 
+coherence-core-v0.1: agent-bridge-fast
+	$(MAKE) test-coherence-tokens
+	$(MAKE) coherence-recovery-smoke-fast
+	$(MAKE) hermes-coherence-recovery-smoke-fast
+	$(MAKE) cockpit-smoke
+
 test-ergonomics: app
 	python3 scripts/dietcode_agent_client.py --wait-ready --compact --error-json --quiet
 	python3 scripts/test_ergonomics.py --compact

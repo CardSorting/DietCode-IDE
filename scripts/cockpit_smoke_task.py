@@ -5,7 +5,9 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -18,6 +20,40 @@ from dietcode_agent_client import connect, load_token, send_rpc  # noqa: E402
 from dietcode_coherence import apply_patch_with_coherence, read_with_coherence  # noqa: E402
 
 PROBE_NAME = "probe.py"
+APPROVAL_TIMEOUT = float(os.environ.get("COCKPIT_SMOKE_APPROVAL_TIMEOUT", "120"))
+
+
+def _approval_status(result: dict[str, Any]) -> str | None:
+    if not result.get("ok"):
+        return None
+    body = result.get("result") or {}
+    if isinstance(body.get("status"), str):
+        return body["status"]
+    approval = body.get("approval")
+    if isinstance(approval, dict) and isinstance(approval.get("status"), str):
+        return approval["status"]
+    return None
+
+
+def _wait_for_approval(sock, token: str, approval_id: str, task_id: str) -> bool:
+    deadline = time.monotonic() + APPROVAL_TIMEOUT
+    while time.monotonic() < deadline:
+        polled = send_rpc(sock, token, "approval.get", {"approvalId": approval_id})
+        status = _approval_status(polled)
+        if status == "approved":
+            emit_event("approval.resolved", task_id, approvalId=approval_id, decision="approved")
+            return True
+        if status in {"rejected", "expired", "failed"}:
+            emit_event(
+                "task.failed",
+                task_id,
+                exitCode=2,
+                error=f"Approval {approval_id} ended with status {status}",
+            )
+            return False
+        time.sleep(0.35)
+    emit_event("task.failed", task_id, exitCode=2, error="Approval wait timed out")
+    return False
 
 
 def _iso_now() -> str:
@@ -102,6 +138,7 @@ def run_smoke_task(*, task_id: str, message: str, workspace: Path, mode: str) ->
         if not validation.get("ok"):
             raise RuntimeError(f"patch validation rejected: {validation}")
 
+        headless = os.environ.get("DIETCODE_HEADLESS_AUTO_APPROVE") == "1"
         applied = apply_patch_with_coherence(
             sock,
             token,
@@ -112,12 +149,21 @@ def run_smoke_task(*, task_id: str, message: str, workspace: Path, mode: str) ->
             expect_before_hash=validation["beforeContentHash"],
             emit=emit_event,
             resolved_by="cockpit-smoke-task",
+            resolve_approval=headless,
         )
         if not applied.get("ok"):
             raise RuntimeError(f"patch.apply failed: {applied}")
 
         result = applied.get("result") or {}
-        if not (result.get("applied") or result.get("complete") or result.get("patched")):
+        if result.get("approvalRequired"):
+            approval = result.get("approval") or {}
+            approval_id = approval.get("approvalId")
+            if not approval_id:
+                raise RuntimeError("approvalRequired without approvalId")
+            emit_event("approval.required", task_id, approvalId=approval_id)
+            if not _wait_for_approval(sock, token, str(approval_id), task_id):
+                return 2
+        elif not (result.get("applied") or result.get("complete") or result.get("patched")):
             raise RuntimeError(f"patch.apply did not apply: {result}")
 
         probe_text = (workspace / PROBE_NAME).read_text(encoding="utf-8")

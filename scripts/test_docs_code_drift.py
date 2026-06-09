@@ -13,6 +13,10 @@ import re
 from pathlib import Path
 
 from agent_contracts import (
+    COHERENCE_ALIGNED_DOCS,
+    COHERENCE_CORE_V01_TARGETS,
+    COHERENCE_ISSUING_READ_METHODS,
+    COHERENCE_RESPONSE_KEYS,
     ERROR_RECOVERY_HINTS,
     GREP_RESPONSE_KEYS,
     INTERNAL_METHOD_NAMESPACES,
@@ -174,6 +178,57 @@ def test_docs_index_links_core_docs() -> None:
         assert needle in text, f"docs/README.md missing {needle}"
 
 
+def test_coherence_issuing_reads_documented() -> None:
+    rpc = (DOCS / "kernel-rpc.md").read_text(encoding="utf-8")
+    tokens = (DOCS / "coherence-tokens.md").read_text(encoding="utf-8")
+    for method in COHERENCE_ISSUING_READ_METHODS:
+        assert method in rpc, f"kernel-rpc.md missing coherence read method {method}"
+        assert method in tokens, f"coherence-tokens.md missing {method}"
+
+
+def test_coherence_error_aligned_across_docs() -> None:
+    assert "coherence_mismatch" in ERROR_RECOVERY_HINTS
+    for doc_name in COHERENCE_ALIGNED_DOCS:
+        text = (DOCS / doc_name).read_text(encoding="utf-8")
+        assert "coherence" in text.lower(), f"{doc_name} missing coherence concept"
+        assert "coherence_mismatch" in text, f"{doc_name} missing coherence_mismatch"
+
+
+def test_coherence_drift_layering_documented() -> None:
+    drift = (DOCS / "workspace-drift.md").read_text(encoding="utf-8")
+    assert "coherence" in drift.lower(), "workspace-drift.md must cross-link coherence"
+    assert "before" in drift.lower() and "drift" in drift.lower(), (
+        "workspace-drift.md must document coherence-before-drift ordering"
+    )
+
+
+def test_coherence_contract_key_sets_documented() -> None:
+    contracts = (REPO_ROOT / "scripts" / "agent_contracts.py").read_text(encoding="utf-8")
+    invariants = (DOCS / "runtime-invariants.md").read_text(encoding="utf-8")
+    for symbol in (
+        "COHERENCE_RESPONSE_KEYS",
+        "COHERENCE_ISSUING_READ_METHODS",
+        "COHERENCE_CORE_V01_TARGETS",
+    ):
+        assert symbol in contracts, f"agent_contracts.py missing {symbol}"
+    assert "coherenceTokenId" in invariants
+    assert "file.readBatch" in invariants or "file.read" in invariants
+
+
+def test_coherence_core_gate_in_makefile() -> None:
+    makefile = (REPO_ROOT / "Makefile").read_text(encoding="utf-8")
+    assert re.search(r"^coherence-core-v0\.1:", makefile, re.MULTILINE), "Makefile missing coherence-core-v0.1"
+    for target in COHERENCE_CORE_V01_TARGETS:
+        assert re.search(rf"^{re.escape(target)}:", makefile, re.MULTILINE), f"Makefile missing {target}"
+
+
+def test_coherence_release_gate_documented() -> None:
+    testing = (DOCS / "testing.md").read_text(encoding="utf-8")
+    tokens = (DOCS / "coherence-tokens.md").read_text(encoding="utf-8")
+    for needle in ("coherence-core-v0.1", "test-coherence-tokens", "hermes-coherence-recovery-smoke"):
+        assert needle in testing or needle in tokens, f"release gate docs missing {needle}"
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Docs-to-code drift checks.")
     add_output_args(parser)
@@ -200,6 +255,12 @@ def main() -> int:
         ("drift.checkpoint_release_gate", test_checkpoint_model_documents_release_gate),
         ("drift.file_structure", test_file_structure_documents_control_tree),
         ("drift.docs_index", test_docs_index_links_core_docs),
+        ("drift.coherence_issuing_reads", test_coherence_issuing_reads_documented),
+        ("drift.coherence_error_alignment", test_coherence_error_aligned_across_docs),
+        ("drift.coherence_drift_layering", test_coherence_drift_layering_documented),
+        ("drift.coherence_contract_keys", test_coherence_contract_key_sets_documented),
+        ("drift.coherence_makefile_gate", test_coherence_core_gate_in_makefile),
+        ("drift.coherence_release_gate_doc", test_coherence_release_gate_documented),
     ]:
         recorder.run(name, fn)
 

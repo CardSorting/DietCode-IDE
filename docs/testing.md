@@ -73,7 +73,22 @@ make test-checkpoint-core-unit
 make test-docs-code-drift
 ```
 
-Locks Makefile targets, error-code docs, tool contracts, and release-gate references in [checkpoint-model.md](checkpoint-model.md).
+Locks Makefile targets, error-code docs, tool contracts, coherence cross-doc alignment, and release-gate references in [checkpoint-model.md](checkpoint-model.md).
+
+## Coherence gate (`coherence-core-v0.1`)
+
+```bash
+make coherence-core-v0.1
+```
+
+| Step | What it proves |
+|------|----------------|
+| `test-coherence-tokens` | Kernel coherence issuance + enforcement (`file.readBatch` included) |
+| `coherence-recovery-smoke-fast` | Deterministic Python recovery vertical |
+| `hermes-coherence-recovery-smoke-fast` | Hermes bridge patch auto-retry |
+| `cockpit-smoke` | Full checkpoint loop still passes with coherence layer |
+
+Tag when green: **coherence-core-v0.1**. See [coherence-tokens.md](coherence-tokens.md).
 
 ## Kernel harness ladder (agent runtime)
 

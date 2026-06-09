@@ -88,7 +88,7 @@ Agents should prefer workspace-native `verify.sh` — same convention as agent c
 
 ## Coherence tokens (governed tasks)
 
-When `taskId` is set on reads (`file.read`, `workspace.status`, …), the kernel issues a **coherence token** — proof of what the agent observed. Mutations must carry `coherenceTokenId` + `expectedWorkspaceRevision` or the kernel returns `coherence_mismatch` (before drift).
+When `taskId` is set on reads (`file.read`, `file.readBatch`, `workspace.status`, …), the kernel issues a **coherence token** — proof of what the agent observed. Mutations must carry `coherenceTokenId` + `expectedWorkspaceRevision` or the kernel returns `coherence_mismatch` (before drift).
 
 **Recovery loop** (bridge + Python harness):
 

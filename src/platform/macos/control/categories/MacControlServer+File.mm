@@ -319,6 +319,7 @@ static void AttachCoherenceToResult(NSMutableDictionary* result,
                 return;
             }
             NSMutableDictionary* results = [NSMutableDictionary dictionary];
+            NSMutableArray<NSString*>* readPaths = [NSMutableArray array];
             for (id pathValue in paths) {
                 if (![pathValue isKindOfClass:[NSString class]] || [pathValue length] == 0) {
                     *outErrCode = @"invalid_params";
@@ -340,6 +341,7 @@ static void AttachCoherenceToResult(NSMutableDictionary* result,
                     NSString* text = [self safeTextForFileAtPath:absPath];
                     if (text) {
                         results[p] = @{ @"ok": @YES, @"text": text };
+                        [readPaths addObject:p];
                     } else {
                         results[p] = @{ @"ok": @NO, @"error": @"read_failed" };
                     }
@@ -353,7 +355,14 @@ static void AttachCoherenceToResult(NSMutableDictionary* result,
                     };
                 }
             }
-            *outResult = @{ @"results": results };
+            if ([method isEqualToString:@"file.readBatch"] && readPaths.count > 0) {
+                [_workspaceState trackHashesForPaths:readPaths workspace:ws windowBridge:_windowBridge];
+            }
+            NSMutableDictionary* batchResult = [@{ @"results": results } mutableCopy];
+            if ([method isEqualToString:@"file.readBatch"]) {
+                AttachCoherenceToResult(batchResult, params, readPaths, _workspaceState, ws, _windowBridge);
+            }
+            *outResult = batchResult;
             return;
         }
 

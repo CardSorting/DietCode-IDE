@@ -319,6 +319,35 @@ COHERENCE_RESPONSE_KEYS = frozenset({
     "anchors",
 })
 
+# CONTRACT: read RPCs that issue coherence when taskId is set (v0.1).
+COHERENCE_ISSUING_READ_METHODS = frozenset({
+    "file.read",
+    "file.readBatch",
+    "file.readRange",
+    "file.readAround",
+    "file.stat",
+    "workspace.status",
+})
+
+# CONTRACT: docs that must stay aligned on coherence (v0.1).
+COHERENCE_ALIGNED_DOCS = frozenset({
+    "coherence-tokens.md",
+    "workspace-drift.md",
+    "kernel-rpc.md",
+    "error-codes.md",
+    "agent-ergonomics.md",
+    "runtime-invariants.md",
+    "agent-bridge.md",
+})
+
+# CONTRACT: coherence-core-v0.1 release gate Makefile targets.
+COHERENCE_CORE_V01_TARGETS = frozenset({
+    "test-coherence-tokens",
+    "coherence-recovery-smoke-fast",
+    "hermes-coherence-recovery-smoke-fast",
+    "cockpit-smoke",
+})
+
 # CONTRACT: workspace.snapshot response keys.
 WORKSPACE_SNAPSHOT_KEYS = frozenset({
     "revisionId",

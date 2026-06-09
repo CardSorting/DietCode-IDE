@@ -17,6 +17,7 @@ make verify-agent-runtime
 | Content identity | `StableHashForString` (16 hex, FNV-1a) | `contentHash`, `beforeContentHash` |
 | Stale writes | `expectBeforeHash` on `patch.apply` rejects drift | `stale_content` error |
 | Task-scoped writes | `coherenceTokenId` + `expectedWorkspaceRevision` when `taskId` set | `coherence_mismatch` error — [coherence-tokens.md](coherence-tokens.md) |
+| Coherence reads | `file.read`, `file.readBatch`, `file.readRange`, `file.readAround`, `file.stat`, `workspace.status` with `taskId` | Issue anchors + token — [coherence-tokens.md](coherence-tokens.md) |
 | Mutation proof | `mutationReceipt` on successful `patch.apply` | `validate_mutation_receipt()` |
 
 Agents must treat `beforeContentHash` from `patch.validate` as the precondition for `patch.apply`.

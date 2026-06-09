@@ -213,6 +213,7 @@ def apply_patch_with_coherence(
     expect_before_hash: str,
     emit: EmitFn | None = None,
     resolved_by: str = "dietcode_coherence",
+    resolve_approval: bool = True,
 ) -> dict[str, Any]:
     params: dict[str, Any] = {
         "path": path,
@@ -231,6 +232,9 @@ def apply_patch_with_coherence(
         return applied
     applied = _complete_after_workspace_drift(sock, token, applied, "patch.apply", params)
     if not applied.get("ok"):
+        return applied
+    result = applied.get("result") or {}
+    if not resolve_approval and result.get("approvalRequired"):
         return applied
     return resolve_kernel_approval(sock, token, applied, task_id, resolved_by=resolved_by, emit=emit)
 

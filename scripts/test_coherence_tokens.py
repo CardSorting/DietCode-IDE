@@ -41,6 +41,23 @@ def test_read_issues_coherence(sock, token: str, rel_path: str, task_id: str) ->
     return coherence
 
 
+def test_read_batch_issues_coherence(sock, token: str, rel_paths: list[str], task_id: str) -> dict:
+    read = send_rpc(sock, token, "file.readBatch", {"paths": rel_paths, "taskId": task_id})
+    assert read.get("ok"), read
+    coherence = read["result"].get("coherence")
+    assert isinstance(coherence, dict), "file.readBatch with taskId must return top-level coherence"
+    _assert_coherence_shape(coherence)
+    assert str(coherence["tokenId"]).startswith("coh_")
+    anchors = coherence.get("anchors") or {}
+    for rel_path in rel_paths:
+        assert rel_path in anchors, f"missing anchor for {rel_path}"
+    results = read["result"].get("results") or {}
+    for rel_path in rel_paths:
+        row = results.get(rel_path) or {}
+        assert row.get("ok") is True, f"expected successful read for {rel_path}: {row}"
+    return coherence
+
+
 def test_stale_token_rejected(sock, token: str, rel_path: str, task_id: str) -> None:
     coherence = test_read_issues_coherence(sock, token, rel_path, task_id)
     patch = (
@@ -110,9 +127,12 @@ def main() -> int:
     token = load_token()
     workspace_root = Path(ensure_workspace_root(sock, token))
     rel_path = f".dietcode/coherence_probe_{uuid.uuid4().hex[:8]}.txt"
+    rel_path_b = f".dietcode/coherence_probe_{uuid.uuid4().hex[:8]}.txt"
     probe = workspace_root / rel_path
+    probe_b = workspace_root / rel_path_b
     probe.parent.mkdir(parents=True, exist_ok=True)
     probe.write_text("hello\n", encoding="utf-8")
+    probe_b.write_text("world\n", encoding="utf-8")
     task_id = f"task_coherence_{uuid.uuid4().hex[:8]}"
 
     try:
@@ -120,6 +140,10 @@ def main() -> int:
         recorder.run(
             "coherence.read_issues_token",
             lambda: test_read_issues_coherence(sock, token, rel_path, task_id),
+        )
+        recorder.run(
+            "coherence.read_batch_issues_token",
+            lambda: test_read_batch_issues_coherence(sock, token, [rel_path, rel_path_b], task_id),
         )
         recorder.run(
             "coherence.stale_revision_rejected",
@@ -132,6 +156,8 @@ def main() -> int:
     finally:
         if probe.exists():
             probe.unlink()
+        if probe_b.exists():
+            probe_b.unlink()
 
     return recorder.finish("coherence_tokens")
 
