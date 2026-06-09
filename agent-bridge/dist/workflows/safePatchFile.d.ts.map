@@ -1,1 +1,0 @@
-{"version":3,"file":"safePatchFile.d.ts","sourceRoot":"","sources":["../../src/workflows/safePatchFile.ts"],"names":[],"mappings":"AAOA,OAAO,KAAK,EAAE,SAAS,EAAE,MAAM,2BAA2B,CAAC;AAC3D,OAAO,KAAK,EAAmB,YAAY,EAAE,eAAe,EAAE,MAAM,uBAAuB,CAAC;AA+C5F,wBAAsB,aAAa,CACjC,SAAS,EAAE,SAAS,EACpB,IAAI,EAAE,MAAM,EACZ,WAAW,EAAE,MAAM,EACnB,OAAO,GAAE,YAAiB,GACzB,OAAO,CAAC,eAAe,CAAC,CAgK1B"}

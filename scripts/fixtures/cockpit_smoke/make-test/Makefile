@@ -1,3 +1,0 @@
-.PHONY: test
-test:
-	python3 -c "import pathlib; t=pathlib.Path('probe.py').read_text(); raise SystemExit(0 if 'VALUE = 2' in t else 1)"

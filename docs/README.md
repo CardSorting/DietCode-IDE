@@ -1,8 +1,8 @@
 # DietCode documentation
 
-> **Supervise AI code changes with visible checkpoints — not blind trust.**
+> **A local kernel experiment for preserving operational coherence across agent read, diff, patch, approval, and verification surfaces.**
 
-[← Project overview](../README.md) · Baseline: `make checkpoint-core` (tag `checkpoint-core-v0.1`)
+[← Project overview](../README.md) · Baseline: `make coherence-core-v0.1`
 
 <p align="center">
   <a href="#i-want-to">I want to…</a> ·
@@ -18,13 +18,12 @@
 
 | I want to… | Go here |
 |------------|---------|
-| **Understand what DietCode does** (no install) | [Root README](../README.md#in-30-seconds) → [checkpoint model](checkpoint-model.md) |
-| **Install and open the Cockpit** | [getting-started.md](getting-started.md) |
-| **Confirm my machine matches the release baseline** | [testing.md](testing.md) → `make checkpoint-core` |
-| **Submit a task and watch checkpoints** | [governed-tasks.md](governed-tasks.md) |
-| **Fix a broken socket, drift block, or stuck task** | [troubleshooting.md](troubleshooting.md) |
-| **Connect Hermes or the legacy app** | [integrations.md](integrations.md) → [integrations/README.md](../integrations/README.md) |
-| **Build my own agent on the bridge** | [agent-bridge.md](agent-bridge.md) → [kernel-rpc.md](kernel-rpc.md) |
+| **Understand what DietCode does** (no install) | [Root README](../README.md) → [coherence tokens](coherence-tokens.md) |
+| **Build the kernel and run coherence tests** | [getting-started.md](getting-started.md) |
+| **Confirm my machine matches the release baseline** | [testing.md](testing.md) → `make coherence-core-v0.1` |
+| **Fix a broken socket or coherence mismatch** | [troubleshooting.md](troubleshooting.md) |
+| **Call kernel RPC from Python** | [kernel-rpc.md](kernel-rpc.md) → `scripts/dietcode_agent_client.py` |
+| **Understand removed UI surfaces** | [archive-note.md](archive-note.md) |
 | **Look up an error code** | [error-codes.md](error-codes.md) |
 
 ---
@@ -41,24 +40,22 @@
 
 ## Learn the model
 
-Start with the **six checkpoints** — every other doc maps to one of them.
-
 | Doc | When to read | Audience |
 |-----|--------------|----------|
-| [brief.md](brief.md) | Fastest orientation before the spec | Everyone |
-| [checkpoint-model.md](checkpoint-model.md) | Canonical gate map, feature → checkpoint routing | Everyone |
-| [architecture.md](architecture.md) | Kernel, bridge, Cockpit wiring and ports | Developers |
-| [governed-tasks.md](governed-tasks.md) | `POST /api/tasks`, modes, SSE events | Operators + integrators |
+| [coherence-tokens.md](coherence-tokens.md) | Canonical coherence token model (v0.1) | Everyone |
+| [checkpoint-model.md](checkpoint-model.md) | Six-gate map, feature → checkpoint routing | Everyone |
+| [architecture.md](architecture.md) | Kernel + control plane wiring | Developers |
 
 ### Checkpoint deep dives
 
 | Gate | Plain English | Doc |
 |------|---------------|-----|
-| 2 Drift | Files changed while the agent was working | [workspace-drift.md](workspace-drift.md) · [coherence-tokens.md](coherence-tokens.md) |
-| 3 Approval | You must approve before the edit lands | [approval-lifecycle.md](approval-lifecycle.md) |
+| Coherence | Agent context bound to kernel revision | [coherence-tokens.md](coherence-tokens.md) |
+| 2 Drift | Files changed while the agent was working | [workspace-drift.md](workspace-drift.md) |
+| 3 Approval | Mutation requires explicit clearance | [approval-lifecycle.md](approval-lifecycle.md) |
 | 5–6 Verify | Tests must pass before “done” | [verify-gate.md](verify-gate.md) |
-| Recovery | Bridge restarted mid-task | [session-recovery.md](session-recovery.md) |
-| Agent loop | Polling checkpoints from code | [agent-ergonomics.md](agent-ergonomics.md) |
+| Recovery | Kernel restarted mid-task | [session-recovery.md](session-recovery.md) |
+| Agent loop | Polling and RPC from code | [agent-ergonomics.md](agent-ergonomics.md) |
 
 ---
 
@@ -66,17 +63,17 @@ Start with the **six checkpoints** — every other doc maps to one of them.
 
 | Doc | When to read |
 |-----|--------------|
-| [getting-started.md](getting-started.md) | First build, kernel socket, workspace, Cockpit URLs |
-| [testing.md](testing.md) | `checkpoint-core`, `cockpit-smoke`, harness ladder |
+| [getting-started.md](getting-started.md) | First build, kernel socket, coherence baseline |
+| [testing.md](testing.md) | `coherence-core-v0.1`, kernel harness ladder |
 | [agent-environment.md](agent-environment.md) | Env vars, `~/.dietcode` paths, `restart-agent-server` |
 
 ### Quick health check
 
 ```bash
-make checkpoint-core
+make coherence-core-v0.1
 ```
 
-Proves kernel + bridge + cockpit + 53-check vertical slice + docs alignment on your Mac.
+Proves kernel coherence tokens + recovery smoke + docs alignment on your Mac.
 
 ---
 
@@ -84,12 +81,10 @@ Proves kernel + bridge + cockpit + 53-check vertical slice + docs alignment on y
 
 | Doc | When to read |
 |-----|--------------|
-| [agent-bridge.md](agent-bridge.md) | TypeScript workflows, packaging, `safePatchFile` |
 | [kernel-rpc.md](kernel-rpc.md) | JSON-RPC methods, Python CLI |
 | [agent-tooling.md](agent-tooling.md) | Read/mutate tool contracts |
 | [agent-shell-tooling.md](agent-shell-tooling.md) | Bounded shell (`shell.rg`, `shell.catSmall`, …) |
 | [runtime-invariants.md](runtime-invariants.md) | Sort order, stale writes, symlink policy |
-| [integrations.md](integrations.md) | Hermes plugin overview |
 
 ---
 
@@ -98,9 +93,8 @@ Proves kernel + bridge + cockpit + 53-check vertical slice + docs alignment on y
 | Symptom | First step | Full guide |
 |---------|------------|------------|
 | “Kernel offline” / socket error | `make restart-agent-server-fast` | [troubleshooting.md](troubleshooting.md#kernel-socket) |
-| Patch blocked — drift | Refresh context in Cockpit | [workspace-drift.md](workspace-drift.md) |
-| Task stuck on approval | Cockpit Approvals panel | [approval-lifecycle.md](approval-lifecycle.md) |
-| Agent finished but task not done | Run verify | [verify-gate.md](verify-gate.md) |
+| Patch blocked — coherence | Re-read with `taskId` | [coherence-tokens.md](coherence-tokens.md) |
+| Patch blocked — drift | Refresh workspace anchor | [workspace-drift.md](workspace-drift.md) |
 | Unknown error code | Search catalog | [error-codes.md](error-codes.md) |
 
 ---
@@ -110,6 +104,7 @@ Proves kernel + bridge + cockpit + 53-check vertical slice + docs alignment on y
 | Doc | Purpose |
 |-----|---------|
 | [file-structure.md](file-structure.md) | Repository map |
+| [archive-note.md](archive-note.md) | Removed cockpit / legacy UI / bridge surfaces |
 | [troubleshooting.md](troubleshooting.md) | Full failure playbook |
 
 ---
@@ -118,15 +113,14 @@ Proves kernel + bridge + cockpit + 53-check vertical slice + docs alignment on y
 
 | Path | Purpose |
 |------|---------|
-| [integrations/README.md](../integrations/README.md) | Hermes enable script + agent chat bundle |
-| [AGENT_RUNTIME_RELIABILITY.md](../AGENT_RUNTIME_RELIABILITY.md) | Adversarial benchmark track (parallel to checkpoint-core) |
-| [benchmarks/agent_success/](../benchmarks/agent_success/) | Evaluation corpus + whitepaper |
+| [AGENT_RUNTIME_RELIABILITY.md](../AGENT_RUNTIME_RELIABILITY.md) | Adversarial benchmark track (parallel to coherence-core) |
+| [benchmarks/agent_success/](../benchmarks/agent_success/) | Evaluation corpus |
 
 ---
 
 ## For maintainers
 
-After changing agent-runtime surfaces or Makefile targets:
+After changing kernel RPC surfaces or Makefile targets:
 
 ```bash
 make test-docs-code-drift

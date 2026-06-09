@@ -127,8 +127,6 @@ make coherence-core-v0.1
 |------|--------|
 | `test-coherence-tokens` | Kernel issuance + enforcement (incl. `file.readBatch`) |
 | `coherence-recovery-smoke-fast` | Python recovery vertical |
-| `hermes-coherence-recovery-smoke-fast` | Hermes `dietcode_ide` patch path |
-| `cockpit-smoke` | Full checkpoint loop still passes |
 
 Tag: **coherence-core-v0.1**
 

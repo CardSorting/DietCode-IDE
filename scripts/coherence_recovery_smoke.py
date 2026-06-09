@@ -55,7 +55,7 @@ def run_recovery_smoke() -> None:
     task_id = f"task_coherence_recovery_{uuid.uuid4().hex[:8]}"
     probe_name = f".dietcode/coherence_recovery_{uuid.uuid4().hex[:8]}/probe.py"
 
-    sock = connect()
+    sock = connect(timeout=120.0)
     token = load_token()
     workspace_root = Path(ensure_workspace_root(sock, token))
     probe_abs = workspace_root / probe_name

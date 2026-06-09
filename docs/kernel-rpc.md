@@ -1,6 +1,6 @@
 # Kernel RPC reference
 
-Headless control surface for workspace mutation. The cockpit bridge and agent-bridge both speak this protocol.
+Headless control surface for workspace mutation. Agents and harnesses speak this protocol via `scripts/dietcode_agent_client.py`.
 
 | | |
 |--|--|
@@ -132,5 +132,5 @@ Catalog: [error-codes.md](error-codes.md). Invariants: [runtime-invariants.md](r
 ## Related
 
 - [architecture.md](architecture.md)
-- [agent-bridge.md](agent-bridge.md) — preferred agent entry point
+- [coherence-tokens.md](coherence-tokens.md) — coherence token model
 - [checkpoint-model.md](checkpoint-model.md)

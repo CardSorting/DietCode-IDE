@@ -337,15 +337,12 @@ COHERENCE_ALIGNED_DOCS = frozenset({
     "error-codes.md",
     "agent-ergonomics.md",
     "runtime-invariants.md",
-    "agent-bridge.md",
 })
 
 # CONTRACT: coherence-core-v0.1 release gate Makefile targets.
 COHERENCE_CORE_V01_TARGETS = frozenset({
     "test-coherence-tokens",
     "coherence-recovery-smoke-fast",
-    "hermes-coherence-recovery-smoke-fast",
-    "cockpit-smoke",
 })
 
 # CONTRACT: workspace.snapshot response keys.
@@ -784,7 +781,6 @@ REQUIRED_MAKE_TARGETS = frozenset({
     "test-agent-shell-tooling-fast",
     "test-agent-shell-workflows",
     "test-authority-boundaries",
-    "test-agent-bridge-authority",
     "test-cli-agent-failures",
     "test-docs-code-drift",
     "verify-agent-runtime-full",
@@ -794,12 +790,9 @@ REQUIRED_MAKE_TARGETS = frozenset({
     "release-check-agent-runtime",
     "agent-self-test",
     "control-smoke",
-    "cockpit-smoke",
-    "checkpoint-core",
-    "test-checkpoint-core-unit",
-    "test-agent-bridge",
-    "test-agent-bridge-fast",
-    "test-agent-bridge-audit",
+    "test-coherence-tokens",
+    "coherence-recovery-smoke-fast",
+    "coherence-core-v0.1",
 })
 
 # CONTRACT: Live integration suite registry (name → script path).

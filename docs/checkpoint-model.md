@@ -215,13 +215,13 @@ See [agent-ergonomics.md](./agent-ergonomics.md).
 
 ## Release baseline
 
-Frozen control-loop gate (tag `checkpoint-core-v0.1`):
+Frozen coherence gate (tag `coherence-core-v0.1`):
 
 ```bash
-make checkpoint-core
+make coherence-core-v0.1
 ```
 
-Runs kernel + agent-bridge + cockpit builds, the 53-check `cockpit-smoke` vertical slice, checkpoint unit tests (resolver / session / checkpoints), and `test-docs-code-drift`.
+Runs live kernel coherence token tests (`test-coherence-tokens`) and the deterministic recovery smoke (`coherence-recovery-smoke-fast`). See [testing.md](./testing.md).
 
 ## Related docs
 
@@ -231,6 +231,6 @@ Runs kernel + agent-bridge + cockpit builds, the 53-check `cockpit-smoke` vertic
 | [workspace-drift.md](./workspace-drift.md) | 2 |
 | [approval-lifecycle.md](./approval-lifecycle.md) | 3 |
 | [verify-gate.md](./verify-gate.md) | 5, 6 |
-| [governed-tasks.md](./governed-tasks.md) | 6 (orchestration) |
+| [kernel-rpc.md](./kernel-rpc.md) | RPC orchestration |
 | [architecture.md](./architecture.md) | All (wiring) |
 | [session-recovery.md](./session-recovery.md) | Noise bucket |

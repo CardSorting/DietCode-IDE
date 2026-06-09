@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Docs-to-code contract alignment for checkpoint-core baseline.
+Docs-to-code contract alignment for kernel/coherence baseline.
 
 Grep: rg 'test_docs_code_drift|docs_code_drift' scripts/ Makefile docs/
 """
@@ -72,8 +72,9 @@ def test_internal_namespaces_documented() -> None:
 def test_testing_doc_has_gates() -> None:
     text = (DOCS / "testing.md").read_text(encoding="utf-8")
     for target in (
-        "checkpoint-core",
-        "cockpit-smoke",
+        "coherence-core-v0.1",
+        "test-coherence-tokens",
+        "coherence-recovery-smoke-fast",
         "verify-agent-runtime-full",
         "test-agent-workflow-smoke",
         "test-agent-shell-tooling",
@@ -97,10 +98,10 @@ def test_agent_shell_tooling_doc_lists_methods() -> None:
         assert method in text, f"agent-shell-tooling.md missing {method}"
 
 
-def test_agent_bridge_doc_lists_shell_methods() -> None:
-    text = (DOCS / "agent-bridge.md").read_text(encoding="utf-8")
-    for method in ("shellPwd", "shellRg", "shellSedRange", "shellCatSmall"):
-        assert method in text, f"agent-bridge.md missing {method}"
+def test_agent_shell_doc_lists_shell_methods() -> None:
+    text = (DOCS / "agent-shell-tooling.md").read_text(encoding="utf-8")
+    for method in ("shell.pwd", "shell.rg", "shell.sedRange", "shell.catSmall"):
+        assert method in text, f"agent-shell-tooling.md missing {method}"
 
 
 def test_shell_error_codes_documented() -> None:
@@ -145,13 +146,13 @@ def test_frozen_key_sets_nonempty() -> None:
 
 def test_root_readme_documents_baseline() -> None:
     text = (REPO_ROOT / "README.md").read_text(encoding="utf-8")
-    for needle in ("checkpoint-core", "cockpit-smoke", "restart-agent-server", "docs/README.md"):
+    for needle in ("coherence-core-v0.1", "test-coherence-tokens", "restart-agent-server", "docs/README.md"):
         assert needle in text, f"README.md missing {needle}"
 
 
 def test_getting_started_mentions_baseline() -> None:
     text = (DOCS / "getting-started.md").read_text(encoding="utf-8")
-    for needle in ("checkpoint-core", "restart-agent-server", "test-docs-code-drift"):
+    for needle in ("coherence-core-v0.1", "restart-agent-server", "test-docs-code-drift"):
         assert needle in text, f"getting-started.md missing {needle}"
 
 
@@ -162,7 +163,7 @@ def test_agent_environment_mentions_restart_target() -> None:
 
 def test_checkpoint_model_documents_release_gate() -> None:
     text = (DOCS / "checkpoint-model.md").read_text(encoding="utf-8")
-    for needle in ("checkpoint-core", "cockpit-smoke", "checkpoint-core-v0.1"):
+    for needle in ("coherence-core-v0.1", "test-coherence-tokens", "coherence-recovery-smoke"):
         assert needle in text, f"checkpoint-model.md missing {needle}"
 
 
@@ -174,7 +175,7 @@ def test_file_structure_documents_control_tree() -> None:
 
 def test_docs_index_links_core_docs() -> None:
     text = (DOCS / "README.md").read_text(encoding="utf-8")
-    for needle in ("checkpoint-model.md", "architecture.md", "getting-started.md", "testing.md"):
+    for needle in ("checkpoint-model.md", "coherence-tokens.md", "getting-started.md", "testing.md"):
         assert needle in text, f"docs/README.md missing {needle}"
 
 
@@ -225,7 +226,7 @@ def test_coherence_core_gate_in_makefile() -> None:
 def test_coherence_release_gate_documented() -> None:
     testing = (DOCS / "testing.md").read_text(encoding="utf-8")
     tokens = (DOCS / "coherence-tokens.md").read_text(encoding="utf-8")
-    for needle in ("coherence-core-v0.1", "test-coherence-tokens", "hermes-coherence-recovery-smoke"):
+    for needle in ("coherence-core-v0.1", "test-coherence-tokens", "coherence-recovery-smoke-fast"):
         assert needle in testing or needle in tokens, f"release gate docs missing {needle}"
 
 
@@ -243,7 +244,7 @@ def main() -> int:
         ("drift.internal_namespaces", test_internal_namespaces_documented),
         ("drift.testing_doc", test_testing_doc_has_gates),
         ("drift.agent_shell_tooling_doc", test_agent_shell_tooling_doc_lists_methods),
-        ("drift.agent_bridge_shell_doc", test_agent_bridge_doc_lists_shell_methods),
+        ("drift.agent_shell_doc", test_agent_shell_doc_lists_shell_methods),
         ("drift.shell_error_codes", test_shell_error_codes_documented),
         ("drift.shell_envelope_keys", test_shell_envelope_keys_nonempty),
         ("drift.makefile_targets", test_makefile_has_required_targets),

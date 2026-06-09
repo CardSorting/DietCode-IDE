@@ -1,5 +1,12 @@
 #!/bin/bash
 set -euo pipefail
 DIR="$(cd "$(dirname "$0")" && pwd)"
-BRIDGE_ROOT="$(cd "$DIR/../agent-bridge" && pwd)"
-exec node "$BRIDGE_ROOT/dist/cli/dietcode-agent-client.js" "$@"
+SEARCH="$DIR"
+while [ "$SEARCH" != "/" ]; do
+  if [ -f "$SEARCH/scripts/dietcode_agent_client.py" ]; then
+    exec python3 "$SEARCH/scripts/dietcode_agent_client.py" "$@"
+  fi
+  SEARCH="$(dirname "$SEARCH")"
+done
+echo "dietcode-agent-client: could not locate scripts/dietcode_agent_client.py" >&2
+exit 1

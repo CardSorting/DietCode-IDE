@@ -1,81 +1,20 @@
 # Testing and release gates
 
-> **“Is my install healthy?”** → `make checkpoint-core`
+> **“Is my install healthy?”** → `make coherence-core-v0.1`
 
 [← Doc index](README.md) · [getting-started](getting-started.md) · [troubleshooting](troubleshooting.md)
 
 | I want to… | Command |
 |------------|---------|
-| Prove full baseline on my Mac | `make checkpoint-core` |
-| Run only the 53-check vertical slice | `make cockpit-smoke` |
+| Prove coherence baseline on my Mac | `make coherence-core-v0.1` |
+| Run only coherence token tests | `make test-coherence-tokens` |
+| Run only recovery smoke | `make coherence-recovery-smoke-fast` |
 | Quick kernel smoke | `make agent-self-test` |
-| Full agent-runtime ladder (separate track) | `make verify-agent-runtime-full` |
+| Full agent-runtime ladder (broader) | `make verify-agent-runtime-full` |
 
 ---
 
-## Primary gate: checkpoint core
-
-```bash
-make checkpoint-core
-```
-
-| Step | What it proves |
-|------|----------------|
-| `make kernel` | C++ kernel compiles |
-| `agent-bridge-fast` | TypeScript bridge compiles |
-| `make cockpit` | Cockpit + server types build |
-| `make cockpit-smoke` | **53-check vertical slice** — full checkpoint loop |
-| `test-checkpoint-core-unit` | Resolver + session + checkpoint unit tests |
-| `test-docs-code-drift` | Docs ↔ contracts ↔ Makefile alignment |
-
-Tag when green: `checkpoint-core-v0.1`.
-
-## Vertical slice (`cockpit-smoke`)
-
-```bash
-make cockpit-smoke
-```
-
-Fixtures under `scripts/fixtures/cockpit_smoke/`:
-
-| Fixture | Verify command |
-|---------|----------------|
-| `npm-test/` | `npm test` |
-| `make-test/` | `make test` |
-| `verify-sh/` | `./verify.sh` |
-
-Per fixture the orchestrator asserts:
-
-- Kernel and bridge up
-- Task submitted via `POST /api/tasks` (`mode: smoke`)
-- Drift checkpoint passes
-- Approval appears and resolves
-- Mutation applies; diff ring updates
-- Verify command resolves; verify passes
-- Task `completed` only after `verified`
-- Session survives bridge reload
-
-Orchestrator: `scripts/cockpit_vertical_slice.py`.
-
-## Checkpoint unit tests
-
-```bash
-make test-checkpoint-core-unit
-```
-
-- `scripts/test_checkpoint_resolver.py` — verify command resolution parity
-- `cockpit/server/checkpoints.test.ts` — gate semantics
-- `cockpit/server/sessionStore.test.ts` — task IDs + diff ring
-
-## Docs drift
-
-```bash
-make test-docs-code-drift
-```
-
-Locks Makefile targets, error-code docs, tool contracts, coherence cross-doc alignment, and release-gate references in [checkpoint-model.md](checkpoint-model.md).
-
-## Coherence gate (`coherence-core-v0.1`)
+## Primary gate: coherence core
 
 ```bash
 make coherence-core-v0.1
@@ -83,16 +22,61 @@ make coherence-core-v0.1
 
 | Step | What it proves |
 |------|----------------|
-| `test-coherence-tokens` | Kernel coherence issuance + enforcement (`file.readBatch` included) |
-| `coherence-recovery-smoke-fast` | Deterministic Python recovery vertical |
-| `hermes-coherence-recovery-smoke-fast` | Hermes bridge patch auto-retry |
-| `cockpit-smoke` | Full checkpoint loop still passes with coherence layer |
+| `make test-coherence-tokens` | Kernel coherence issuance + enforcement (`file.readBatch` included) |
+| `make coherence-recovery-smoke-fast` | Deterministic Python recovery vertical |
 
 Tag when green: **coherence-core-v0.1**. See [coherence-tokens.md](coherence-tokens.md).
 
+## Coherence token tests
+
+```bash
+make test-coherence-tokens
+```
+
+Live kernel checks in `scripts/test_coherence_tokens.py`:
+
+- `file.read` and `file.readBatch` issue coherence tokens when `taskId` is set
+- Stale `expectedWorkspaceRevision` rejected with `coherence_mismatch`
+- Missing token rejected on guarded patch paths
+
+Fast iteration (assumes server already matches HEAD):
+
+```bash
+make test-coherence-tokens-fast
+```
+
+## Coherence recovery smoke
+
+```bash
+make coherence-recovery-smoke-fast
+```
+
+Fixtures under `scripts/fixtures/coherence_recovery/`:
+
+| File | Role |
+|------|------|
+| `probe.py` | Mutable target for patch smoke |
+| `verify.sh` | Post-mutation verification |
+
+Orchestrator: `scripts/coherence_recovery_smoke.py` — proves stale patch blocked, context refreshed, safe retry, verify passes.
+
+Full gate (rebuild + restart kernel first):
+
+```bash
+make coherence-recovery-smoke
+```
+
+## Docs drift
+
+```bash
+make test-docs-code-drift
+```
+
+Locks Makefile targets, error-code docs, tool contracts, coherence cross-doc alignment, and release-gate references.
+
 ## Kernel harness ladder (agent runtime)
 
-These prove RPC contracts and tooling — run after kernel changes, separate from `checkpoint-core`:
+These prove RPC contracts and tooling — run after kernel changes, separate from `coherence-core-v0.1`:
 
 | Target | Focus |
 |--------|-------|
@@ -110,41 +94,27 @@ Restart kernel before live harnesses when C++ changed:
 make restart-agent-server
 ```
 
-## Agent bridge
-
-```bash
-make test-agent-bridge-fast      # offline unit tests
-make test-agent-bridge-authority # authority workflows
-```
-
-## Hermes (optional)
-
-```bash
-make smoke-agent-chat-live       # bounded Hermes edit — not cockpit-smoke
-make test-hermes-bridge-audit
-```
-
-Hermes paths are **not** part of `checkpoint-core`.
-
 ## Benchmark track (optional)
 
 ```bash
-make benchmark-agent-success-fast
+make benchmark-agent-success-fast   # may require archived bridge tooling
 ```
 
-See [AGENT_RUNTIME_RELIABILITY.md](../AGENT_RUNTIME_RELIABILITY.md). Parallel evaluation — does not gate checkpoint core.
+See [AGENT_RUNTIME_RELIABILITY.md](../AGENT_RUNTIME_RELIABILITY.md). Parallel evaluation — does not gate coherence core.
 
 ## CI-style minimal loop
 
 ```bash
-make checkpoint-core
+make kernel
+make coherence-core-v0.1
+make test-docs-code-drift
 ```
 
-If that passes, the governed mutation control loop is proven for the frozen baseline.
+If that passes, the kernel coherence model is proven for the frozen baseline.
 
 ## Agent runtime release ladder
 
-Historical RPC pass ladder (broader than checkpoint core):
+Historical RPC pass ladder (broader than coherence core):
 
 ```bash
 make verify-agent-runtime-full

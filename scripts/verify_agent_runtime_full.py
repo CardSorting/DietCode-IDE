@@ -24,17 +24,12 @@ NEXT_COMMANDS = {
     "live_agent_shell_tooling": "make test-agent-shell-tooling",
     "live_agent_shell_workflows": "make test-agent-shell-workflows",
     "live_authority_boundaries": "make test-authority-boundaries",
-    "live_agent_bridge_authority": "make test-agent-bridge-authority",
     "live_cli_agent_failures": "python3 scripts/test_cli_agent_failures.py --compact",
     "live_release_readiness": "python3 scripts/test_release_readiness.py --compact",
     "live_partial_success_closure": "make test-partial-success-closure",
     "live_broccoliq_runtime_memory": "make test-broccoliq-runtime-memory",
     "live_runtime_native_integration": "make test-runtime-native-integration",
-    "live_agent_bridge": "make test-agent-bridge",
-    "live_agent_bridge_audit": "python3 scripts/test_agent_bridge_audit.py --compact",
     "live_verify_agent_runtime": "make verify-agent-runtime",
-    "live_agent_chat_workspace_switch": "make test-agent-chat-workspace-switch",
-    "live_smoke_agent_chat": "make smoke-agent-chat-live",
     "live_verification_authority": "make test-verification-authority",
 }
 
@@ -47,16 +42,12 @@ LADDER: list[tuple[str, list[str], bool, bool]] = [
     ("live_agent_shell_tooling", [sys.executable, "scripts/test_agent_shell_tooling.py", "--compact"], True, False),
     ("live_agent_shell_workflows", [sys.executable, "scripts/test_agent_shell_workflows.py", "--compact"], True, False),
     ("live_authority_boundaries", [sys.executable, "scripts/test_authority_boundaries.py", "--compact"], True, False),
-    ("live_agent_bridge_authority", ["make", "test-agent-bridge-authority"], True, False),
     ("live_cli_agent_failures", [sys.executable, "scripts/test_cli_agent_failures.py", "--compact"], True, False),
     ("live_partial_success_closure", [sys.executable, "scripts/test_partial_success_closure.py", "--compact"], True, False),
     ("live_broccoliq_runtime_memory", [sys.executable, "scripts/test_broccoliq_runtime_memory.py", "--compact"], True, False),
     ("live_runtime_native_integration", [sys.executable, "scripts/test_runtime_native_integration.py", "--compact"], True, False),
-    ("live_agent_bridge", ["make", "test-agent-bridge"], True, False),
     ("live_release_readiness", [sys.executable, "scripts/test_release_readiness.py", "--compact"], True, False),
-    ("live_agent_chat_workspace_switch", ["make", "test-agent-chat-workspace-switch"], True, False),
     ("live_verification_authority", ["make", "test-verification-authority"], True, False),
-    ("live_smoke_agent_chat", ["make", "smoke-agent-chat-live"], True, False),
 ]
 
 

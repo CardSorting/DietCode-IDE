@@ -5,140 +5,93 @@
 <h1 align="center">DietCode</h1>
 
 <p align="center">
-  <strong>Supervise AI code changes on your Mac — with visible checkpoints, not blind trust.</strong><br><br>
-  <strong>DietCode is air-traffic control for AI edits:</strong><br>
-  a governed local mutation runtime that clears each workspace change through visible operational checkpoints.
+  <strong>A local kernel experiment for preserving operational coherence across agent read, diff, patch, approval, and verification surfaces.</strong>
 </p>
 
 <p align="center">
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-4CAF50.svg?style=flat-square" alt="MIT License"></a>
   <img src="https://img.shields.io/badge/platform-macOS-lightgrey.svg?style=flat-square" alt="macOS">
-  <img src="https://img.shields.io/badge/baseline-checkpoint--core--v0.1-blue.svg?style=flat-square" alt="checkpoint-core-v0.1">
+  <img src="https://img.shields.io/badge/baseline-coherence--core--v0.1-blue.svg?style=flat-square" alt="coherence-core-v0.1">
 </p>
 
 <p align="center">
-  <a href="#i-want-to">I want to…</a> ·
+  <a href="#what-dietcode-is">What it is</a> ·
   <a href="#quick-start">Quick start</a> ·
-  <a href="#the-six-checkpoints">Checkpoints</a> ·
+  <a href="#coherence-model">Coherence</a> ·
   <a href="#documentation">Docs</a> ·
   <a href="#troubleshooting">Help</a>
 </p>
 
 ---
 
-## How DietCode handles failure
-
-DietCode does not paper over operational failure. When the control loop breaks, you see it immediately — the system never implies an agent is still operating safely when it is not.
-
-| Situation | What you see |
-|-----------|--------------|
-| Task loses connection | Visible disconnect — not a silent hang |
-| Approval times out | Explicit expiry — not an assumed “yes” |
-| Files changed mid-task | Drift gate blocks the patch |
-| Tests fail | Verify gate blocks completion |
-| Bridge restarted | Stale-session warning + recovery path |
-| Recovery needed | Your intent required — no auto-resume into danger |
-
-One kernel holds mutation authority. The Cockpit never edits files directly — only `dietcode-kernel` mutates your workspace. Agent exit does **not** mean the job succeeded; tasks complete only after verify passes or is explicitly waived.
-
----
-
-## I want to…
-
-| I want to… | Start here |
-|------------|------------|
-| **Understand the idea** (no install) | [Brief](docs/brief.md) → [philosophy](docs/philosophy.md) → [checkpoints](#the-six-checkpoints) |
-| **Run DietCode on my Mac** | [Quick start](#quick-start) → [getting started](docs/getting-started.md) |
-| **Watch an agent task in the UI** | [Quick start](#quick-start) → [governed tasks](docs/governed-tasks.md) |
-| **Know if my install is healthy** | `make checkpoint-core` → [testing guide](docs/testing.md) |
-| **Fix something broken** | [Troubleshooting](#troubleshooting) → [troubleshooting.md](docs/troubleshooting.md) |
-| **Wire my own agent or CI** | [agent bridge](docs/agent-bridge.md) → [kernel RPC](docs/kernel-rpc.md) |
-| **Use Hermes / legacy app chat** | [integrations](integrations/README.md) *(optional)* |
-
-Full doc index: [docs/README.md](docs/README.md)
-
----
-
 ## What DietCode is
 
-A **local-first control plane** on macOS: one trusted tower sequences reads, approvals, patches, and verification while you watch from the Cockpit.
+DietCode is a **headless macOS kernel** (`dietcode-kernel`) that governs workspace mutation through JSON-RPC. One trusted process holds mutation authority; every agent read, patch, approval, and verify step must stay coherent with kernel-issued tokens and revision anchors.
 
 | Layer | Role |
 |-------|------|
-| **Kernel** (`dietcode-kernel`) | Sole authority that changes files |
-| **Bridge** | Governed tasks + session recovery |
-| **Cockpit** | Steering, approvals, checkpoint visibility |
-| **Agent bridge** | How Hermes, scripts, and CI request changes safely |
+| **Kernel** (`dietcode-kernel`) | Sole authority that changes files; issues coherence tokens |
+| **Control plane** (`src/platform/macos/control/`) | JSON-RPC server, drift/approval/verify gates |
+| **Harnesses** (`scripts/`) | Python CLI, coherence tests, recovery smoke |
 
 ```text
-You or an AI agent → Cockpit → Bridge → dietcode-kernel → your project
+agent or script → dietcode_agent_client.py → dietcode-kernel → your project
 ```
 
-**Not** a web IDE, **not** a chat window that silently edits files, **not** cloud-hosted. The optional AppKit editor in `legacy_ui/` is legacy compatibility — the product surface is the checkpointed control loop.
+**Not** an IDE, **not** a web UI, **not** cloud-hosted. The retained artifact is the kernel/coherence methodology and the tests that prove it.
 
-| Typical AI tool | DietCode |
-|-----------------|----------|
-| Agent edits opaquely | One kernel mutates; everything else requests clearance |
-| Chat ends → assume success | Task open until verify clears |
-| Conflicts found late | Drift gate blocks stale patches |
-| Restart loses context | Bridge restores bounded session state |
-| Failures in logs | Cockpit shows blocked gates and disconnects |
-
-Architecture detail: [architecture.md](docs/architecture.md)
+Architecture detail: [architecture.md](docs/architecture.md) · Coherence: [coherence-tokens.md](docs/coherence-tokens.md)
 
 ---
 
-## The six checkpoints
+## Coherence model
 
-Every governed task clears six gates before it can be called **done**:
+Operational coherence binds agent context to kernel state before drift, approval, patch, and verify gates run.
 
-| # | Checkpoint | Question |
-|---|------------|----------|
-| 1 | **Context** | Did the agent read valid state? |
-| 2 | **Drift** | Did the workspace change underneath it? |
-| 3 | **Approval** | Is this mutation allowed? |
-| 4 | **Mutation** | Did the patch apply cleanly? |
-| 5 | **Verification** | Did the result pass? |
-| 6 | **Completion** | Can this task be called done? |
+| Step | What the kernel enforces |
+|------|--------------------------|
+| **Read** | `file.read` / `file.readBatch` with `taskId` issues a coherence token |
+| **Patch** | `patch.apply` must include `coherenceTokenId` + `expectedWorkspaceRevision` |
+| **Mismatch** | `coherence_mismatch` blocks stale writes; refresh context and retry |
+| **Recovery** | Deterministic re-read → safe retry path (see recovery smoke) |
 
-```text
-prompt → read → drift → approval → patch → verify → completed
-```
-
-Deep dive: [checkpoint-model.md](docs/checkpoint-model.md) · [drift](docs/workspace-drift.md) · [approval](docs/approval-lifecycle.md) · [verify](docs/verify-gate.md) · [recovery](docs/session-recovery.md)
+Deep dive: [coherence-tokens.md](docs/coherence-tokens.md) · [workspace-drift.md](docs/workspace-drift.md) · [checkpoint-model.md](docs/checkpoint-model.md)
 
 ---
 
 ## Quick start
 
-**Prerequisites:** macOS, Xcode CLT, Node.js 20+, Python 3.11+ — [getting-started.md](docs/getting-started.md)
+**Prerequisites:** macOS, Xcode CLT, Python 3.11+ — [getting-started.md](docs/getting-started.md)
 
-### 1. Clone and validate the baseline
+### 1. Build and validate
 
 ```bash
 git clone <repo>
 cd DietCode-IDE
-make checkpoint-core
+make kernel
+make coherence-core-v0.1
 ```
 
-Proves kernel, bridge, cockpit, checkpoint APIs, recovery, and the 53-check vertical slice on your machine. Tag: **checkpoint-core-v0.1**.
+Proves kernel coherence token issuance, enforcement, and recovery smoke on your machine. Tag: **coherence-core-v0.1**.
 
-### 2. Start development
+### 2. Start the kernel
 
 ```bash
-make kernel
 make restart-agent-server-fast
-cd cockpit && npm install && npm run dev
+python3 scripts/dietcode_agent_client.py --wait-ready --compact
+python3 scripts/dietcode_agent_client.py rpc rpc.ping
 ```
 
-| Surface | URL |
-|---------|-----|
-| Cockpit UI | http://localhost:5173 |
-| Bridge API | http://127.0.0.1:9477 |
+Socket: `~/.dietcode/control.sock` · Token: `~/.dietcode/session.token`
 
-### 3. Submit a task
+### 3. Exercise RPC from Python
 
-Open the Cockpit, point at a workspace, submit a bounded change, and watch the checkpoint rail advance. API: [governed-tasks.md](docs/governed-tasks.md)
+```bash
+python3 scripts/dietcode_agent_client.py rpc workspace.openFolder \
+  --params '{"path":"/path/to/your/project"}'
+```
+
+Full RPC reference: [kernel-rpc.md](docs/kernel-rpc.md)
 
 ---
 
@@ -146,28 +99,14 @@ Open the Cockpit, point at a workspace, submit a bounded change, and watch the c
 
 | Command | What it does |
 |---------|--------------|
-| `make checkpoint-core` | Full baseline gate — run before trusting an install |
-| `make cockpit-smoke` | 53-check vertical slice only |
 | `make kernel` | Build `build/dietcode-kernel` |
+| `make test-coherence-tokens` | Live kernel coherence issuance + enforcement |
+| `make coherence-recovery-smoke-fast` | Deterministic recovery vertical slice |
+| `make coherence-core-v0.1` | Full coherence baseline gate |
 | `make restart-agent-server-fast` | Restart kernel socket (no rebuild) |
-| `make agent-bridge-fast` | Build TypeScript bridge |
-| `make cockpit` | Production UI + server build |
+| `make test-docs-code-drift` | Docs ↔ contracts ↔ Makefile alignment |
 
 More: [testing.md](docs/testing.md)
-
-### checkpoint-core-v0.1
-
-| Layer | Status |
-|-------|--------|
-| Kernel | Headless JSON-RPC — sole mutation authority |
-| Cockpit | Checkpoint rail, drift/approval/verify panels |
-| Bridge | Session recovery, governed tasks, SSE |
-| Safety | Drift · approval · verify gates |
-| Validation | `make cockpit-smoke` (53 checks) |
-
-```bash
-make checkpoint-core   # must pass before checkpoint model changes
-```
 
 ---
 
@@ -175,12 +114,12 @@ make checkpoint-core   # must pass before checkpoint model changes
 
 | Job | Docs |
 |-----|------|
-| **Concept** | [brief](docs/brief.md) · [philosophy](docs/philosophy.md) · [whitepaper](docs/whitepaper.md) |
-| **Learn** | [checkpoint-model](docs/checkpoint-model.md) · [architecture](docs/architecture.md) · [governed-tasks](docs/governed-tasks.md) |
+| **Concept** | [brief](docs/brief.md) · [philosophy](docs/philosophy.md) · [checkpoint-model](docs/checkpoint-model.md) |
+| **Coherence** | [coherence-tokens](docs/coherence-tokens.md) · [workspace-drift](docs/workspace-drift.md) · [session-recovery](docs/session-recovery.md) |
 | **Run** | [getting-started](docs/getting-started.md) · [testing](docs/testing.md) · [troubleshooting](docs/troubleshooting.md) |
-| **Build** | [agent-bridge](docs/agent-bridge.md) · [kernel-rpc](docs/kernel-rpc.md) · [integrations](docs/integrations.md) |
+| **Build** | [kernel-rpc](docs/kernel-rpc.md) · [agent-tooling](docs/agent-tooling.md) · [file-structure](docs/file-structure.md) |
 
-Index: [docs/README.md](docs/README.md)
+Index: [docs/README.md](docs/README.md) · Archive note: [docs/archive-note.md](docs/archive-note.md)
 
 ---
 
@@ -190,24 +129,10 @@ Index: [docs/README.md](docs/README.md)
 |---------|---------------|
 | Kernel offline | `make restart-agent-server-fast` |
 | Stale binary after `git pull` | `make kernel && make restart-agent-server-fast` |
-| Drift blocks patch | Refresh context in Cockpit — [workspace-drift.md](docs/workspace-drift.md) |
-| Task stuck before “completed” | [verify-gate.md](docs/verify-gate.md) |
-| Install health unknown | `make checkpoint-core` |
+| Coherence blocks patch | Re-read with `taskId` — [coherence-tokens.md](docs/coherence-tokens.md) |
+| Install health unknown | `make coherence-core-v0.1` |
 
 Full playbook: [troubleshooting.md](docs/troubleshooting.md) · [error-codes.md](docs/error-codes.md)
-
----
-
-## Optional integrations
-
-Hermes and legacy agent-chat are optional — the checkpoint loop does not depend on any model provider.
-
-```bash
-make app
-make smoke-agent-chat-live   # separate from cockpit-smoke
-```
-
-[integrations/README.md](integrations/README.md) · Research benchmarks: [AGENT_RUNTIME_RELIABILITY.md](AGENT_RUNTIME_RELIABILITY.md)
 
 ---
 
@@ -215,12 +140,9 @@ make smoke-agent-chat-live   # separate from cockpit-smoke
 
 ```text
 src/kernel/                     Kernel entry
-src/platform/macos/control/     JSON-RPC server
-cockpit/                        UI + bridge
-agent-bridge/                   Agent workflows
-scripts/                        Harnesses + cockpit-smoke
-legacy_ui/                      Optional native editor
-integrations/                   Hermes plugin
+src/platform/macos/control/     JSON-RPC server + coherence tokens
+scripts/                        CLI, coherence harnesses, fixtures
+docs/                           Coherence model + kernel reference
 ```
 
 [file-structure.md](docs/file-structure.md)
