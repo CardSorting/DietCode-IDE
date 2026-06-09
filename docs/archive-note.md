@@ -34,6 +34,18 @@ make coherence-core-v0.1
 
 Tag when green: **coherence-core-v0.1**.
 
+## Editor scaffold (removed pass 4)
+
+Pre-kernel IDE experiment code was pruned from the active tree:
+
+- `src/editor/`, `src/search/`, `src/syntax/`, `src/ui/`, `src/core/`
+- `tests/test_editor.cpp`
+- LSP client and file-watcher stubs (kernel uses headless language RPC stubs)
+
+## Benchmarks archive
+
+The `benchmarks/agent_success/` research corpus and frozen results remain in the tree but live runners depended on `agent-bridge/`. See [../benchmarks/README.md](../benchmarks/README.md).
+
 ## Related
 
 - [README.md](../README.md)

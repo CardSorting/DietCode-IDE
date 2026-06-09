@@ -278,5 +278,6 @@ python3 scripts/dietcode_agent_client.py --expect-before-hash <hash> --patch-fil
 - [runtime-invariants.md](runtime-invariants.md)
 - [kernel-rpc.md](kernel-rpc.md)
 - [error-codes.md](error-codes.md)
-- [agent-bridge.md](agent-bridge.md)
+- [kernel-rpc.md](kernel-rpc.md)
+- [coherence-tokens.md](coherence-tokens.md)
 - [testing.md](testing.md)

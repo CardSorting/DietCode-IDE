@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Regression tests for verification authority."""
+"""Regression tests for verification authority helpers."""
 
 from __future__ import annotations
 
@@ -13,11 +13,9 @@ import time
 import unittest
 import unittest.mock
 from pathlib import Path
-from unittest import mock
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 SCRIPTS = REPO_ROOT / "scripts"
-SIDEBAR_MM = REPO_ROOT / "src/platform/macos/MacAgentSidebar.mm"
 
 
 def _load_module(name: str, path: Path):
@@ -30,8 +28,6 @@ def _load_module(name: str, path: Path):
 
 
 verify_auth = _load_module("dietcode_verification_authority", SCRIPTS / "dietcode_verification_authority.py")
-chat = _load_module("dietcode_agent_chat", SCRIPTS / "dietcode_agent_chat.py")
-bundle = _load_module("dietcode_agent_bundle", SCRIPTS / "dietcode_agent_bundle.py")
 
 
 class VerificationAuthorityTests(unittest.TestCase):
@@ -108,58 +104,7 @@ class VerificationAuthorityTests(unittest.TestCase):
         self.assertGreaterEqual(stored["verificationStartedAt"], stored["mutationCompletedAt"])
         self.assertTrue(authority["checkedAfterMutation"])
 
-    def test_enforce_verification_authority_exits_on_failure(self) -> None:
-        build_bundle = REPO_ROOT / "build" / "DietCode.app"
-        if not build_bundle.is_dir():
-            self.skipTest("build/DietCode.app missing")
-        with tempfile.TemporaryDirectory() as tmp:
-            ws = Path(tmp)
-            ctx = bundle.resolve_context(repo_root=REPO_ROOT, app_bundle_arg=str(build_bundle))
-            status = {
-                "runtime": {"ready": True},
-                "bridge": {"ready": True},
-                "hermes": {"ready": True},
-                "workspaceAuthority": {"workspaceMatch": True},
-            }
-            failed_verify = {
-                "verifyCommand": "./verify.sh",
-                "executed": True,
-                "exitCode": 2,
-                "passed": False,
-                "stdoutFile": "/tmp/out",
-                "stderrFile": "/tmp/err",
-                "checkedAfterMutation": True,
-                "durationMs": 1,
-            }
-            with mock.patch.object(chat, "assert_chat_ready", return_value=status):
-                with mock.patch.object(chat, "run_hermes_chat", return_value=(0, "done")):
-                    with mock.patch.object(chat, "collect_bridge_patch_events", return_value=[]):
-                        with mock.patch.object(chat, "audit_diff_authority", return_value={
-                            "diffFile": None, "changedFiles": [], "matchesMutationAuthority": True,
-                        }):
-                            with mock.patch.object(
-                                chat,
-                                "execute_verification_authority",
-                                return_value=failed_verify,
-                            ):
-                                code = chat.cmd_chat(
-                                    REPO_ROOT,
-                                    ctx,
-                                    workspace=ws,
-                                    prompt="edit",
-                                    fmt="json",
-                                    max_turns=5,
-                                    enforce_mutation_authority=False,
-                                    verify_command="./verify.sh",
-                                    enforce_verification_authority=True,
-                                )
-            self.assertEqual(code, 12)
-
-    def test_sidebar_verification_status(self) -> None:
-        text = SIDEBAR_MM.read_text(encoding="utf-8") if SIDEBAR_MM.is_file() else ""
-        self.assertIn("Verification:", text)
-        self.assertIn("View Verify Log", text)
-        self.assertIn("verificationAuthority", text)
+    def test_verification_labels(self) -> None:
         self.assertEqual(verify_auth.verification_label({"executed": True, "passed": True}), "Passed")
         self.assertEqual(verify_auth.verification_label({"executed": True, "passed": False}), "Failed")
         self.assertEqual(verify_auth.verification_label({"executed": False}), "Not Run")

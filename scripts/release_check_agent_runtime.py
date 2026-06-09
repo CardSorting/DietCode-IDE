@@ -43,9 +43,9 @@ def _validate_stable_fixtures() -> tuple[bool, dict]:
 
 def _docs_command_sanity() -> tuple[bool, dict]:
     required_snippets = [
-        ("docs/testing.md", "checkpoint-core"),
+        ("docs/testing.md", "coherence-core-v0.1"),
         ("docs/testing.md", "verify-agent-runtime-full"),
-        ("docs/checkpoint-model.md", "checkpoint-core-v0.1"),
+        ("docs/checkpoint-model.md", "coherence-core-v0.1"),
         ("docs/getting-started.md", "restart-agent-server"),
     ]
     errors: list[str] = []

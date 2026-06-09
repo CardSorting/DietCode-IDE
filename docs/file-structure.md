@@ -2,12 +2,15 @@
 
 ```text
 DietCode-IDE/
+├── ARCHIVE.md                   # Removed vs retained index
 ├── build/
 │   └── dietcode-kernel          # Headless kernel binary (default product)
 ├── src/
 │   ├── kernel/                  # Kernel entry, WorkspaceSession bridge
 │   ├── kernel/workspace/        # Headless file/patch/verify ops
-│   └── platform/macos/control/  # MacControlServer JSON-RPC + coherence
+│   ├── platform/macos/control/  # MacControlServer JSON-RPC + coherence
+│   ├── filesystem/              # FileService, GitService (kernel deps)
+│   └── domain/control/          # Shared control-plane types
 ├── scripts/
 │   ├── dietcode_agent_client.py # Python RPC CLI
 │   ├── dietcode_coherence.py    # Coherence helpers for harnesses
@@ -18,6 +21,7 @@ DietCode-IDE/
 │       ├── coherence_recovery/  # Recovery smoke workspace
 │       ├── recovery/            # Error recovery hint fixtures
 │       └── release/             # Internal namespace fixtures
+├── benchmarks/                  # Research archive (agent_success — bridge-dependent)
 └── docs/                        # Coherence model + kernel reference
 ```
 

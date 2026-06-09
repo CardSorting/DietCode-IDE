@@ -1,7 +1,9 @@
 # Agent Success Benchmark
 
-**DietCode Agent Runtime Reliability · v1.0 research release**  
+**DietCode Agent Runtime Reliability · v1.0 research release (archived)**  
 Tag: `agent-runtime-reliability-v1.0` · Runtime **1.6.5** · Benchmark **1.2** · Trace schema **1.0**
+
+> **Archive note:** This benchmark depended on the removed `agent-bridge/` and agent-chat surfaces. Results and methodology are preserved; live Makefile targets are not wired in the coherence-core archive. See [../README.md](../README.md).
 
 > Start here: [AGENT_RUNTIME_RELIABILITY.md](../../AGENT_RUNTIME_RELIABILITY.md)
 
@@ -85,39 +87,38 @@ This is a **defensible evaluation artifact**, not a pass-rate leaderboard.
 
 ---
 
-## Quick start
+## Quick start (archived — requires restored agent-bridge)
+
+Live benchmark runs are **not** part of the current repo baseline (`make coherence-core-v0.1`). To reproduce historically:
 
 ```bash
-# Prerequisites: DietCode built, agent server ready
-make agent-bridge-fast
-make agent-ready
+# Restore agent-bridge/ from git history, then:
+# make agent-bridge-fast && make agent-ready
+# python3 benchmarks/agent_success/run_benchmark.py --assume-server-ready
+# python3 benchmarks/agent_success/run_orchestrator_benchmark.py --assume-server-ready
+# python3 benchmarks/agent_success/release_check.py --assume-server-ready
+```
 
-# Base corpus (001–030)
-make benchmark-agent-success-fast
+Offline schema and contract unit tests still run without the bridge:
 
-# Nightmare orchestrator sweep → RESULTS_ORCHESTRATOR.md
-make benchmark-contract-orchestrator
-
-# v1.0 release gate (reference 10/10 + orchestrated 10/10 + traces)
-make benchmark-contract-release-check
-
-# Schema + isolation + security + negative gates (offline)
-make test-agent-benchmark-schema
+```bash
+python3 benchmarks/agent_success/test_benchmark_schema.py
+python3 benchmarks/agent_success/test_contracts.py
+python3 benchmarks/agent_success/test_release_gates.py
 ```
 
 ---
 
-## Commands
+## Commands (historical — Makefile targets removed)
 
-| Command | Purpose |
-|---------|---------|
-| `make benchmark-agent-success-fast` | Base corpus, assumes server ready |
-| `make benchmark-agent-success` | Full base run + server restart |
-| `make benchmark-agent-success-report` | Regenerate `summary.md` from JSONL |
-| `make benchmark-contract-ladder` | Nightmare × static profiles |
-| `make benchmark-contract-orchestrator` | Orchestrated nightmare → findings report |
-| `make benchmark-contract-release-check` | **v1.0 release gate** (live server required) |
-| `make test-contract-orchestrator` | Contract + protocol + semantic + gate unit tests |
+| Script | Purpose |
+|--------|---------|
+| `run_benchmark.py` | Base corpus (001–030), requires bridge CLI |
+| `run_orchestrator_benchmark.py` | Orchestrated nightmare sweep |
+| `release_check.py` | v1.0 release gate (live server + bridge) |
+| `report_results.py` | Regenerate summary from JSONL |
+| `test_benchmark_schema.py` | Offline schema + isolation tests |
+| `test_contracts.py` | Offline contract unit tests |
 | `make test-contract-release-gates` | Release gate unit tests |
 | `make test-agent-benchmark-schema` | Schema freeze + isolation + audit suite |
 | `make test-release-gate-negative` | Prove gates fail when tampered |

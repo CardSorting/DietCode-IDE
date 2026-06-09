@@ -114,7 +114,8 @@ Proves kernel coherence tokens + recovery smoke + docs alignment on your Mac.
 | Path | Purpose |
 |------|---------|
 | [AGENT_RUNTIME_RELIABILITY.md](../AGENT_RUNTIME_RELIABILITY.md) | Adversarial benchmark track (parallel to coherence-core) |
-| [benchmarks/agent_success/](../benchmarks/agent_success/) | Evaluation corpus |
+| [benchmarks/README.md](../benchmarks/README.md) | Research archive — bridge-dependent runners |
+| [benchmarks/agent_success/](../benchmarks/agent_success/) | Frozen evaluation corpus + results |
 
 ---
 

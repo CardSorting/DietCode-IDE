@@ -1,34 +1,25 @@
 # Architecture
 
-> DietCode is a **governed local mutation runtime**. The cockpit is the control surface; the kernel is the authority.
+> DietCode is a **headless governed mutation kernel**. The control plane is JSON-RPC; the kernel is the sole mutation authority.
 
-Canonical checkpoint map: [checkpoint-model.md](checkpoint-model.md).
+Canonical checkpoint map: [checkpoint-model.md](checkpoint-model.md) · Coherence: [coherence-tokens.md](coherence-tokens.md)
 
 ## Components
 
 ```text
 ┌─────────────────────────────────────────────────────────┐
-│  Cockpit (Vite + React)                                 │
-│  Chat · CheckpointRail · Drift · Approval · Verify      │
-│  Timeline · Diffs · Logs                                │
-└───────────────────────┬─────────────────────────────────┘
-                        │ HTTP + SSE (:9477)
-┌───────────────────────▼─────────────────────────────────┐
-│  Cockpit bridge (cockpit/server/bridge.ts)              │
-│  Task registry · session store · checkpoint resolver    │
-│  Approval proxy · verify gate · event polling           │
+│  Agents / harnesses (Python CLI, scripts, CI)           │
+│  scripts/dietcode_agent_client.py                       │
 └───────────────────────┬─────────────────────────────────┘
                         │ JSON lines + token
 ┌───────────────────────▼─────────────────────────────────┐
-│  dietcode-kernel (C++ / ObjC++)                           │
-│  MacControlServer · approvals · drift · verify            │
-│  WorkspaceSession — sole mutation authority               │
+│  dietcode-kernel (C++ / ObjC++)                          │
+│  MacControlServer · coherence tokens · approvals        │
+│  drift · verify · WorkspaceSession                       │
 └───────────────────────┬─────────────────────────────────┘
                         │
                    Workspace on disk
 ```
-
-**Agent Bridge** (`agent-bridge/`) sits beside this stack: agents call bridge workflows → kernel RPC. Hermes uses the bundled plugin → bridge CLI → kernel.
 
 ## Kernel
 
@@ -37,37 +28,16 @@ Canonical checkpoint map: [checkpoint-model.md](checkpoint-model.md).
 | Binary | `build/dietcode-kernel` |
 | Entry | `src/kernel/main.mm`, `KernelRuntime.mm` |
 | RPC server | `src/platform/macos/control/MacControlServer.mm` |
+| Coherence | `MacControlCoherenceTokens.mm` |
 | Workspace | `src/kernel/workspace/` |
 | Socket | `~/.dietcode/control.sock` |
 
-Headless build excludes `legacy_ui/` editor sources. `safeWorkspacePath` reads from `WorkspaceSession`, not AppKit windows.
+Headless build uses `DietCodeControlWindowBridge` — no AppKit editor required. `safeWorkspacePath` reads from `WorkspaceSession`.
 
 ```bash
 make kernel
 DIETCODE_REPO_ROOT=$(pwd) ./build/dietcode-kernel --ensure-socket
 ```
-
-## Cockpit bridge
-
-| Module | Role |
-|--------|------|
-| `bridge.ts` | HTTP API, RPC client, SSE |
-| `taskRunner.ts` | Spawns governed/smoke task scripts |
-| `taskRegistry.ts` | In-memory tasks + persistence hook |
-| `sessionStore.ts` | Event ring, diffs, active tasks JSON |
-| `checkpoints.ts` | Six-gate snapshot builder |
-| `verifyGate.ts` | Mutation → verification_required → completed |
-| `workspaceDrift.ts` | Drift status cache |
-| `verifyCommandResolver.ts` | `verify.sh` → `make test` → `npm test` |
-
-### Governed task runners
-
-| Mode | Script |
-|------|--------|
-| `supervised` / `trusted` | `scripts/cockpit_governed_task.py` (Hermes) |
-| `smoke` | `scripts/cockpit_smoke_task.py` (deterministic, no Hermes) |
-
-Vertical slice orchestrator: `scripts/cockpit_vertical_slice.py` (`make cockpit-smoke`).
 
 ## RPC wire format
 
@@ -87,32 +57,40 @@ Responses: `{ "id", "ok", "result" }` or `{ "id", "ok": false, "error": { "strin
 
 ## Session and recovery
 
-Bridge persists under `DIETCODE_SESSION_DIR` (default `~/.dietcode/session/`):
+Kernel recovery store and optional session dir (`DIETCODE_SESSION_DIR`, default `~/.dietcode/session/`):
 
-- `active_tasks.json`
-- `recent_events.ndjson`
-- `recent_diffs.json`
-- `pending_approvals.json`
+- Pending approvals (kernel authoritative)
+- Bounded event ring buffer
+- Recovery RPCs (`recovery.*`)
 
-On bridge restart, `bootstrapSessionRecovery` reloads tasks and syncs kernel approvals. See [session-recovery.md](session-recovery.md).
+See [session-recovery.md](session-recovery.md).
 
 ## Autonomy and permissions
 
-Default autonomy level: **3 (supervised)**. Destructive RPCs (`patch.apply` with `confirm`, `workspace.openFolder`, etc.) queue `approvalRequired` until cockpit resolves.
+Default autonomy level: **3 (supervised)**. Destructive RPCs (`patch.apply` with `confirm`, `workspace.openFolder`, etc.) queue `approvalRequired` until resolved via `approval.resolve`.
 
 Permission tiers: Read · Edit · Execute · Destructive. Method catalog: `src/platform/macos/control/services/MacControlMethodCatalog.mm`.
+
+## Coherence layer
+
+When `taskId` is set on reads, the kernel issues coherence tokens. Mutations must include `coherenceTokenId` + `expectedWorkspaceRevision` or receive `coherence_mismatch` before drift checks run.
+
+Harness: `scripts/dietcode_coherence.py` · Tests: `scripts/test_coherence_tokens.py`, `scripts/coherence_recovery_smoke.py`
+
+## Archived surfaces
+
+Cockpit UI, HTTP bridge, TypeScript agent-bridge, and Hermes integrations were experimental product surfaces used to prove the model. They are no longer in the active tree. See [archive-note.md](archive-note.md).
 
 ## What is not in this stack
 
 | Item | Role |
 |------|------|
-| Benchmark harness | Parallel reliability track — not a checkpoint |
+| Benchmark harness | Parallel reliability track — not coherence-core |
 | BroccoliQ journal | Offline evaluation — noise bucket |
-| Legacy AppKit editor | Optional; not cockpit |
 | Cloud / remote kernel | Not supported |
 
 ## Related
 
 - [kernel-rpc.md](kernel-rpc.md) — method reference
-- [governed-tasks.md](governed-tasks.md) — HTTP task API
-- [agent-bridge.md](agent-bridge.md) — agent client layer
+- [agent-ergonomics.md](agent-ergonomics.md) — agent loop
+- [testing.md](testing.md) — release gates

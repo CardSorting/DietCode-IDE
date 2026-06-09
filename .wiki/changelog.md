@@ -1,5 +1,43 @@
 # Changelog
 
+## 2026-06-08 — Incremental kernel build + validate speed fix
+
+- Makefile kernel build now uses per-file object compilation (`build/obj/`) instead of monolithic recompile (~45s → ~1s incremental)
+- `coherence-core-v0.1` / `validate` build kernel once, then `restart-agent-server-fast` + fast test targets (no redundant full rebuild per sub-make)
+
+## 2026-06-08 — Benchmark + wiki archive cleanup (pass 6)
+
+- Added `benchmarks/agent_success/ARCHIVE_NOTE.md`; archive banners on RESULTS*.md and WHITEPAPER §9
+- Replaced stale `make agent-bridge-fast` / `benchmark-agent-success*` references in frozen reports
+- `.wiki/architecture.md` reframed as historical ledger with active kernel tree table
+- Verify allowlist `make app` → `make kernel` in `docs/kernel-rpc.md` and `MacControlSupport.mm`
+
+## 2026-06-08 — CI + validate gate (pass 5)
+
+- Added `make validate` (`coherence-core-v0.1` + `test-docs-code-drift`)
+- Added `.github/workflows/coherence-core.yml` (macOS CI)
+- Fixed `dietcode_mutation_authority.collect_bridge_patch_events` — no longer imports removed `dietcode_agent_bundle`
+- Docs: `testing.md` benchmark section points at frozen `benchmarks/` tree
+
+## 2026-06-08 — Editor scaffold prune (pass 4)
+
+### Removed orphaned C++ (not used by kernel)
+- `src/editor/`, `src/search/`, `src/syntax/`, `src/ui/`, `src/core/`, `src/utils/`
+- `src/filesystem/FileWatcher.*`, `tests/test_editor.cpp`
+- Kernel build no longer links `LSPClient.mm` or `FileWatcher.mm`
+- `make test` now runs `agent-self-test` only; added `ARCHIVE.md` index
+
+## 2026-06-08 — Kernel/coherence-core archive
+
+### Removed experimental surfaces
+- Archived and removed `cockpit/`, `legacy_ui/`, `agent-bridge/`, `integrations/`
+- Makefile now targets kernel-only build + `coherence-core-v0.1` gate
+- Docs reframed as kernel/coherence methodology (`docs/archive-note.md`)
+
+### Preserved
+- `dietcode-kernel`, coherence token implementation, RPC harnesses
+- `make coherence-core-v0.1` baseline (coherence tokens + recovery smoke)
+
 ## 2026-06-04 — Phase 4 Hardening: Stability and Accessibility
 
 ### Added keyboard accessibility & VoiceOver

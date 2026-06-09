@@ -101,7 +101,7 @@ def check_integration_scripts_compact() -> None:
 def check_runtime_contracts_doc() -> None:
     assert TESTING_DOC.is_file(), "docs/testing.md missing"
     text = _read(TESTING_DOC)
-    assert "checkpoint-core" in text
+    assert "coherence-core-v0.1" in text
     assert "verify-agent-runtime" in text
 
 

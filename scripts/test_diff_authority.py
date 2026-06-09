@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Regression tests for diff authority audit."""
+"""Regression tests for diff authority audit helpers."""
 
 from __future__ import annotations
 
@@ -13,7 +13,6 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 SCRIPTS = REPO_ROOT / "scripts"
-SIDEBAR_MM = REPO_ROOT / "src/platform/macos/MacAgentSidebar.mm"
 
 
 def _load_module(name: str, path: Path):
@@ -85,12 +84,6 @@ class DiffAuthorityTests(unittest.TestCase):
                 mutation_authority=mutation_report,
             )
             self.assertFalse(report["matchesMutationAuthority"])
-
-    def test_sidebar_view_diff_button(self) -> None:
-        text = SIDEBAR_MM.read_text(encoding="utf-8") if SIDEBAR_MM.is_file() else ""
-        self.assertIn("View Diff", text)
-        self.assertIn("viewDiff:", text)
-        self.assertIn("diffAuthority", text)
 
 
 if __name__ == "__main__":

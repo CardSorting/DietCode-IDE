@@ -31,7 +31,7 @@ This is not decorative language. It encodes a specific worldview:
 | Control tower | Kernel + governed control plane |
 | Clearance before movement | Approval, drift, and verify gates |
 | Centralized authority over airspace | Single mutation authority over the workspace |
-| Visibility (radar, radio, status boards) | Cockpit checkpoint rail, panels, timeline |
+| Visibility (radar, radio, status boards) | Kernel RPC status, coherence events, harness NDJSON |
 | “Landed” is a defined state | `completed` requires verify pass or explicit waive |
 | Incidents are reported, not hidden | Disconnects, expiry, drift blocks surface immediately |
 
@@ -94,7 +94,7 @@ visualization         — what the operator sees
 
 Collapsing these into one opaque stack — typically a chat window with file access — creates a category error. The user believes they are conversing. The system is mutating shared infrastructure. Those are different activities with different risk profiles.
 
-**The cockpit never edits files.** Only the kernel mutates the workspace. This is not a technical detail. It is a **philosophical line**: UI is for steering and visibility; authority lives in one place.
+**Only the kernel mutates the workspace.** Agents and harnesses request clearance via RPC. This is not a technical detail. It is a **philosophical line**: visibility and steering are separate from authority.
 
 Agents, bridges, and scripts may request mutation. They do not perform it. The tower clears; the plane does not clear itself.
 
@@ -129,7 +129,7 @@ Local-first is not nostalgia. It is a **trust boundary**:
 - Verification runs your commands (`make test`, `npm test`, `./verify.sh`).
 - Approvals are yours — not a vendor’s policy engine in another region.
 
-Cloud-assisted models may connect as optional agents. The **control loop** does not depend on them. Hermes, legacy app chat, and future providers are integrations — not the product identity.
+Cloud-assisted models may connect as optional agents. The **control loop** does not depend on them. External agent runtimes are clients of the kernel — not the product identity.
 
 ---
 
@@ -144,7 +144,7 @@ Philosophy is as much about refusal as aspiration. DietCode refuses to:
 | Auto-approve on timeout | Silence is not consent |
 | Auto-resume into drift or verify failure | Recovery requires operator intent |
 | Add gates without questions | Checkpoints stay six until the model changes |
-| Position as an IDE replacement | The surface is the control loop, not an editor |
+| Position as an IDE replacement | The artifact is the kernel/coherence methodology |
 
 These refusals are user-respecting. They trade demo magic for **operational honesty**.
 
@@ -157,7 +157,7 @@ These refusals are user-respecting. They trade demo magic for **operational hone
 | Individual developer | Supervise agent edits without babysitting every line |
 | Team lead | Know that “done” means verified, not merely attempted |
 | Agent author | Stable bridge contracts and checkpoint APIs instead of raw file hacks |
-| Maintainer | A frozen baseline (`checkpoint-core-v0.1`) that proves the loop end-to-end |
+| Maintainer | A frozen baseline (`coherence-core-v0.1`) that proves coherence enforcement |
 
 DietCode does not promise that agents will always succeed. It promises that **success and failure will be visible at the right gate** — and that no component will silently inherit mutation authority it should not hold.
 
@@ -168,12 +168,12 @@ DietCode does not promise that agents will always succeed. It promises that **su
 Philosophy without evidence is marketing. DietCode binds its claims to runnable proof:
 
 ```bash
-make checkpoint-core
+make coherence-core-v0.1
 ```
 
-This gate validates kernel, bridge, cockpit, checkpoint APIs, recovery semantics, and a 53-check vertical slice across npm, Make, and `verify.sh` fixtures. The tag `checkpoint-core-v0.1` marks a frozen baseline for the control loop.
+This gate validates kernel coherence token issuance, enforcement, and deterministic recovery smoke. The tag `coherence-core-v0.1` marks a frozen baseline for the coherence layer.
 
-A parallel research track — adversarial benchmarks under `benchmarks/agent_success/` — evaluates runtime reliability under stress. It informs design; it is not the cockpit gate. See [AGENT_RUNTIME_RELIABILITY.md](../AGENT_RUNTIME_RELIABILITY.md).
+A parallel research track — adversarial benchmarks under `benchmarks/agent_success/` — evaluates runtime reliability under stress. It informs design; it is not the coherence-core gate. See [AGENT_RUNTIME_RELIABILITY.md](../AGENT_RUNTIME_RELIABILITY.md).
 
 ---
 

@@ -82,7 +82,7 @@ Destructive methods return `approvalRequired: true` when autonomy is 3 (default)
 | `verify.run` | Execute | `command`, optional `cwd`, `taskId` |
 | `verify.status` | Read | Running verify state |
 
-Allowed command prefixes (default): `make test`, `make app`, `git diff --check`, `npm test`, `./verify.sh`.
+Allowed command prefixes (default): `make test`, `make kernel`, `git diff --check`, `npm test`, `./verify.sh`.
 
 Emits `verify.completed` or `verify.failed`.
 

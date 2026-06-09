@@ -1,5 +1,7 @@
 # DietCode Agent Success Benchmark — Results Report
 
+> **Archive note:** Frozen results (June 2026). Live reproduction requires restoring `agent-bridge/` from git history; Makefile benchmark targets were removed. See [ARCHIVE_NOTE.md](ARCHIVE_NOTE.md).
+
 **Empirical results from live runtime evaluation — base corpus (tasks 001–030)**  
 Run date: **8 June 2026**  
 DietCode runtime: **1.6.5** (control socket)  
@@ -61,7 +63,7 @@ These results support five concrete claims:
 | Tasks | 30 (`task_001` – `task_030`) |
 | Normal tasks | 20 |
 | Adversarial tasks | 10 |
-| Bridge build | `make agent-bridge-fast` |
+| Bridge build | `agent-bridge/` (restore from git history) |
 
 ### Source artifacts
 
@@ -283,17 +285,17 @@ Adversarial tasks were all verified post-mutation. Reference runs recorded bound
 
 ---
 
-## 9. Recommended next runs
+## 9. Recommended next runs (archived)
 
-To populate the adversarial gap meaningfully:
+To re-run live evaluation, restore `agent-bridge/` from git history first (see [ARCHIVE_NOTE.md](ARCHIVE_NOTE.md)). Example:
 
 ```bash
 # External LLM agent (does not read verify.sh by default)
 export AGENT_BENCHMARK_AGENT_SCRIPT=/path/to/llm_agent.py
 python3 benchmarks/agent_success/run_benchmark.py --executor agent --mode bridge --assume-server-ready
 
-# Combined report
-make benchmark-agent-success-report
+# Combined report (requires restored Makefile targets)
+# make benchmark-agent-success-report
 ```
 
 Compare money-table adversarial pass rates and `wrongFileEditedByTrapType` counts. The expected outcome for naive agents:
@@ -302,11 +304,13 @@ Compare money-table adversarial pass rates and `wrongFileEditedByTrapType` count
 
 ---
 
-## 10. Reproducing these results
+## 10. Reproducing these results (archived)
+
+Restore `agent-bridge/` and Makefile benchmark targets from git history before running.
 
 ```bash
-# Reference baseline (60 rows)
-make benchmark-agent-success-fast
+# Reference baseline (60 rows) — target removed from coherence-core Makefile
+# make benchmark-agent-success-fast
 
 # Agent bridge run
 python3 benchmarks/agent_success/run_benchmark.py \

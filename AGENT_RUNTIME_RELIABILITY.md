@@ -6,34 +6,31 @@ Start here.
 
 Bounded agent code mutation requires observable contracts, safe execution protocols, semantic repair discipline, and replayable mutation evidence.
 
-## Agent Chat trust loop (installed app)
+## Kernel coherence trust loop
 
-The native Agent Chat sidebar (`dietcode-agent-chat`) adds a four-layer authority chain on every run:
+The retained kernel enforces a coherence-first mutation path:
 
 | Layer | Invariant |
 |-------|-----------|
-| Workspace authority | Requested workspace == observed runtime workspace |
-| Mutation authority | Changed files explained by bridge patch telemetry |
-| Diff authority | Visible diff changed set == mutation reported files |
-| Verification authority | Executable verify passes after final mutation |
+| Coherence | Task-scoped reads issue tokens; stale writes return `coherence_mismatch` |
+| Drift | Workspace changes block Edit/Destructive RPCs until refresh |
+| Approval | Destructive mutations require explicit `approval.resolve` |
+| Verification | `verify.run` must pass before harness marks completion |
 
 ```bash
-make smoke-agent-chat-live          # live proof of all four layers
-make verify-hermes-bridge           # integration ladder
-make verify-agent-runtime-full      # full release ladder
+make coherence-core-v0.1          # coherence tokens + recovery smoke
+make verify-agent-runtime-full      # broader RPC release ladder
 ```
 
-Details: [Integrations](docs/integrations.md) · [Agent Bridge](docs/agent-bridge.md).
+Details: [coherence-tokens.md](docs/coherence-tokens.md) · [kernel-rpc.md](docs/kernel-rpc.md)
 
-## Run the release gate
+## Benchmark track (archived bridge dependency)
+
+The adversarial benchmark harness under `benchmarks/agent_success/` was built against the removed TypeScript agent-bridge. It remains as a research artifact; it does not gate `coherence-core-v0.1`.
 
 ```bash
+# Requires archived agent-bridge tooling — may not run on current tree
 make benchmark-contract-release-check
-```
-
-## Validate schemas
-
-```bash
 make test-agent-benchmark-schema
 ```
 

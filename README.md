@@ -103,6 +103,7 @@ Full RPC reference: [kernel-rpc.md](docs/kernel-rpc.md)
 | `make test-coherence-tokens` | Live kernel coherence issuance + enforcement |
 | `make coherence-recovery-smoke-fast` | Deterministic recovery vertical slice |
 | `make coherence-core-v0.1` | Full coherence baseline gate |
+| `make validate` | Baseline gate + docs drift (CI target) |
 | `make restart-agent-server-fast` | Restart kernel socket (no rebuild) |
 | `make test-docs-code-drift` | Docs ↔ contracts ↔ Makefile alignment |
 
@@ -119,7 +120,7 @@ More: [testing.md](docs/testing.md)
 | **Run** | [getting-started](docs/getting-started.md) · [testing](docs/testing.md) · [troubleshooting](docs/troubleshooting.md) |
 | **Build** | [kernel-rpc](docs/kernel-rpc.md) · [agent-tooling](docs/agent-tooling.md) · [file-structure](docs/file-structure.md) |
 
-Index: [docs/README.md](docs/README.md) · Archive note: [docs/archive-note.md](docs/archive-note.md)
+Index: [docs/README.md](docs/README.md) · Archive: [ARCHIVE.md](ARCHIVE.md) · [docs/archive-note.md](docs/archive-note.md)
 
 ---
 

@@ -7,6 +7,7 @@
 | I want to… | Command |
 |------------|---------|
 | Prove coherence baseline on my Mac | `make coherence-core-v0.1` |
+| Full archive validate (baseline + docs drift) | `make validate` |
 | Run only coherence token tests | `make test-coherence-tokens` |
 | Run only recovery smoke | `make coherence-recovery-smoke-fast` |
 | Quick kernel smoke | `make agent-self-test` |
@@ -96,19 +97,15 @@ make restart-agent-server
 
 ## Benchmark track (optional)
 
-```bash
-make benchmark-agent-success-fast   # may require archived bridge tooling
-```
+Frozen results live under `benchmarks/agent_success/`; live runners need restored `agent-bridge/`. See [benchmarks/README.md](../benchmarks/README.md) and [AGENT_RUNTIME_RELIABILITY.md](../AGENT_RUNTIME_RELIABILITY.md). Does not gate coherence core.
 
-See [AGENT_RUNTIME_RELIABILITY.md](../AGENT_RUNTIME_RELIABILITY.md). Parallel evaluation — does not gate coherence core.
-
-## CI-style minimal loop
+## CI / local validate
 
 ```bash
-make kernel
-make coherence-core-v0.1
-make test-docs-code-drift
+make validate
 ```
+
+Runs `coherence-core-v0.1` then `test-docs-code-drift`. GitHub Actions runs the same target on macOS for pushes and pull requests (`.github/workflows/coherence-core.yml`).
 
 If that passes, the kernel coherence model is proven for the frozen baseline.
 

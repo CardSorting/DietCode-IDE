@@ -26,13 +26,14 @@ SCHEMA_VERSION = CLIENT_SCHEMA_VERSION
 SOCKET_PATH = os.path.expanduser(os.environ.get("DIETCODE_SOCKET_PATH", "~/.dietcode/control.sock"))
 TOKEN_PATH = os.path.expanduser(os.environ.get("DIETCODE_TOKEN_PATH", "~/.dietcode/session.token"))
 REPO_ROOT = Path(__file__).resolve().parents[1]
-DEFAULT_APP_PATH = REPO_ROOT / "build" / "DietCode.app" / "Contents" / "MacOS" / "DietCode"
+DEFAULT_KERNEL_PATH = REPO_ROOT / "build" / "dietcode-kernel"
+DEFAULT_APP_PATH = DEFAULT_KERNEL_PATH  # backward-compatible alias
 TEST_WORKSPACE_ENV = "DIETCODE_TEST_WORKSPACE"
 
 # Documented environment variables (grep: rg 'DIETCODE_' docs/agent-environment.md)
 ENV_REGISTRY: dict[str, str] = {
     "DIETCODE_AGENT_CONFIG": "Path to JSON config file (overridden by --config)",
-    "DIETCODE_APP_PATH": "Path to DietCode binary (overridden by --app and config.app)",
+    "DIETCODE_APP_PATH": "Path to dietcode-kernel binary (overridden by --app and config.app)",
     "DIETCODE_SOCKET_PATH": "Unix control socket path (overridden by --socket and config.socket)",
     "DIETCODE_TOKEN_PATH": "Session token file path (overridden by --token-file and config.tokenFile)",
     "DIETCODE_TEST_WORKSPACE": "Workspace root for integration harnesses (default: repo root)",
@@ -296,7 +297,7 @@ def _socket_probe_diagnostic(socket_path: str, errors: list[str]) -> str | None:
 
 def resolve_app_path(app_path: str | os.PathLike[str] | None = None) -> Path:
     configured = app_path or os.environ.get("DIETCODE_APP_PATH")
-    return Path(configured).expanduser().resolve() if configured else DEFAULT_APP_PATH
+    return Path(configured).expanduser().resolve() if configured else DEFAULT_KERNEL_PATH
 
 
 def load_config(config_path: str | None) -> dict[str, Any]:
@@ -336,7 +337,7 @@ def ensure_socket(
 
     app_binary = resolve_app_path(app_path)
     if not app_binary.exists():
-        raise RuntimeError(f"DietCode binary not found at {app_binary}. Run 'make app' first.")
+        raise RuntimeError(f"dietcode-kernel binary not found at {app_binary}. Run 'make kernel' first.")
 
     if not quiet:
         print("control socket not active, asking DietCode to ensure headless control...", file=sys.stderr)
@@ -410,7 +411,7 @@ def read_runtime_diagnostic_lines(path: str = RUNTIME_DIAGNOSTIC_LOG, limit: int
 def _process_status_for_dietcode() -> dict[str, Any] | None:
     try:
         completed = subprocess.run(
-            ["pgrep", "-lf", "DietCode.app/Contents/MacOS/DietCode"],
+            ["pgrep", "-lf", "dietcode-kernel"],
             capture_output=True,
             text=True,
             check=False,
@@ -1516,7 +1517,7 @@ def main() -> int:
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     parser.add_argument("--config", help="JSON config file. Can also be set with DIETCODE_AGENT_CONFIG.")
-    parser.add_argument("--app", help="Path to DietCode binary. Defaults to build/DietCode.app/Contents/MacOS/DietCode.")
+    parser.add_argument("--app", help="Path to dietcode-kernel binary. Defaults to build/dietcode-kernel.")
     parser.add_argument("--socket", help="Unix socket path. Defaults to config, DIETCODE_SOCKET_PATH, or ~/.dietcode/control.sock.")
     parser.add_argument("--token-file", help="Session token path. Defaults to config, DIETCODE_TOKEN_PATH, or ~/.dietcode/session.token.")
     parser.add_argument("--timeout", type=float, help="Seconds to wait for socket startup and connect.")

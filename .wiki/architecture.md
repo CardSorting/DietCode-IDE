@@ -1,10 +1,31 @@
 # Architecture Ledger
 
-## Layer map
+> **Historical ledger.** Sections below document the **removed** editor scaffold, AppKit UI, and cockpit surfaces (pruned in the kernel/coherence-core archive). Do not treat file paths in the historical sections as present in the current tree.
 
-DietCode follows a layered architecture with a portable C++20 core and a thin native platform shell.
+## Active kernel tree (current)
 
-### Pure editor/domain logic
+Headless `dietcode-kernel` + Python coherence harnesses. See [docs/file-structure.md](../docs/file-structure.md) and [ARCHIVE.md](../ARCHIVE.md).
+
+| Path | Role |
+|------|------|
+| `src/kernel/` | Kernel entry, workspace session bridge |
+| `src/kernel/workspace/` | Headless file/patch/verify ops |
+| `src/platform/macos/control/` | JSON-RPC, coherence tokens, approval gates |
+| `src/platform/macos/services/` | Subprocess, diff/symbol/buffer analysis (kernel RPC deps) |
+| `src/filesystem/` | `FileService`, `GitService`, `PathUtils` |
+| `src/domain/control/` | Shared control-plane types |
+| `scripts/dietcode_agent_client.py` | Python RPC CLI |
+| `scripts/dietcode_coherence.py` | Coherence recovery helpers |
+
+Validate: `make validate` (`coherence-core-v0.1` + docs drift).
+
+---
+
+## Historical layer map (removed — pass 4)
+
+The former IDE experiment compiled a portable C++20 editor core plus a macOS control-plane kernel. **These paths were deleted**; the ledger is kept for design archaeology.
+
+### Pure editor/domain logic (removed)
 
 Files:
 
@@ -34,7 +55,7 @@ Verified boundary:
 - These files do not perform network calls.
 - The pure editor/search behavior is covered by `tests/test_editor.cpp`.
 
-### Core orchestration
+### Core orchestration (removed)
 
 Files:
 
@@ -51,9 +72,11 @@ Verified boundary:
 - Core does not import AppKit/Cocoa.
 - Core does not directly perform filesystem or process operations.
 
-### Infrastructure and platform adapters
+### Infrastructure and platform adapters (partially retained)
 
-Files:
+Retained for kernel: `src/filesystem/FileService.*`, `src/filesystem/GitService.*`, `src/platform/macos/control/**`, `src/platform/macos/services/**`. Removed: `FileWatcher`, `src/platform/macos/ui/**`, and most other paths listed below.
+
+Files (historical listing):
 
 - `src/filesystem/FileService.hpp`
 - `src/filesystem/FileService.cpp`
@@ -100,7 +123,7 @@ Verified boundary:
 - Native clipboard access is isolated in `MacClipboard`.
 - `FileWatcher` cannot be started in the current scaffold, preserving the no-background-watcher MVP rule.
 
-### Platform-neutral UI state
+### Platform-neutral UI state (removed)
 
 Files:
 
@@ -123,7 +146,7 @@ Verified boundary:
 - UI headers do not perform file I/O.
 - UI headers do not spawn processes.
 
-### Plumbing
+### Plumbing (removed)
 
 Files:
 
@@ -133,9 +156,9 @@ Verified boundary:
 
 - Contains stateless helper functions only.
 
-## macOS Prototype Native Integration
+## macOS Prototype Native Integration (removed)
 
-The macOS shell integrates native AppKit components:
+The former AppKit shell integrated native components:
 
 - `NSApplication` & `NSAppDelegate` (lifecycle management, clean teardown of child processes)
 - `NSWindow` & `NSWindowController` (focus border tracking, tab management)
@@ -149,9 +172,9 @@ The macOS shell integrates native AppKit components:
 
 This architecture maintains a dependency-free AppKit/C++ vertical slice, prioritizing responsiveness and macOS platform standards before committing to custom text renderers.
 
-## No-hidden-compute audit
+## No-hidden-compute audit (historical — AppKit prototype)
 
-Verified by source inspection of the completed prototype:
+Verified by source inspection of the removed AppKit prototype:
 
 - **No unsolicited network APIs**: DietCode does not perform automatic updates, telemetry transmission, or remote system lookups.
 - **On-demand interactive terminals**: A local interactive PTY terminal process is started *only* when the terminal panel is toggled and used by the user, and compilation tasks spawn `NSTask` on-demand.

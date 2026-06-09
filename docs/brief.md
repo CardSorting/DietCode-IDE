@@ -8,7 +8,7 @@
 
 ## One sentence
 
-**DietCode is air-traffic control for AI edits** — a local runtime on macOS that clears each workspace change through six visible checkpoints before a task can be called done.
+**DietCode is a local kernel experiment** for preserving operational coherence across agent read, diff, patch, approval, and verification surfaces.
 
 ---
 
@@ -22,7 +22,7 @@ When agents edit your code, you usually cannot tell:
 - whether tests passed — or ran at all;
 - whether “finished” means **verified** or merely **stopped talking**.
 
-Most tools hide these in chat. DietCode surfaces them as **checkpoints**.
+DietCode surfaces these as **checkpoints** enforced by `dietcode-kernel`.
 
 ---
 
@@ -30,14 +30,14 @@ Most tools hide these in chat. DietCode surfaces them as **checkpoints**.
 
 | Idea | What it means |
 |------|---------------|
-| **One mutation authority** | Only `dietcode-kernel` writes files. UI and agents request clearance. |
+| **One mutation authority** | Only `dietcode-kernel` writes files. Agents request clearance via RPC. |
+| **Coherence tokens** | Task-scoped reads bind context to kernel revision before drift/approval |
 | **Six checkpoints** | Context → Drift → Approval → Mutation → Verify → Completion |
-| **Bounded tasks** | You submit a governed task, not an open-ended conversation |
-| **Legible failure** | Disconnect, drift block, and verify failure are visible — not smoothed away |
+| **Legible failure** | `coherence_mismatch`, drift block, verify failure — not smoothed away |
 | **Local-first** | Runs on your Mac; your tests decide if the edit worked |
 
 ```text
-You or agent → Cockpit → Bridge → kernel → your project
+agent or script → dietcode_agent_client.py → dietcode-kernel → your project
 ```
 
 ---
@@ -59,11 +59,11 @@ You or agent → Cockpit → Bridge → kernel → your project
 
 ## What it is not
 
-- Not a web IDE or cloud workspace
+- Not an IDE or web UI
 - Not a chat window that silently edits files
 - Not “done” when the model stops
 
-The optional native editor in `legacy_ui/` is legacy. The product is the **control loop**.
+Experimental cockpit, legacy AppKit UI, and agent-bridge surfaces were removed. See [archive-note.md](archive-note.md).
 
 ---
 
@@ -71,29 +71,26 @@ The optional native editor in `legacy_ui/` is legacy. The product is the **contr
 
 | You | DietCode helps you |
 |-----|-------------------|
-| **Developer** | Supervise agent edits with approve / reject / verify |
-| **Team lead** | Know “completed” means verified |
-| **Agent author** | Integrate via bridge workflows, not raw file hacks |
-| **Operator** | Recover cleanly after bridge restart or drift |
+| **Researcher** | Study governed mutation and coherence enforcement |
+| **Agent author** | Integrate via kernel RPC, not raw file hacks |
+| **Maintainer** | Freeze a reproducible coherence baseline |
 
 ---
 
 ## Proof it works
 
 ```bash
-make checkpoint-core
+make coherence-core-v0.1
 ```
 
-Frozen baseline **checkpoint-core-v0.1**: kernel + bridge + cockpit + 53-check vertical slice (npm, Make, `verify.sh` fixtures).
+Frozen baseline **coherence-core-v0.1**: live coherence token tests + deterministic recovery smoke.
 
 Daily dev:
 
 ```bash
 make kernel && make restart-agent-server-fast
-cd cockpit && npm install && npm run dev
+python3 scripts/dietcode_agent_client.py --wait-ready --compact
 ```
-
-Cockpit: http://localhost:5173 · Bridge API: http://127.0.0.1:9477
 
 ---
 
@@ -101,9 +98,9 @@ Cockpit: http://localhost:5173 · Bridge API: http://127.0.0.1:9477
 
 | Situation | You see |
 |-----------|---------|
-| Connection lost | Disconnect — not a silent hang |
-| Approval expired | Explicit expiry — not assumed yes |
+| Stale agent context | `coherence_mismatch` — re-read with `taskId` |
 | Files changed mid-task | Drift gate blocks patch |
+| Approval pending | `approvalRequired` until resolved |
 | Tests fail | Verify gate blocks completion |
 
 DietCode never implies an agent is safe when it is not.
@@ -112,8 +109,7 @@ DietCode never implies an agent is safe when it is not.
 
 ## Optional extras
 
-- **Hermes / legacy app chat** — [integrations/README.md](../integrations/README.md)
-- **Adversarial benchmarks** — [AGENT_RUNTIME_RELIABILITY.md](../AGENT_RUNTIME_RELIABILITY.md) (research track, separate from `checkpoint-core`)
+- **Adversarial benchmarks** — [AGENT_RUNTIME_RELIABILITY.md](../AGENT_RUNTIME_RELIABILITY.md) (research track, separate from coherence-core)
 
 ---
 
@@ -124,11 +120,11 @@ DietCode never implies an agent is safe when it is not.
 | **5 min** | You are here |
 | **20 min** | [philosophy.md](philosophy.md) — why governed mutation |
 | **45 min** | [whitepaper.md](whitepaper.md) — architecture and contracts |
-| **Reference** | [checkpoint-model.md](checkpoint-model.md) — gate specification |
+| **Reference** | [coherence-tokens.md](coherence-tokens.md) · [checkpoint-model.md](checkpoint-model.md) |
 | **Hands-on** | [getting-started.md](getting-started.md) — build and run |
 
 ---
 
 ## Summary
 
-> Agents will edit code. You still own the consequences. DietCode sequences those edits through a local control tower — one authority, six checkpoints, visible clearance, honest completion. Bounded autonomy, not blind trust.
+> Agents will edit code. You still own the consequences. DietCode sequences those edits through a local kernel — one authority, coherence tokens, six checkpoints, honest completion. Bounded autonomy, not blind trust.

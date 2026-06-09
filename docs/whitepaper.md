@@ -2,7 +2,7 @@
 
 **A whitepaper on local control-plane architecture for supervised agent code mutation**
 
-Version 1.0 · June 2026 · Baseline `checkpoint-core-v0.1`  
+Version 1.0 · June 2026 · Baseline `coherence-core-v0.1`  
 Philosophy: [philosophy.md](philosophy.md) · Brief: [brief.md](brief.md)
 
 ---
@@ -11,7 +11,7 @@ Philosophy: [philosophy.md](philosophy.md) · Brief: [brief.md](brief.md)
 
 Autonomous coding agents introduce a structural problem: **mutation**, **orchestration**, and **operator visibility** are typically fused into a single opaque interface. Operators cannot see which safety precondition failed, whether the workspace changed mid-task, or whether “done” means verified or merely attempted.
 
-DietCode is a **governed local mutation runtime** for macOS. A headless C++ kernel holds sole workspace mutation authority. A TypeScript bridge orchestrates bounded tasks with session recovery. A React Cockpit provides checkpoint-aligned supervision. External agents integrate through a TypeScript Agent Bridge or JSON-RPC CLI — they request clearance; they do not write files directly.
+DietCode is a **governed local mutation kernel** for macOS. A headless C++ process (`dietcode-kernel`) holds sole workspace mutation authority. Agents and harnesses integrate through JSON-RPC (`scripts/dietcode_agent_client.py`) — they request clearance; they do not write files directly. Operational coherence is enforced via task-scoped coherence tokens before drift, approval, and verify gates.
 
 The runtime enforces **six checkpoints** (context, drift, approval, mutation, verification, completion) between agent intent and task completion. Agent process exit does not imply success. Tasks reach `completed` only when verification passes or is explicitly waived.
 
@@ -56,7 +56,7 @@ DietCode addresses these as **control-plane** failures, not model failures.
 
 ### 2.1 Single mutation authority
 
-Exactly one component applies patches: `dietcode-kernel`. The Cockpit, bridge, and agents propose operations; the kernel enforces permissions, drift, approvals, and receipts.
+Exactly one component applies patches: `dietcode-kernel`. Agents and harnesses propose operations via RPC; the kernel enforces coherence, permissions, drift, approvals, and receipts.
 
 ### 2.2 Checkpoints as gates, not features
 
@@ -82,7 +82,7 @@ Default deployment: macOS process + local Unix socket (`~/.dietcode/control.sock
 
 ### 2.6 Frozen baseline provability
 
-Control-loop changes must pass `make checkpoint-core` before release. Tag: `checkpoint-core-v0.1`.
+Coherence-layer changes must pass `make coherence-core-v0.1` before release. Tag: `coherence-core-v0.1`.
 
 ---
 
@@ -125,24 +125,19 @@ Waive does not bypass drift or approval.
 
 ```text
 ┌─────────────────────────────────────────────────────────┐
-│  Cockpit (Vite + React) — :5173 dev UI                  │
-│  CheckpointRail · Drift · Approval · Verify · Timeline  │
-└───────────────────────┬─────────────────────────────────┘
-                        │ HTTP + SSE
-┌───────────────────────▼─────────────────────────────────┐
-│  Bridge (cockpit/server/) — :9477                       │
-│  taskRegistry · sessionStore · checkpoints · verifyGate   │
+│  Agents / harnesses (Python CLI, scripts, CI)           │
+│  scripts/dietcode_agent_client.py · dietcode_coherence  │
 └───────────────────────┬─────────────────────────────────┘
                         │ JSON lines + session token
 ┌───────────────────────▼─────────────────────────────────┐
 │  dietcode-kernel (C++/ObjC++)                           │
-│  MacControlServer · WorkspaceSession                    │
+│  MacControlServer · coherence tokens · WorkspaceSession │
 └───────────────────────┬─────────────────────────────────┘
                         │
                    Workspace on disk
 ```
 
-**Agent Bridge** (`agent-bridge/`) provides TypeScript workflows (`safePatchFile`, `awaitApproval`, `awaitWorkspaceDrift`) for Hermes, scripts, and CI. Path: agent → bridge → kernel RPC.
+Experimental cockpit, HTTP bridge, and TypeScript agent-bridge surfaces were archived after proving the model. See [archive-note.md](archive-note.md).
 
 Detail: [architecture.md](architecture.md).
 
@@ -150,21 +145,19 @@ Detail: [architecture.md](architecture.md).
 
 | Component | Owns |
 |-----------|------|
-| Kernel | File mutation, patch apply, verify execution, drift anchoring, approval queue |
-| Bridge | Governed tasks, SSE events, session persistence, checkpoint snapshots |
-| Cockpit | Steering UI, approval/drift/verify panels, infrastructure banners |
-| Agent bridge | Workflow API, error enrichment, packaging for external agents |
+| Kernel | File mutation, coherence tokens, patch apply, verify execution, drift anchoring, approval queue |
+| Python CLI | RPC transport, harness orchestration, coherence recovery helpers |
 
-### 4.2 Governed task path
+### 4.2 Governed agent path
 
 ```text
-POST /api/tasks → taskRunner spawns script → agent reads (1)
+file.read (taskId) → coherence token (1)
   → patch.apply → approval if supervised (2–3)
-  → workspace.mutated (4) → verification_required (5)
-  → run-verify → completed (6)
+  → workspace.mutated (4) → verify.run (5)
+  → harness marks completed (6)
 ```
 
-Modes: `supervised`, `trusted`, `smoke` (deterministic harness). See [governed-tasks.md](governed-tasks.md).
+Recovery smoke: `scripts/coherence_recovery_smoke.py`. See [coherence-tokens.md](coherence-tokens.md).
 
 ---
 
@@ -223,13 +216,13 @@ Detail: [session-recovery.md](session-recovery.md).
 
 ## 7. Verification routing
 
-After mutation, `workspace.mutated` arms checkpoint 5. Bridge resolves verify command via:
+After mutation, `workspace.mutated` arms checkpoint 5. Harnesses resolve verify command via `dietcode_verification_authority.py`:
 
 1. `./verify.sh`
 2. `make test`
 3. `npm test`
 
-Resolver: `cockpit/server/verifyCommandResolver.ts`. Subproject workspaces pass `cwd` relative to kernel root.
+Subproject workspaces pass `cwd` relative to kernel root in `verify.run`.
 
 Detail: [verify-gate.md](verify-gate.md).
 
@@ -237,40 +230,22 @@ Detail: [verify-gate.md](verify-gate.md).
 
 ## 8. Release baseline and evidence
 
-### 8.1 checkpoint-core gate
+### 8.1 coherence-core gate
 
 ```bash
-make checkpoint-core
+make coherence-core-v0.1
 ```
 
 | Step | Proves |
 |------|--------|
-| `make kernel` | Kernel compiles |
-| `agent-bridge-fast` | Bridge package builds |
-| `make cockpit` | UI + server types build |
-| `make cockpit-smoke` | 53-check vertical slice |
-| `test-checkpoint-core-unit` | Resolver, session, checkpoint unit tests |
-| `test-docs-code-drift` | Docs ↔ contracts alignment |
+| `test-coherence-tokens` | Kernel coherence issuance + enforcement |
+| `coherence-recovery-smoke-fast` | Stale block → refresh → retry → verify |
 
-### 8.2 Vertical slice fixtures
+Fixtures: `scripts/fixtures/coherence_recovery/`. Detail: [testing.md](testing.md).
 
-`scripts/fixtures/cockpit_smoke/`:
+### 8.2 Parallel reliability track
 
-| Fixture | Verify |
-|---------|--------|
-| `npm-test/` | `npm test` |
-| `make-test/` | `make test` |
-| `verify-sh/` | `./verify.sh` |
-
-Per fixture: task submit → drift → approval → mutation → verify → `completed` after verified; session survives bridge reload.
-
-Orchestrator: `scripts/cockpit_vertical_slice.py`.
-
-Detail: [testing.md](testing.md).
-
-### 8.3 Parallel reliability track
-
-Adversarial benchmarks (`benchmarks/agent_success/`) evaluate runtime contracts under trap-heavy fixtures. They produce mutation traces and release gates for research — **not** a substitute for `checkpoint-core`. See [AGENT_RUNTIME_RELIABILITY.md](../AGENT_RUNTIME_RELIABILITY.md).
+Adversarial benchmarks (`benchmarks/agent_success/`) evaluate runtime contracts under trap-heavy fixtures. They produce mutation traces and release gates for research — **not** a substitute for `coherence-core-v0.1`. See [AGENT_RUNTIME_RELIABILITY.md](../AGENT_RUNTIME_RELIABILITY.md).
 
 ---
 
@@ -304,8 +279,8 @@ DietCode does not replace code review or org-wide security policy. It makes **ag
 ## 11. Limitations and non-goals
 
 - **macOS only** for the kernel control plane at this baseline
-- **Not** a general-purpose IDE — `legacy_ui/` is optional compatibility
-- **Not** model-specific — Hermes is optional integration
+- **Not** a general-purpose IDE — UI surfaces were archived
+- **Not** model-specific — any agent client may use kernel RPC
 - **Not** fully autonomous coding — bounded autonomy by design
 - **Not** cloud-hosted multi-tenant control plane in v0.1
 
@@ -313,9 +288,9 @@ DietCode does not replace code review or org-wide security policy. It makes **ag
 
 ## 12. Conclusion
 
-DietCode reframes agentic coding as **governed mutation**: one authority, six checkpoints, legible failure, and completion semantics tied to verification. The architecture is intentionally separable — kernel, bridge, cockpit, agent bridge — so that each layer answers one class of operational question.
+DietCode reframes agentic coding as **governed mutation**: one authority, coherence tokens, six checkpoints, legible failure, and completion semantics tied to verification.
 
-The frozen baseline `checkpoint-core-v0.1` exists so that claims about the control loop remain **executable**, not aspirational. Run the gate, watch the checkpoints, and call a task done only when the tower clears it.
+The frozen baseline `coherence-core-v0.1` exists so that claims about operational coherence remain **executable**, not aspirational. Run the gate, enforce the tokens, and call a task done only when verify clears.
 
 ---
 
@@ -327,6 +302,7 @@ The frozen baseline `checkpoint-core-v0.1` exists so that claims about the contr
 | [brief.md](brief.md) | Executive companion |
 | [checkpoint-model.md](checkpoint-model.md) | Gate specification + feature audit |
 | [architecture.md](architecture.md) | Implementation map |
-| [governed-tasks.md](governed-tasks.md) | Task API |
-| [agent-bridge.md](agent-bridge.md) | External agent integration |
+| [coherence-tokens.md](coherence-tokens.md) | Coherence token model |
+| [kernel-rpc.md](kernel-rpc.md) | RPC reference |
+| [archive-note.md](archive-note.md) | Removed experimental surfaces |
 | [benchmarks/agent_success/WHITEPAPER.md](../benchmarks/agent_success/WHITEPAPER.md) | Adversarial evaluation instrument |

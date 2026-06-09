@@ -267,15 +267,6 @@ def main():
             ping_res = call(sock, token, "rpc.ping")
             assert ping_res.get("result", {}).get("version") == "1.6.6"
 
-            # Check Info.plist in build directory
-            plist_path = "build/DietCode.app/Contents/Info.plist"
-            assert os.path.exists(plist_path), "Info.plist in build dir missing"
-            with open(plist_path, "rb") as f:
-                plist = plistlib.load(f)
-            plist_version = plist.get("CFBundleShortVersionString")
-            print(f"Info.plist CFBundleShortVersionString: {plist_version}")
-            assert plist_version == "1.6.6", f"Info.plist version mismatch! Got {plist_version}"
-
             print("\nAll v1.6.6 Release Constant Hygiene Verification Cases Passed Successfully!")
             return 0
 

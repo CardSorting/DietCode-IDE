@@ -1,5 +1,9 @@
 #!/usr/bin/env python3
-"""Agent success benchmark runner — Mode A (raw RPC) and Mode B (Agent Bridge)."""
+"""Agent success benchmark runner — Mode A (raw RPC) and Mode B (Agent Bridge).
+
+Archive note: bridge mode requires agent-bridge/ restored from git history.
+Makefile benchmark targets were removed in the coherence-core archive.
+"""
 
 from __future__ import annotations
 
@@ -235,7 +239,10 @@ class BridgeSession:
 
     def __enter__(self) -> BridgeSession:
         if not BRIDGE_CLI.exists():
-            raise RuntimeError(f"bridge CLI not built: {BRIDGE_CLI} — run `make agent-bridge-fast`")
+            raise RuntimeError(
+                f"bridge CLI missing: {BRIDGE_CLI} — restore agent-bridge/ from git history "
+                "and build dist/cli/dietcode-agent-client.js (see benchmarks/agent_success/ARCHIVE_NOTE.md)"
+            )
         return self
 
     def __exit__(self, *args: object) -> None:

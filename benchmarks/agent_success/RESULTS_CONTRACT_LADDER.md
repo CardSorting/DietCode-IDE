@@ -1,5 +1,7 @@
 # Runtime Contract Evaluation Ladder — Results
 
+> **Archive note:** Frozen results (June 2026). Live reproduction requires restoring `agent-bridge/` from git history. See [ARCHIVE_NOTE.md](ARCHIVE_NOTE.md).
+
 **Empirical profile sweep on nightmare tasks (051–060)**
 
 **Generated:** 2026-06-08T11:37:35Z

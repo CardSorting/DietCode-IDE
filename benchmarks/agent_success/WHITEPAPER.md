@@ -521,27 +521,25 @@ From `RESULTS_CONTRACT_LADDER.md`:
 
 ---
 
-## 9. Running the benchmark
+## 9. Running the benchmark (archived)
+
+> **Archive note:** Makefile benchmark targets and `agent-bridge/` were removed in the coherence-core archive. Frozen results remain; live runs require restoring both from git history. See [ARCHIVE_NOTE.md](ARCHIVE_NOTE.md).
 
 ```bash
 # Regenerate fixtures (optional — committed fixtures ship with the repo)
 python3 benchmarks/agent_success/generate_fixtures.py
 
-# Full run — rebuild app, restart server, run all tasks, print report
-make benchmark-agent-success
+# Full run — requires restored agent-bridge/ + Makefile targets
+# make benchmark-agent-success
+# make benchmark-agent-success-fast
+# make benchmark-agent-success-report
+# make test-agent-success-report
+# make test-contract-ladder
+# make benchmark-contract-ladder
 
-# Fast iteration — assumes runtime already matches HEAD
-make benchmark-agent-success-fast
-
-# Report only (latest JSONL)
-make benchmark-agent-success-report
-
-# Smoke tests
-make test-agent-success-report
-make test-contract-ladder
-
-# Runtime Contract Evaluation Ladder (nightmare × all profiles)
-make benchmark-contract-ladder
+# Direct runner (after restoring agent-bridge/dist/cli/dietcode-agent-client.js)
+python3 benchmarks/agent_success/run_benchmark.py --assume-server-ready \
+  --executor reference --run-id my_run
 ```
 
 ### 9.1 Selective runs
@@ -606,7 +604,7 @@ The desired property:
 
 The benchmark exercises the DietCode control plane documented in:
 
-- [Agent Bridge](../../docs/agent-bridge.md)
+- [Archive note](../../docs/archive-note.md) — removed agent-bridge surface
 - [Testing & release gates](../../docs/testing.md)
 - [Runtime Invariants](../../docs/runtime-invariants.md)
 
@@ -683,7 +681,9 @@ DietCode does not only measure whether an agent can patch code. It measures **wh
 | `results/*.jsonl` | Raw run output |
 | `results/summary.md` | Claim-ready report |
 
-## Appendix B: Makefile targets
+## Appendix B: Makefile targets (removed from coherence-core archive)
+
+These targets existed when `agent-bridge/` was in-tree. Restore from git history to re-enable.
 
 | Target | Action |
 |--------|--------|
@@ -693,6 +693,8 @@ DietCode does not only measure whether an agent can patch code. It measures **wh
 | `benchmark-contract-ladder` | Nightmare × all profiles → ladder report |
 | `test-agent-success-report` | Report format smoke test |
 | `test-contract-ladder` | Ladder smoke test |
+
+Active repo gate: `make validate` (see [ARCHIVE_NOTE.md](ARCHIVE_NOTE.md)).
 
 ## Appendix C: Version history
 

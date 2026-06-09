@@ -213,7 +213,7 @@ BOOL IsTextBinary(NSString* text) {
 }
 
 NSArray<NSString*>* DefaultVerifyCommands(void) {
-    return @[@"make test", @"make app", @"git diff --check", @"npm test", @"./verify.sh"];
+    return @[@"make test", @"make kernel", @"git diff --check", @"npm test", @"./verify.sh"];
 }
 
 NSArray<NSString*>* VerifyCommandsAllowlist(void) {

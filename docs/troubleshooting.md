@@ -10,16 +10,17 @@
 |--------------|---------------|---------------|
 | “Kernel offline” / socket error | The engine isn’t running | `make restart-agent-server-fast` |
 | Errors right after `git pull` | Old binary still running | `make kernel && make restart-agent-server-fast` |
-| Patch blocked — “drift” | Files changed while agent worked | Refresh context in Cockpit Drift panel |
-| Task waiting forever | Approval needed | Cockpit **Approvals** panel |
-| Agent done but task not “completed” | Tests haven’t passed yet | Run verify from Cockpit |
-| Not sure install is healthy | Baseline may be broken | `make checkpoint-core` |
+| Patch blocked — coherence | Agent context stale | Re-read with `taskId` — [coherence-tokens.md](coherence-tokens.md) |
+| Patch blocked — “drift” | Files changed while agent worked | `workspace.refreshAnchor` |
+| Approval pending | Mutation needs clearance | `approval.resolve` via RPC |
+| Agent done but verify not passed | Tests haven’t passed yet | `verify.run` |
+| Not sure install is healthy | Baseline may be broken | `make coherence-core-v0.1` |
 
 ---
 
 ## Kernel socket
 
-**Symptom:** `socket not active`, `transport_error`, bridge banner “Kernel offline”.
+**Symptom:** `socket not active`, `transport_error`.
 
 ```bash
 make restart-agent-server-fast
@@ -36,15 +37,14 @@ Paths: socket `~/.dietcode/control.sock` · token `~/.dietcode/session.token` (m
 
 ---
 
-## Bridge: invalid session token
+## Invalid session token
 
-**Symptom:** `kernelConnected: false`, `Invalid or missing session token`.
+**Symptom:** `Invalid or missing session token`.
 
-The bridge must send `token` at the **top level** of each kernel request (not inside `params`). Restart the bridge after a kernel restart so it reads the new token file.
+Each kernel request must send `token` at the **top level** (not inside `params`). Restart the kernel after token rotation:
 
 ```bash
-pkill -f "tsx server/bridge.ts"
-cd cockpit && npm run bridge
+make restart-agent-server-fast
 ```
 
 ---
@@ -61,53 +61,59 @@ make kernel restart-agent-server-fast
 
 ---
 
+## Coherence mismatch
+
+**Symptom:** `coherence_mismatch`, `anchored_file_changed`.
+
+**What it means:** The agent’s coherence token no longer matches kernel revision or anchored file content.
+
+```bash
+python3 scripts/dietcode_agent_client.py rpc file.read \
+  --params '{"path":"src/foo.ts","taskId":"task_1"}'
+# Regenerate patch with fresh coherenceTokenId + expectedWorkspaceRevision
+```
+
+See [coherence-tokens.md](coherence-tokens.md) and `scripts/dietcode_coherence.py`.
+
+---
+
 ## Workspace drift blocks patches
 
 **Symptom:** `workspaceDriftRequired`, checkpoint 2 active, `workspace.drift.detected`.
 
-**What it means:** Someone (or another tool) changed files after the agent read them. DietCode blocks the patch until you refresh or explicitly continue.
-
 ```bash
-# Via bridge
-curl -X POST http://127.0.0.1:9477/api/workspace/refresh-anchor
-
-# Via kernel RPC
 python3 scripts/dietcode_agent_client.py rpc workspace.refreshAnchor
 ```
 
-Or use the Cockpit **Drift** panel → **Refresh context**.  
+Or `workspace.continueAnyway` for supervised override.  
 Deep dive: [workspace-drift.md](workspace-drift.md).
 
 ---
 
 ## Approval stuck
 
-**Symptom:** Task `awaiting_approval`, pending approval in kernel.
+**Symptom:** `approvalRequired`, pending approval in kernel.
 
 ```bash
-curl http://127.0.0.1:9477/api/approvals?status=pending
-curl -X POST http://127.0.0.1:9477/api/approvals/<id>/resolve \
-  -H 'Content-Type: application/json' \
-  -d '{"decision":"approved","resolvedBy":"cockpit"}'
+python3 scripts/dietcode_agent_client.py rpc approval.list
+python3 scripts/dietcode_agent_client.py rpc approval.resolve \
+  --params '{"approvalId":"appr_1","decision":"approved","resolvedBy":"operator"}'
 ```
 
 Approvals expire after 30 minutes. See [approval-lifecycle.md](approval-lifecycle.md).
 
 ---
 
-## Task completed before verify
+## Verify not passed
 
-**Symptom:** Agent exited 0 but task not `completed`.
-
-**Expected behavior:** Mutations arm checkpoint 5. The task stays open until verify passes or is waived.
+**Symptom:** Mutation applied but verify gate still active.
 
 ```bash
-curl -X POST http://127.0.0.1:9477/api/tasks/<taskId>/run-verify \
-  -H 'Content-Type: application/json' \
-  -d '{}'
+python3 scripts/dietcode_agent_client.py rpc verify.run \
+  --params '{"command":"make test"}'
 ```
 
-Or use the Cockpit verify controls. See [verify-gate.md](verify-gate.md).
+See [verify-gate.md](verify-gate.md).
 
 ---
 
@@ -117,14 +123,12 @@ Or use the Cockpit verify controls. See [verify-gate.md](verify-gate.md).
 
 Allowed defaults include `make test`, `npm test`, `./verify.sh`. Custom commands need kernel allowlist or `AgentVerifyCommands` user defaults.
 
-For subproject workspaces, the bridge passes `cwd` relative to kernel root when the task workspace is a subdirectory.
-
 ---
 
-## `cockpit-smoke` failures
+## Coherence test failures
 
 ```bash
-make cockpit-smoke 2>&1 | python3 -c "
+make test-coherence-tokens 2>&1 | python3 -c "
 import sys, json
 for line in sys.stdin:
     if line.strip().startswith('{'):
@@ -137,10 +141,9 @@ for line in sys.stdin:
 Common causes:
 
 - Kernel not restarted after C++ pull
-- Port 9477 in use by stale bridge
-- Fixture workspace not under kernel root (`build/cockpit-smoke-ws`)
+- Socket owned by stale process
 
-Full gate docs: [testing.md](testing.md)
+Full gate: [testing.md](testing.md)
 
 ---
 
@@ -166,7 +169,7 @@ Every failure envelope should include `string_code`, `recovery_hint`, and `nextR
 
 ## Still stuck
 
-1. `make checkpoint-core` — reproduces the full baseline on your machine
+1. `make coherence-core-v0.1` — reproduces the coherence baseline on your machine
 2. [getting-started.md](getting-started.md) — clean build path from scratch
 3. [architecture.md](architecture.md) — which component owns what
 4. [checkpoint-model.md](checkpoint-model.md) — which gate is blocking progress

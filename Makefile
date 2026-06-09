@@ -18,14 +18,6 @@ KERNEL_NAME := dietcode-kernel
 KERNEL_BINARY := $(BUILD_DIR)/$(KERNEL_NAME)
 KERNEL_RESOURCES := $(BUILD_DIR)/resources
 KERNEL_BIN := $(KERNEL_RESOURCES)/bin
-TEST_BIN := $(BUILD_DIR)/test_editor
-
-CORE_CPP := \
-	src/editor/TextBuffer.cpp \
-	src/editor/EditorDocument.cpp \
-	src/search/FindInFile.cpp \
-	src/filesystem/FileService.cpp \
-	src/syntax/Tokenizer.cpp
 
 KERNEL_WORKSPACE_CPP := \
 	src/kernel/workspace/WorkspaceFileOps.cpp \
@@ -83,12 +75,14 @@ CONTROL_MM := \
 	src/platform/macos/services/WorkspaceAnalysisService.mm \
 	src/platform/macos/services/BufferStateService.mm \
 	src/platform/macos/services/SubprocessRunner.mm \
-	src/filesystem/GitService.mm \
-	src/filesystem/FileWatcher.mm \
-	src/core/LSPClient.mm
+	src/filesystem/GitService.mm
 
 KERNEL_OBJCXXFLAGS := $(OBJCXXFLAGS) -DDIETCODE_KERNEL_BUILD
 KERNEL_SOURCES := $(KERNEL_WORKSPACE_CPP) src/filesystem/FileService.cpp $(CONTROL_MM) $(KERNEL_APP_MM)
+KERNEL_OBJ_DIR := $(BUILD_DIR)/obj
+KERNEL_CPP_OBJECTS := $(patsubst %.cpp,$(KERNEL_OBJ_DIR)/%.o,$(filter %.cpp,$(KERNEL_SOURCES)))
+KERNEL_MM_OBJECTS := $(patsubst %.mm,$(KERNEL_OBJ_DIR)/%.o,$(filter %.mm,$(KERNEL_SOURCES)))
+KERNEL_OBJECTS := $(KERNEL_CPP_OBJECTS) $(KERNEL_MM_OBJECTS)
 
 .PHONY: all kernel app headless ensure-socket restart-agent-server restart-agent-server-fast \
 	agent-ready agent-status agent-ping agent-methods agent-capabilities agent-self-test \
@@ -100,10 +94,10 @@ KERNEL_SOURCES := $(KERNEL_WORKSPACE_CPP) src/filesystem/FileService.cpp $(CONTR
 	test-docs-code-drift test-partial-success-closure test-broccoliq-runtime-memory \
 	test-broccoliq-runtime-memory-fast test-runtime-native-integration \
 	test-runtime-native-integration-fast test-coherence-tokens test-coherence-tokens-fast \
-	coherence-recovery-smoke coherence-recovery-smoke-fast coherence-core-v0.1 \
+	coherence-recovery-smoke coherence-recovery-smoke-fast coherence-core-v0.1 validate \
 	agent-integration test-agent-integration verify-agent-runtime verify-agent-runtime-fast \
 	verify-agent-runtime-full verify-agent-runtime-full-fast release-check-agent-runtime \
-	test-mutation-authority test-diff-authority test-verification-authority test clean
+	test-mutation-authority test-diff-authority test-verification-authority test test-editor clean
 
 all: kernel
 
@@ -116,8 +110,16 @@ $(KERNEL_RESOURCES):
 $(KERNEL_BIN):
 	mkdir -p $(KERNEL_BIN)
 
-$(KERNEL_BINARY): $(BUILD_DIR) $(KERNEL_SOURCES)
-	$(CXX) $(KERNEL_OBJCXXFLAGS) $(KERNEL_SOURCES) -framework Cocoa -lsqlite3 -o $(KERNEL_BINARY)
+$(KERNEL_OBJ_DIR)/%.o: %.cpp | $(BUILD_DIR)
+	@mkdir -p $(dir $@)
+	$(CXX) $(CXXFLAGS) -DDIETCODE_KERNEL_BUILD -c $< -o $@
+
+$(KERNEL_OBJ_DIR)/%.o: %.mm | $(BUILD_DIR)
+	@mkdir -p $(dir $@)
+	$(CXX) $(KERNEL_OBJCXXFLAGS) -c $< -o $@
+
+$(KERNEL_BINARY): $(KERNEL_OBJECTS) | $(BUILD_DIR)
+	$(CXX) $(KERNEL_OBJECTS) -framework Cocoa -lsqlite3 -o $(KERNEL_BINARY)
 
 kernel: $(KERNEL_BINARY)
 
@@ -250,7 +252,7 @@ test-runtime-native-integration: restart-agent-server
 test-runtime-native-integration-fast:
 	DIETCODE_REPO_ROOT=$(CURDIR) python3 scripts/test_runtime_native_integration.py --compact
 
-test-coherence-tokens: restart-agent-server
+test-coherence-tokens: kernel restart-agent-server-fast
 	DIETCODE_REPO_ROOT=$(CURDIR) python3 scripts/dietcode_agent_client.py --wait-ready --compact --error-json --quiet
 	DIETCODE_REPO_ROOT=$(CURDIR) python3 scripts/test_coherence_tokens.py --compact
 
@@ -264,10 +266,17 @@ coherence-recovery-smoke: restart-agent-server
 coherence-recovery-smoke-fast:
 	DIETCODE_REPO_ROOT=$(CURDIR) PYTHONUNBUFFERED=1 python3 scripts/coherence_recovery_smoke.py --compact
 
-coherence-core-v0.1:
-	$(MAKE) test-coherence-tokens
+coherence-core-v0.1: kernel
+	$(MAKE) restart-agent-server-fast
+	DIETCODE_REPO_ROOT=$(CURDIR) python3 scripts/dietcode_agent_client.py --wait-ready --compact --error-json --quiet
+	$(MAKE) test-coherence-tokens-fast
 	$(MAKE) coherence-recovery-smoke-fast
 	@echo "coherence-core-v0.1 — kernel coherence tokens + recovery smoke: OK"
+
+validate:
+	$(MAKE) coherence-core-v0.1
+	$(MAKE) test-docs-code-drift
+	@echo "validate — coherence-core-v0.1 + docs drift: OK"
 
 test-ergonomics: kernel
 	python3 scripts/dietcode_agent_client.py --wait-ready --compact --error-json --quiet
@@ -303,11 +312,11 @@ verify-agent-runtime-full-fast:
 release-check-agent-runtime:
 	python3 scripts/release_check_agent_runtime.py --compact
 
-$(TEST_BIN): $(BUILD_DIR) $(CORE_CPP) tests/test_editor.cpp
-	$(CXX) $(CXXFLAGS) $(CORE_CPP) tests/test_editor.cpp -o $(TEST_BIN)
+test: agent-self-test
 
-test: $(TEST_BIN) agent-self-test
-	$(TEST_BIN)
+test-editor:
+	@echo "Editor C++ unit tests removed — use make coherence-core-v0.1 for the kernel baseline." >&2
+	@exit 1
 
 clean:
 	rm -rf $(BUILD_DIR)

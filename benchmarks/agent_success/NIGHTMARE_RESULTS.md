@@ -1,5 +1,7 @@
 # DietCode Agent Success Benchmark — Nightmare Tier Results
 
+> **Archive note:** Frozen results (June 2026). Live reproduction requires restoring `agent-bridge/` from git history. See [ARCHIVE_NOTE.md](ARCHIVE_NOTE.md).
+
 **Empirical results from the adversarial runtime contract layer (tasks 051–060)**  
 Run date: **8 June 2026**  
 DietCode runtime: **1.6.5** (control socket)  
@@ -76,7 +78,7 @@ Beyond the base benchmark fields, nightmare runs emit:
 | Socket | `~/.dietcode/control.sock` |
 | Tasks | 10 (`task_051` – `task_060`) |
 | Tier | `nightmare` (`nightmare: true` in metadata) |
-| Bridge build | `make agent-bridge-fast` |
+| Bridge build | `agent-bridge/` (restore from git history) |
 
 ### Source artifacts
 
@@ -286,15 +288,17 @@ Expected outcome for LLM agents without `verify_invariant.sh` access: additional
 
 ---
 
-## 10. Reproducing these results
+## 10. Reproducing these results (archived)
+
+Restore `agent-bridge/` from git history before bridge-mode runs. See [ARCHIVE_NOTE.md](ARCHIVE_NOTE.md).
 
 ```bash
 # Regenerate nightmare fixtures
 python3 benchmarks/agent_success/generate_fixtures.py \
   --task task_051  # repeat through task_060
 
-# Full paper runs (requires live DietCode socket)
-make agent-bridge-fast   # if bridge stale
+# Full paper runs (requires live DietCode socket + restored agent-bridge/)
+# git checkout <commit> -- agent-bridge/ && make agent-bridge-fast
 
 python3 benchmarks/agent_success/run_benchmark.py --assume-server-ready \
   --executor reference --run-id nightmare_paper_ref_clean_20260608 \

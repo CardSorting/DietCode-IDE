@@ -235,12 +235,9 @@ def mutation_authority_label(mode: str) -> str:
 
 
 def collect_bridge_patch_events(ctx: Any, workspace: Path, event_log: Path) -> list[dict[str, Any]]:
-    from dietcode_agent_bundle import fetch_bridge_timeline
-
-    log_events = read_mutation_event_log(event_log)
-    timeline_payload = fetch_bridge_timeline(ctx, workspace, limit=80)
-    timeline_events = parse_timeline_patch_events(timeline_payload, workspace)
-    return merge_patch_events(log_events, timeline_events)
+    """Collect patch events from the local mutation log (agent-bridge timeline removed)."""
+    _ = ctx  # retained for callers that pass a kernel RPC context
+    return read_mutation_event_log(event_log)
 
 
 def empty_mutation_authority() -> dict[str, Any]:

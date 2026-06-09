@@ -2,34 +2,28 @@
 
 ## Current verified state
 
-DietCode is a fully functional macOS-first native IDE prototype, now hardened with Phase 4 (Stability and Accessibility) systems. The codebase features a layered C++20 core, a native Cocoa/AppKit shell, PTY interactive terminal execution, auto-recovery snapshots, large-file performance modes, full keyboard/VoiceOver support, and built-in High Contrast accessibility themes.
+DietCode is a **kernel/coherence-core archive**: headless `dietcode-kernel` with operational coherence enforcement across agent read, patch, approval, and verify surfaces.
+
+Experimental cockpit, legacy AppKit UI, agent-bridge, and editor scaffold code were removed. See [ARCHIVE.md](../ARCHIVE.md) and [docs/archive-note.md](../docs/archive-note.md).
 
 ## Verified deliverables
 
-- Product, UX, and performance specifications in `docs/`.
-- Portable C++20 core (document models, buffer manipulation, simple undo stack, text searching) in `src/`.
-- Native Cocoa/AppKit integration (windows, menus, file outlines, terminals, custom drawing) in `src/platform/macos/`.
-- Auto-recovery backing store at `~/.dietcode/backups/`.
-- No-dependency unit tests in `tests/test_editor.cpp`.
-- Clean Makefile with targets to build, test, run, and clean the application.
+- Coherence model docs in `docs/`
+- Headless kernel: `src/kernel/`, `src/platform/macos/control/`
+- Python RPC CLI and coherence harnesses in `scripts/`
+- Frozen benchmark research under `benchmarks/agent_success/`
 
 ## Verified build state
 
-Command executed successfully:
-
 ```sh
-make clean && make test && make app
+make kernel
+make coherence-core-v0.1
 ```
-
-Observed result:
-
-- `make test` compiles and runs the suite, producing: `All DietCode editor tests passed.`
-- `make app` compiles all C++ and Objective-C++ sources into a native, warning-free application bundle `build/DietCode.app`.
-
 
 ## Navigation
 
-- See `.wiki/changelog.md` for exact changes.
-- See `.wiki/architecture.md` for layer mapping and boundaries.
-- See `.wiki/build-and-test.md` for verified commands.
-- See `.wiki/decisions.md` for product and implementation decisions.
+- [ARCHIVE.md](../ARCHIVE.md) — removed vs retained map
+- `.wiki/changelog.md` — historical changes
+- `.wiki/architecture.md` — layer map (includes historical editor notes)
+- `.wiki/build-and-test.md` — current commands
+- `.wiki/decisions.md` — product decisions

@@ -793,6 +793,7 @@ REQUIRED_MAKE_TARGETS = frozenset({
     "test-coherence-tokens",
     "coherence-recovery-smoke-fast",
     "coherence-core-v0.1",
+    "validate",
 })
 
 # CONTRACT: Live integration suite registry (name → script path).

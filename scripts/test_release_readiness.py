@@ -75,7 +75,7 @@ def test_release_docs_present() -> None:
 
 def test_testing_doc_mentions_release() -> None:
     text = DOCS["testing"].read_text(encoding="utf-8")
-    assert "checkpoint-core" in text
+    assert "coherence-core-v0.1" in text
     assert "verify-agent-runtime-full" in text or "release-check-agent-runtime" in text
 
 

@@ -11,7 +11,7 @@ DietCode tracks workspace **state validity** so the agent cannot mutate files af
 | RPC | Permission | Purpose |
 |-----|------------|---------|
 | `workspace.status` | Read | Full drift snapshot |
-| `workspace.snapshot` | Read | Point-in-time file hashes (existing) |
+| `workspace.snapshot` | Read | Point-in-time file hashes |
 | `workspace.refreshAnchor` | Read | Re-anchor tracked files + git HEAD; bumps `contextRefreshId` |
 | `workspace.continueAnyway` | Read | One-shot override (5 min) for supervised flows |
 
@@ -46,50 +46,26 @@ Unblock paths:
 
 1. **Refresh context** — `workspace.refreshAnchor` then retry with `contextRefreshId`
 2. **Continue anyway** — `workspace.continueAnyway` or `continueAnyway: true` on the mutation
-3. Cockpit drives both via bridge HTTP (see below)
 
 Kernel emits `workspace.drift.detected` when a mutation is blocked.
 
-**Layering:** For governed mutations (`taskId` set), the kernel checks coherence **before** drift so agents receive `coherence_mismatch` (precise) rather than `workspaceDriftRequired` (broad). Drift still applies when no task coherence envelope is in play.
+**Layering:** For governed mutations (`taskId` set), the kernel checks coherence **before** drift so agents receive `coherence_mismatch` (precise) rather than `workspaceDriftRequired` (broad). Drift still applies when no task coherence envelope is in play. See [coherence-tokens.md](./coherence-tokens.md).
 
-## Cockpit
+## Agent loop
 
-When drift is detected, the cockpit shows:
+`patch.apply` / `patch.applyBatch` handle `workspaceDriftRequired` in harnesses:
 
-```text
-Workspace changed outside DietCode
-Affected files:
-- src/foo.ts — changed since agent read it
-- package.json — changed after verification
+1. Call `workspace.refreshAnchor`
+2. Poll `workspace.status` until `driftDetected` is false
+3. Retry mutation with returned `contextRefreshId`
 
-Actions: Refresh context | Cancel task | Continue anyway
-```
-
-Bridge endpoints:
-
-| Endpoint | Action |
-|----------|--------|
-| `GET /api/workspace/status` | Proxy `workspace.status` |
-| `POST /api/workspace/refresh-anchor` | `workspace.refreshAnchor` |
-| `POST /api/workspace/re-verify` | Re-run `verify.run` with last command (checkpoint 5 — prefer task verify panel) |
-| `POST /api/workspace/continue-anyway` | `workspace.continueAnyway` |
-
-Health snapshot (`GET /api/health`) includes `workspaceStatus` and `affectedFiles`.
-
-## Agent bridge
-
-`patch.apply` / `patch.applyBatch` handle `workspaceDriftRequired` like approvals:
-
-1. Poll `workspace.status` until `driftDetected` is false (cockpit refresh or external `workspace.refreshAnchor`)
-2. Retry mutation with returned `contextRefreshId`
-
-Supervised tasks: the human refreshes context in the cockpit; the agent bridge unblocks automatically.
+Python helper: `scripts/dietcode_coherence.py` (`_complete_after_workspace_drift`).
 
 ## Anchoring
 
 Hashes are tracked when the agent:
 
-- Reads files (`file.read`, `file.readRange`, `file.readAround`)
+- Reads files (`file.read`, `file.readRange`, `file.readAround`, `file.readBatch`)
 - Applies patches (`patch.apply` / batch)
 
 `workspace.refreshAnchor` re-reads all tracked paths, clears external-change flags, snapshots git HEAD, and increments `contextRefreshId`.

@@ -1,19 +1,16 @@
 #!/usr/bin/env python3
-"""Regression tests for mutation authority audit and sidebar labels."""
+"""Regression tests for mutation authority audit helpers."""
 
 from __future__ import annotations
 
 import importlib.util
-import json
 import sys
 import tempfile
 import unittest
 from pathlib import Path
-from unittest import mock
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 SCRIPTS = REPO_ROOT / "scripts"
-SIDEBAR_MM = REPO_ROOT / "src/platform/macos/MacAgentSidebar.mm"
 
 
 def _load_module(name: str, path: Path):
@@ -26,8 +23,6 @@ def _load_module(name: str, path: Path):
 
 
 mutation = _load_module("dietcode_mutation_authority", SCRIPTS / "dietcode_mutation_authority.py")
-chat = _load_module("dietcode_agent_chat", SCRIPTS / "dietcode_agent_chat.py")
-bundle = _load_module("dietcode_agent_bundle", SCRIPTS / "dietcode_agent_bundle.py")
 
 
 class MutationAuthorityAuditTests(unittest.TestCase):
@@ -60,8 +55,8 @@ class MutationAuthorityAuditTests(unittest.TestCase):
                     "path": rel,
                     "beforeHash": "aaa",
                     "afterHash": "bbb",
-                    "tool": "dietcode_ide.patch",
-                    "protocol": "safePatchFile",
+                    "tool": "patch.apply",
+                    "protocol": "kernel_rpc",
                 }
             ]
             report = mutation.audit_mutation_authority(
@@ -102,8 +97,8 @@ class MutationAuthorityAuditTests(unittest.TestCase):
                     "path": "/etc/passwd",
                     "beforeHash": "a",
                     "afterHash": "b",
-                    "tool": "dietcode_ide.patch",
-                    "protocol": "safePatchFile",
+                    "tool": "patch.apply",
+                    "protocol": "kernel_rpc",
                 }
             ]
             report = mutation.audit_mutation_authority(
@@ -115,51 +110,35 @@ class MutationAuthorityAuditTests(unittest.TestCase):
             self.assertEqual(report["mode"], "violated")
             self.assertTrue(any("bridge_path_outside_workspace" in item for item in report["evidence"]))
 
-    def test_enforce_mutation_authority_exits_on_violation(self) -> None:
-        build_bundle = REPO_ROOT / "build" / "DietCode.app"
-        if not build_bundle.is_dir():
-            self.skipTest("build/DietCode.app missing")
+
+class MutationAuthorityCollectTests(unittest.TestCase):
+    def test_collect_patch_events_from_log_only(self) -> None:
+        import json
+
         with tempfile.TemporaryDirectory() as tmp:
             ws = Path(tmp)
-            ctx = bundle.resolve_context(repo_root=REPO_ROOT, app_bundle_arg=str(build_bundle))
-            status = {
-                "runtime": {"ready": True},
-                "bridge": {"ready": True},
-                "hermes": {"ready": True},
-                "workspaceAuthority": {"workspaceMatch": True},
+            log = ws / "events.jsonl"
+            event = {
+                "eventType": "mutation.patch.applied",
+                "workspace": str(ws),
+                "path": "src/foo.py",
+                "beforeHash": "aaa",
+                "afterHash": "bbb",
+                "tool": "patch.apply",
+                "protocol": "kernel_rpc",
             }
-            with mock.patch.object(chat, "assert_chat_ready", return_value=status):
-                with mock.patch.object(chat, "run_hermes_chat", return_value=(0, "done")):
-                    with mock.patch.object(chat, "collect_bridge_patch_events", return_value=[]):
-                        with mock.patch.object(chat, "workspace_manifest") as manifest_mock:
-                            manifest_mock.side_effect = [{}, {"edited.py": "hash"}]
-                            code = chat.cmd_chat(
-                                REPO_ROOT,
-                                ctx,
-                                workspace=ws,
-                                prompt="edit",
-                                fmt="json",
-                                max_turns=5,
-                                enforce_mutation_authority=True,
-                            )
-            self.assertEqual(code, 11)
+            log.write_text(json.dumps(event) + "\n", encoding="utf-8")
+            events = mutation.collect_bridge_patch_events(None, ws, log)
+            self.assertEqual(len(events), 1)
+            self.assertEqual(events[0]["path"], "src/foo.py")
 
 
-class SidebarMutationAuthorityTests(unittest.TestCase):
+class MutationAuthorityLabelTests(unittest.TestCase):
     def test_mutation_authority_labels(self) -> None:
         self.assertEqual(mutation.mutation_authority_label("bridge_only"), "Bridge verified")
         self.assertEqual(mutation.mutation_authority_label("no_mutation"), "No mutation")
         self.assertEqual(mutation.mutation_authority_label("unknown"), "Unknown — review run")
         self.assertEqual(mutation.mutation_authority_label("violated"), "Violation — agent disabled")
-
-    def test_sidebar_mutation_authority_status(self) -> None:
-        text = SIDEBAR_MM.read_text(encoding="utf-8") if SIDEBAR_MM.is_file() else ""
-        self.assertIn("Mutation path:", text)
-        self.assertIn("Bridge verified", text)
-        self.assertIn("No mutation", text)
-        self.assertIn("Unknown", text)
-        self.assertIn("Violation", text)
-        self.assertIn("mutationAuthority", text)
 
     def test_doctor_payload_shape_includes_mutation_authority(self) -> None:
         authority = mutation.empty_mutation_authority()

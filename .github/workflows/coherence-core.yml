@@ -1,0 +1,15 @@
+name: coherence-core
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+
+jobs:
+  validate:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Coherence archive validate
+        run: make validate

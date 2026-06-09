@@ -1,5 +1,7 @@
 # Runtime Contract Orchestrator — Findings
 
+> **Archive note:** Frozen results (June 2026). Live reproduction requires restoring `agent-bridge/` from git history. See [ARCHIVE_NOTE.md](ARCHIVE_NOTE.md).
+
 **Generated:** 2026-06-08T12:07:04Z · DietCode **1.6.5** · Benchmark **v1.4**
 
 > Reliable bounded autonomy emerges through adaptive runtime contract escalation, not static maximal visibility.

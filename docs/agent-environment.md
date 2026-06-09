@@ -20,25 +20,16 @@ python3 scripts/dietcode_agent_client.py --status --compact
 |----------|---------|
 | `DIETCODE_SOCKET_PATH` | `~/.dietcode/control.sock` |
 | `DIETCODE_TOKEN_PATH` | `~/.dietcode/session.token` |
-| `DIETCODE_APP_PATH` | `build/dietcode-kernel` or app bundle binary |
+| `DIETCODE_APP_PATH` | `build/dietcode-kernel` |
 | `DIETCODE_REPO_ROOT` | Repo root (Makefile sets for harnesses) |
-
-## Bridge / cockpit
-
-| Variable | Default |
-|----------|---------|
-| `COCKPIT_BRIDGE_PORT` | `9477` |
 | `DIETCODE_SESSION_DIR` | `~/.dietcode/session` |
 
-Smoke harness uses `build/cockpit-smoke-session` and `build/cockpit-smoke-ws`.
-
-## Governed tasks
+## Governed tasks / coherence
 
 | Variable | Purpose |
 |----------|---------|
-| `DIETCODE_TASK_ID` | Attach RPCs and events to a task |
-| `DIETCODE_SUPERVISED` | Bridge waits for approval on patches |
-| `DIETCODE_IDE_ROOT` | Repo root for spawned task scripts |
+| `DIETCODE_TASK_ID` | Attach RPCs and events to a task; issues coherence tokens on reads |
+| `DIETCODE_COHERENCE_EVENT_SOURCE` | NDJSON event source label in harnesses |
 
 ## Harness workspace
 
@@ -71,5 +62,5 @@ python3 scripts/dietcode_agent_client.py --config /path/to/config.json rpc rpc.p
 ## Related
 
 - [kernel-rpc.md](kernel-rpc.md)
-- [agent-bridge.md](agent-bridge.md)
+- [coherence-tokens.md](coherence-tokens.md)
 - [getting-started.md](getting-started.md)

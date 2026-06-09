@@ -65,8 +65,8 @@ def main():
 
         # 3. Test LSP-backed features
         print("\nTest 3: LSP-backed features")
-        # Note: Requires LSP to be running for the file. Let's try src/core/AppState.hpp
-        target_file = "src/core/AppState.hpp"
+        # Headless kernel returns empty LSP stubs; use a stable repo file.
+        target_file = "src/kernel/workspace/WorkspaceSession.hpp"
         call(sock, token, "workspace.openFile", {"path": target_file})
         time.sleep(1) # Give LSP time to start
 

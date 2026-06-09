@@ -127,8 +127,8 @@ A successful mutation always emits `workspace.mutated`, which arms checkpoint 5.
 | **Rule** | Agent exit ≠ done. Done requires checkpoint 5 passed or waived, or no mutations (5 skipped). |
 | **Task status** | `completed` only when `verificationState` is `verified`, `verification_waived`, or `none` |
 | **Events** | `task.completed`, `task.verified`, `task.verification_waived` |
-| **Cockpit** | Verification panel (pending/failed); timeline `task.completed` |
-| **Doc** | [governed-tasks.md](./governed-tasks.md), [verify-gate.md](./verify-gate.md) |
+| **Harness** | `verify.run` + NDJSON `task.completed` |
+| **Doc** | [verify-gate.md](./verify-gate.md), [kernel-rpc.md](./kernel-rpc.md) |
 
 ---
 
@@ -140,20 +140,17 @@ A successful mutation always emits `workspace.mutated`, which arms checkpoint 5.
 | `workspace.snapshot` / `workspace.status` | 1 Context | Also feeds 2 |
 | `workspace.refreshAnchor` | 1 → 2 | Recovery after drift |
 | `workspace.drift.detected` | 2 Drift | |
-| Drift panel | 2 Drift | |
 | `continueAnyway` | 2 Drift | Operator override |
+| `coherence_mismatch` | — | Pre-drift stale context |
 | `approval.*` RPCs | 3 Approval | |
-| Approval panel | 3 Approval | |
 | `awaiting_approval` task status | 3 Approval | |
 | `patch.validate` / `patch.apply` | 4 Mutation | |
 | `mutationReceipt` | 4 Mutation | |
-| Diffs panel | 4 Mutation | Observability |
 | `workspace.mutated` | 4 → 5 | Arms verification |
 | `verify.run` | 5 Verification | |
-| Verification panel | 5 Verification | |
 | `verification_waived` | 5 Verification | Operator override |
-| `task.completed` (governed) | 6 Completion | |
-| Governed task registry | 6 Completion | Orchestrates 1–5 |
+| `task.completed` (harness) | 6 Completion | |
+| Coherence recovery smoke | — | Proves refresh + retry path |
 
 ---
 
@@ -164,54 +161,34 @@ These support the control plane but are **not** separate gates. Do not add UI or
 | Feature | Role |
 |---------|------|
 | Kernel offline / reconnect | Transport hygiene |
-| Bridge reconnected | Session recovery |
-| SSE stale | Stream hygiene |
-| Session export / clear | Ephemeral recovery ([session-recovery.md](./session-recovery.md)) |
-| Task disconnected | Recovery after bridge restart |
+| Kernel restart | Session recovery ([session-recovery.md](./session-recovery.md)) |
 | Log stream | Raw tail across all checkpoints — debug only |
-| Chat panel | Task entry point — not a gate |
-| Task timeline | Cross-checkpoint audit trail — not a gate |
+| NDJSON harness events | Cross-checkpoint audit trail — not a gate |
 | Benchmark / BroccoliQ journal | Offline reliability evaluation — parallel track |
 
-If a proposed feature does not answer one of the six questions above, it probably belongs in the noise bucket or in the agent bridge — not the governed cockpit loop.
-
----
-
-## Cockpit layout (checkpoint-aligned)
-
-```text
-[ Infrastructure banners ]     kernel offline, disconnected, bridge reconnected, SSE stale
-[ Checkpoint 2 · Drift ]       when driftDetected
-[ Checkpoint 5 · Verification] when verification_required / verification_failed
-[ Chat ]                       submit governed task
-[ Timeline + Diffs ]           4 Mutation observability + full trail
-[ Approvals ]                  3 Approval
-[ Logs ]                       noise bucket (optional debug)
-```
+If a proposed feature does not answer one of the six questions above, it probably belongs in the noise bucket — not the governed kernel loop.
 
 ---
 
 ## Agent ergonomics
 
-Structured checkpoint state for agents and CI-style tooling:
+Structured checkpoint state for agents and CI-style tooling via kernel RPC:
 
-- `GET /api/checkpoints` — active task
-- `GET /api/tasks/:id/checkpoints` — per-task pipeline snapshot
-
-Cockpit **CheckpointRail** mirrors GitHub Actions stage UX: six steps, explicit `passed` / `active` / `failed` / `blocked`.
+- `workspace.status` — drift + verify snapshot
+- `approval.list` — pending approvals
+- `verify.status` — verification gate
 
 See [agent-ergonomics.md](./agent-ergonomics.md).
 
-## Production hardening (audit pass)
+## Coherence hardening (v0.1)
 
 | Area | Implementation |
 |------|----------------|
-| Verify command | Auto-resolve `verify.sh`, `make test`, `npm test` ([verifyCommandResolver.ts](../cockpit/server/verifyCommandResolver.ts)) |
-| Mutation diffs | `workspace.mutated` → session diff ring + Diff panel |
-| Active task | Session prefers `verification_required` / `verification_failed` |
-| Agent errors | `workspace_drift`, `approval_*` recovery hints in bridge |
-| Hermes plugin | Emits `workspace.drift.detected` on drift block |
-| No duplicate UI | Drift/verify banners removed — panels + rail only |
+| Coherence tokens | `MacControlCoherenceTokens.mm` — issuance on task-scoped reads |
+| Recovery loop | `scripts/dietcode_coherence.py` — stale block, refresh, retry |
+| Verify command | `dietcode_verification_authority.py` — `verify.sh` → `make test` → `npm test` |
+| Agent errors | `coherence_mismatch`, `workspace_drift`, `approval_*` recovery hints |
+| Release gate | `make coherence-core-v0.1` |
 
 ## Release baseline
 

@@ -1,56 +1,31 @@
 # Agent ergonomics (checkpoint-aware)
 
-> **DietCode gives agents bounded autonomy through visible checkpoints.**
+> **DietCode gives agents bounded autonomy through visible checkpoints enforced by the kernel.**
 
 Agents should treat the kernel as a **state machine with six gates**, not a fire-and-forget file API. This doc is the agent-facing contract; the full map is [checkpoint-model.md](./checkpoint-model.md).
 
-## Checkpoint query API (cockpit bridge)
+## Kernel RPC checkpoint queries
 
-Humans use the cockpit; agents and tooling can poll structured checkpoint state:
+Poll kernel state directly via RPC:
 
-| Endpoint | Returns |
-|----------|---------|
-| `GET /api/checkpoints` | Active task checkpoint snapshot |
-| `GET /api/tasks/:id/checkpoints` | Per-task checkpoint snapshot |
+| RPC | Returns |
+|-----|---------|
+| `workspace.status` | Drift snapshot, anchors, verify state |
+| `workspace.revision` | Revision IDs for coherence |
+| `verify.status` / `verify.last` | Verification gate state |
+| `approval.list` | Pending approvals |
 
-Response shape:
+Use `taskId` on reads to receive coherence tokens. See [coherence-tokens.md](./coherence-tokens.md).
 
-```json
-{
-  "snapshot": {
-    "taskId": "task_3",
-    "taskStatus": "verification_required",
-    "verificationState": "verification_required",
-    "canComplete": false,
-    "blockingCheckpoint": 5,
-    "suggestedVerifyCommand": "make test",
-    "checkpoints": [
-      { "id": 1, "key": "context", "name": "Context", "status": "passed", "question": "..." },
-      { "id": 2, "key": "drift", "name": "Drift", "status": "passed" },
-      { "id": 5, "key": "verification", "name": "Verification", "status": "active", "blocking": true }
-    ]
-  }
-}
-```
+## Blocking responses
 
-**Status values:** `pending`, `active`, `passed`, `failed`, `blocked`, `waived`, `skipped`.
-
-Industry mirror: CI pipeline stages (GitHub Actions, Buildkite) — one stage, one question, explicit pass/fail.
-
-## Agent bridge behavior
-
-### Automatic `taskId`
-
-When `DIETCODE_TASK_ID` is set (governed tasks), the bridge injects `taskId` into every kernel RPC so events bind to the correct task.
-
-### Blocking responses
-
-| Kernel result | Bridge action | Checkpoint |
-|---------------|---------------|------------|
-| `approvalRequired: true` | Poll `approval.get` until resolved | 3 |
-| `workspaceDriftRequired: true` | Poll `workspace.status` until drift clears | 2 |
+| Kernel result | Agent action | Checkpoint |
+|---------------|--------------|------------|
+| `approvalRequired: true` | Poll `approval.get` / resolve via `approval.resolve` | 3 |
+| `workspaceDriftRequired: true` | `workspace.refreshAnchor` then retry with `contextRefreshId` | 2 |
+| `coherence_mismatch` | Re-read `changedPaths` with `taskId`, regenerate patch, retry once | — |
 | `patch.apply` + receipt | Continue | 4 |
-| `verify.run` failure | Surface `verification_failed` to cockpit | 5 |
+| `verify.run` failure | Re-run verify or escalate | 5 |
 
 ### Error codes (recovery hints)
 
@@ -59,38 +34,35 @@ When `DIETCODE_TASK_ID` is set (governed tasks), the bridge injects `taskId` int
 | `workspace_drift` | `workspace.status` | Refresh context before retry |
 | `stale_content` | `patch.validate` | Re-read before patch |
 | `coherence_mismatch` | `file.read` | Task-scoped stale write — re-read `changedPaths`, regenerate patch, retry once |
-| `approval_required` | `approval.get` | Wait for human |
+| `approval_required` | `approval.get` | Wait for operator |
 | `approval_rejected` | `workspace.revision` | Revise plan |
 
 ## Verify command resolution
 
-The bridge resolves verify commands in order (mirrors `dietcode_verification_authority.py`):
+Harnesses resolve verify commands via `dietcode_verification_authority.py`:
 
-1. Explicit `command` in `POST /api/tasks/:id/run-verify`
-2. Task `lastVerifyCommand`
-3. Kernel `workspace.status.lastVerifiedCommand`
-4. `./verify.sh` in workspace root
-5. `make test` if Makefile has `test` target
-6. `npm test` / `npm run verify` from `package.json`
-7. `DIETCODE_AGENT_CHAT_FALLBACK_VERIFY` env
+1. Explicit `command` in `verify.run`
+2. `./verify.sh` in workspace root
+3. `make test` if Makefile has `test` target
+4. `npm test` / `npm run verify` from `package.json`
 
-Agents should prefer workspace-native `verify.sh` — same convention as agent chat sidebar.
+Agents should prefer workspace-native `verify.sh`.
 
 ## Recommended agent loop
 
 ```text
-1. file.read / patch.validate     → anchor context (checkpoint 1)
-2. workspace.status               → check drift (checkpoint 2)
-3. patch.apply                    → mutation (checkpoint 4)
-4. Poll GET /api/tasks/:id/checkpoints until blockingCheckpoint is null or 5 active
-5. Do not claim "done" until snapshot.canComplete === true
+1. file.read / patch.validate (taskId)  → anchor context + coherence token (checkpoint 1)
+2. workspace.status                     → check drift (checkpoint 2)
+3. patch.apply (coherenceTokenId)       → mutation (checkpoint 4)
+4. verify.run                           → verification (checkpoint 5)
+5. Do not claim "done" until verify passes or is waived (checkpoint 6)
 ```
 
 ## Coherence tokens (governed tasks)
 
 When `taskId` is set on reads (`file.read`, `file.readBatch`, `workspace.status`, …), the kernel issues a **coherence token** — proof of what the agent observed. Mutations must carry `coherenceTokenId` + `expectedWorkspaceRevision` or the kernel returns `coherence_mismatch` (before drift).
 
-**Recovery loop** (bridge + Python harness):
+**Recovery loop** (`scripts/dietcode_coherence.py`):
 
 ```text
 patch.apply → coherence_mismatch
@@ -111,9 +83,9 @@ patch.apply → coherence_mismatch
 
 See [coherence-tokens.md](./coherence-tokens.md) for kernel caps and anchor format.
 
-## Hermes `dietcode_ide` events
+## NDJSON task events
 
-Governed tasks emit NDJSON to `DIETCODE_TASK_EVENT_LOG`:
+Harnesses may emit NDJSON to `DIETCODE_TASK_EVENT_LOG`:
 
 | Event | Checkpoint |
 |-------|------------|
@@ -123,11 +95,12 @@ Governed tasks emit NDJSON to `DIETCODE_TASK_EVENT_LOG`:
 | `coherence.retry` | — (coherence) |
 | `coherence.operator_required` | — (coherence) |
 | `approval.required` | 3 |
-| `file.diff` | 4 |
-| `tool.call.completed` | — (observability) |
+| `mutation.applied` | 4 |
+| `verify.completed` | 5 |
 
 ## What agents should not do
 
-- Claim task completion when `verificationState` is `verification_required`
-- Bypass drift with mutation retries (use `workspace.refreshAnchor` or cockpit **Continue anyway**)
-- Treat log stream or timeline as gates — they are audit trails only
+- Claim task completion when verify has not passed
+- Bypass drift with blind mutation retries (use `workspace.refreshAnchor`)
+- Skip coherence tokens when `taskId` is set on governed paths
+- Treat log streams as gates — they are audit trails only
