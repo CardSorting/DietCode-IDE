@@ -4,13 +4,19 @@
 
 > DietCode uses coherence tokens so agents can only mutate the workspace they actually observed.
 
+[workspace-drift.md](workspace-drift.md) · [kernel-rpc.md](kernel-rpc.md) · [error-codes.md](error-codes.md)
+
+---
+
 ## What it answers
 
 1. Did the workspace change since this task read?
-2. Did any file this task depends on change?
-3. Is verification older than the latest mutation context? (`verifyRevision` on token must match kernel)
+2. Did any anchored file change?
+3. Is verification older than the latest mutation context?
 
-No graph. No ledger. Caps: **40 tasks**, **100 anchors/task**, **30 min TTL**. Hash only files actually read.
+No graph. No ledger. Caps: **40 tasks**, **100 anchors/task**, **30 min TTL**. Hashes only files actually read.
+
+---
 
 ## Counters
 
@@ -19,11 +25,20 @@ No graph. No ledger. Caps: **40 tasks**, **100 anchors/task**, **30 min TTL**. H
 | `workspaceRevision` | Kernel mutation; patch apply/batch |
 | `verifyRevision` | Successful `verify.run` |
 
-## Read response
+---
 
-Issued on `file.read`, `file.readBatch`, `file.readRange`, `file.readAround`, `file.stat`, and `workspace.status` when `taskId` is set:
+## Issuing reads
 
-Batch reads return one task-scoped token at the top level:
+Coherence is issued on these methods when `taskId` is set:
+
+- `file.read`
+- `file.readBatch`
+- `file.readRange`
+- `file.readAround`
+- `file.stat`
+- `workspace.status`
+
+### Batch response
 
 ```json
 {
@@ -43,7 +58,7 @@ Batch reads return one task-scoped token at the top level:
 }
 ```
 
-Single-file reads embed `coherence` beside `text`:
+### Single-file response
 
 ```json
 {
@@ -59,7 +74,9 @@ Single-file reads embed `coherence` beside `text`:
 }
 ```
 
-Anchors use the kernel content hash (`fnv1a:<hex>`).
+Anchors use kernel content hash (`fnv1a:<hex>`).
+
+---
 
 ## Mutation params
 
@@ -72,6 +89,8 @@ Required when `taskId` is set on `patch.apply` / `patch.applyBatch`:
   "expectedWorkspaceRevision": 41
 }
 ```
+
+---
 
 ## Stale response
 
@@ -87,37 +106,56 @@ Required when `taskId` is set on `patch.apply` / `patch.applyBatch`:
 }
 ```
 
-**Recovery:** re-read affected paths with the same `taskId`, then retry the mutation with the new token.
+**Recovery:** re-read affected paths with the same `taskId`, regenerate patch from live content, retry with fresh token.
 
-## Agent recovery (bridge)
+---
 
-When `safePatchFile` is called with `taskId` and `buildPatchFromContent`, a single automatic retry runs on `coherence_mismatch`:
+## Python recovery loop
+
+`scripts/dietcode_coherence.py` implements the governed retry path used by harnesses:
 
 ```text
-coherence_mismatch
+patch.apply → coherence_mismatch
   → emit context.stale
-  → re-read changedPaths (context.refreshed)
-  → buildPatchFromContent(current text)
-  → emit coherence.retry
-  → retry patch.apply once with fresh token
-  → still stale? emit coherence.operator_required and stop
+  → file.read changedPaths (taskId) → context.refreshed
+  → rebuild patch from live content
+  → emit coherence.retry (one automatic attempt)
+  → success OR coherence.operator_required
 ```
 
-Without `buildPatchFromContent`, the bridge returns `CoherenceStaleRecovery` for the caller to handle.
+Smoke proof: `scripts/coherence_recovery_smoke.py`
 
-```typescript
-await safePatchFile(transport, path, diff, {
-  taskId: 'task_12',
-  buildPatchFromContent: ({ content }) => rebuildUnifiedDiff(path, content, target),
-  onCoherenceEvent: (event) => logNdjson(event),
-});
+```bash
+make coherence-recovery-smoke-fast
 ```
 
-Smoke: `make coherence-recovery-smoke`
+Full gate (rebuild + restart):
+
+```bash
+make coherence-recovery-smoke
+```
+
+---
+
+## Layering with drift
+
+For governed mutations (`taskId` set), the kernel checks **coherence before drift**. Agents receive `coherence_mismatch` (precise stale context) rather than `workspaceDriftRequired` (broad workspace change). See [workspace-drift.md](workspace-drift.md).
+
+---
+
+## Agent loop
+
+```text
+read (taskId) → coherence token
+prepare patch → include coherenceTokenId + expectedWorkspaceRevision
+patch.apply → kernel validates
+coherence_mismatch → refresh context and retry once
+valid → approval → mutation → verify
+```
+
+---
 
 ## Release gate
-
-Tag when green:
 
 ```bash
 make coherence-core-v0.1
@@ -128,20 +166,12 @@ make coherence-core-v0.1
 | `test-coherence-tokens` | Kernel issuance + enforcement (incl. `file.readBatch`) |
 | `coherence-recovery-smoke-fast` | Python recovery vertical |
 
-Tag: **coherence-core-v0.1**
+Tag: **coherence-core-v0.1**. Full CI: `make validate`.
 
-## Agent loop
-
-```text
-read file (taskId) → coherence token
-prepare patch → include token + expectedWorkspaceRevision
-patch.apply → kernel validates
-mismatch → refresh context and retry
-valid → approval → mutation → verify
-```
+---
 
 ## Related
 
-- [workspace-drift.md](./workspace-drift.md) — user-facing drift checkpoint
-- [kernel-rpc.md](./kernel-rpc.md) — RPC reference
-- [error-codes.md](./error-codes.md) — `coherence_mismatch`
+- [agent-ergonomics.md](agent-ergonomics.md) — agent-facing loop
+- [checkpoint-model.md](checkpoint-model.md) — gate map
+- [testing.md](testing.md) — validation ladder

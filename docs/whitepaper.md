@@ -1,8 +1,8 @@
-# DietCode Governed Mutation Runtime
+# DietCode governed mutation runtime
 
-**A whitepaper on local control-plane architecture for supervised agent code mutation**
+**Technical whitepaper for the kernel/coherence-core archive**
 
-Version 1.0 · June 2026 · Baseline `coherence-core-v0.1`  
+Version 1.0 · June 2026 · Baseline **coherence-core-v0.1**  
 Philosophy: [philosophy.md](philosophy.md) · Brief: [brief.md](brief.md)
 
 ---
@@ -11,19 +11,17 @@ Philosophy: [philosophy.md](philosophy.md) · Brief: [brief.md](brief.md)
 
 Autonomous coding agents introduce a structural problem: **mutation**, **orchestration**, and **operator visibility** are typically fused into a single opaque interface. Operators cannot see which safety precondition failed, whether the workspace changed mid-task, or whether “done” means verified or merely attempted.
 
-DietCode is a **governed local mutation kernel** for macOS. A headless C++ process (`dietcode-kernel`) holds sole workspace mutation authority. Agents and harnesses integrate through JSON-RPC (`scripts/dietcode_agent_client.py`) — they request clearance; they do not write files directly. Operational coherence is enforced via task-scoped coherence tokens before drift, approval, and verify gates.
+DietCode is a **governed local mutation kernel** for macOS, preserved as a **coherence-core archive**. A headless C++ process (`dietcode-kernel`) holds sole workspace mutation authority. Agents integrate through JSON-RPC (`scripts/dietcode_agent_client.py`) — they request clearance; they do not write files directly. Operational coherence is enforced via task-scoped coherence tokens before drift, approval, and verify gates.
 
-The runtime enforces **six checkpoints** (context, drift, approval, mutation, verification, completion) between agent intent and task completion. Agent process exit does not imply success. Tasks reach `completed` only when verification passes or is explicitly waived.
+The runtime enforces **six checkpoints** between agent intent and task completion. Agent process exit does not imply success.
 
-This document specifies the problem framing, design principles, checkpoint model, system architecture, wire contracts, recovery semantics, release baseline, and relationship to parallel reliability evaluation. It is the product/runtime whitepaper — distinct from the adversarial benchmark whitepaper at [benchmarks/agent_success/WHITEPAPER.md](../benchmarks/agent_success/WHITEPAPER.md).
+This document specifies problem framing, design principles, architecture, wire contracts, recovery semantics, and the frozen **coherence-core-v0.1** baseline. Adversarial evaluation is a separate frozen research track at [benchmarks/agent_success/WHITEPAPER.md](../benchmarks/agent_success/WHITEPAPER.md).
 
 ---
 
 ## 1. Problem statement
 
 ### 1.1 Four confounded questions
-
-Most “AI IDE” products answer these implicitly and conflate them in UI:
 
 | # | Question |
 |---|----------|
@@ -32,23 +30,21 @@ Most “AI IDE” products answer these implicitly and conflate them in UI:
 | Q3 | How does the operator observe progress and failure? |
 | Q4 | When may a task be called *done*? |
 
-When Q1–Q4 collapse into chat, operators develop false confidence: fluent prose masks stale patches, drift collisions, unverified edits, and silent disconnects.
+When Q1–Q4 collapse into chat, operators develop false confidence.
 
-### 1.2 Failure modes in the wild
-
-Predictable agent-runtime failures include:
+### 1.2 Failure modes
 
 - **Stale context** — patch based on files that changed after read
-- **Wrong-file mutation** — correct pattern applied to decoy or sibling path
-- **Silent success** — agent exits 0 while tests fail or verify never ran
-- **Authority leakage** — UI or plugin writes files outside a single enforcement point
-- **Unbounded session** — restart loses task state; operator cannot resume safely
+- **Wrong-file mutation** — correct pattern, wrong path
+- **Silent success** — agent exits while tests fail
+- **Authority leakage** — multiple writers without a single gate
+- **Unbounded session** — restart loses safe resume semantics
 
-DietCode addresses these as **control-plane** failures, not model failures.
+DietCode addresses these as **control-plane** failures.
 
 ### 1.3 Design goal
 
-> Provide **bounded autonomy through visible checkpoints** — air-traffic control for AI edits.
+> **Bounded autonomy through visible checkpoints** — air-traffic control for AI edits.
 
 ---
 
@@ -56,68 +52,51 @@ DietCode addresses these as **control-plane** failures, not model failures.
 
 ### 2.1 Single mutation authority
 
-Exactly one component applies patches: `dietcode-kernel`. Agents and harnesses propose operations via RPC; the kernel enforces coherence, permissions, drift, approvals, and receipts.
+Only `dietcode-kernel` applies patches. Agents propose via RPC.
 
-### 2.2 Checkpoints as gates, not features
+### 2.2 Checkpoints as gates
 
-Each governed capability maps to one of six questions (see §3). Features that do not answer a checkpoint question belong in transport hygiene, recovery, or observability — not the gate set.
+Each capability maps to one of six questions (§3). Non-gate features belong in transport hygiene or observability.
 
 ### 2.3 Legible failure
 
-Every block should surface: which gate fired, which files are affected, and the next operator or agent action. Error envelopes include `string_code`, `recovery_hint`, and `nextRecommendedCommand` where applicable ([error-codes.md](error-codes.md)).
+Blocks surface `string_code`, `recovery_hint`, `nextRecommendedCommand` ([error-codes.md](error-codes.md)).
 
 ### 2.4 Completion is a system state
 
 | State | Meaning |
 |-------|---------|
 | Agent exited | Process ended — **not** completion |
-| `verification_required` | Mutation occurred; verify not yet run |
+| `verification_required` | Mutation occurred; verify pending |
 | `verified` | Verify passed |
-| `verification_waived` | Operator override at checkpoint 5 |
 | `completed` | Checkpoint 6 cleared |
 
 ### 2.5 Local-first trust boundary
 
-Default deployment: macOS process + local Unix socket (`~/.dietcode/control.sock`) + local workspace. No cloud kernel required for the checkpoint loop.
+macOS process + Unix socket + local workspace. No cloud kernel required.
 
 ### 2.6 Frozen baseline provability
 
-Coherence-layer changes must pass `make coherence-core-v0.1` before release. Tag: `coherence-core-v0.1`.
+```bash
+make validate
+```
+
+Tag: **coherence-core-v0.1**.
 
 ---
 
 ## 3. Checkpoint model
 
-A checkpoint is a **single question** the control plane must answer before proceed or done.
+| # | Name | Question |
+|---|------|----------|
+| 1 | Context | Did the agent read valid state? |
+| 2 | Drift | Did the workspace change underneath it? |
+| 3 | Approval | Is this mutation allowed? |
+| 4 | Mutation | Did the patch apply cleanly? |
+| 5 | Verification | Did the result pass? |
+| 6 | Completion | Can this task be called done? |
 
-| # | Name | Question | Primary enforcement |
-|---|------|----------|---------------------|
-| 1 | Context | Did the agent read valid state? | Hash anchors; stale reads surface at 2 or 4 |
-| 2 | Drift | Did the workspace change underneath it? | `driftDetected` blocks Edit/Destructive RPCs |
-| 3 | Approval | Is this mutation allowed? | `approvalRequired` → `approval.resolve` |
-| 4 | Mutation | Did the patch apply cleanly? | `patch.validate` → `patch.apply` + receipt |
-| 5 | Verification | Did the result pass? | `verify.run`; arms on `workspace.mutated` |
-| 6 | Completion | Can this task be called done? | Governed task registry + verify state |
-
-```text
-prompt → read (1) → drift (2) → approval (3) → patch (4) → verify (5) → completed (6)
-```
-
-### 3.1 Noise bucket (non-checkpoints)
-
-These support the loop but are **not** gates: kernel reconnect, bridge reload, SSE staleness, session export, log tail, chat entry, timeline audit, benchmark journal. See [checkpoint-model.md](checkpoint-model.md).
-
-### 3.2 Operator overrides
-
-| Override | Checkpoint | Semantics |
-|----------|------------|-----------|
-| Refresh context | 2 | Re-anchor reads after drift |
-| Continue anyway | 2 | Explicit accept of drift risk |
-| Approve / reject | 3 | Human clearance |
-| Waive verify | 5 | Explicit accept of unverified completion |
-| Recovery restore | Noise | Bounded session reload — requires intent |
-
-Waive does not bypass drift or approval.
+Noise bucket (not gates): kernel reconnect, session reload, log tail, benchmark journal. See [checkpoint-model.md](checkpoint-model.md).
 
 ---
 
@@ -125,39 +104,39 @@ Waive does not bypass drift or approval.
 
 ```text
 ┌─────────────────────────────────────────────────────────┐
-│  Agents / harnesses (Python CLI, scripts, CI)           │
-│  scripts/dietcode_agent_client.py · dietcode_coherence  │
+│  Agents / harnesses / CI (Python)                       │
+│  dietcode_agent_client.py · dietcode_coherence.py       │
 └───────────────────────┬─────────────────────────────────┘
-                        │ JSON lines + session token
+                        │ JSON + session.token
 ┌───────────────────────▼─────────────────────────────────┐
-│  dietcode-kernel (C++/ObjC++)                           │
-│  MacControlServer · coherence tokens · WorkspaceSession │
+│  dietcode-kernel                                        │
+│  MacControlServer · coherence · WorkspaceSession        │
 └───────────────────────┬─────────────────────────────────┘
                         │
                    Workspace on disk
 ```
 
-Experimental cockpit, HTTP bridge, and TypeScript agent-bridge surfaces were archived after proving the model. See [archive-note.md](archive-note.md).
+Experimental cockpit, HTTP bridge, and TypeScript agent-bridge were archived after proving the model. See [archive-note.md](archive-note.md).
 
 Detail: [architecture.md](architecture.md).
 
-### 4.1 Component responsibilities
+### 4.1 Responsibilities
 
 | Component | Owns |
 |-----------|------|
-| Kernel | File mutation, coherence tokens, patch apply, verify execution, drift anchoring, approval queue |
-| Python CLI | RPC transport, harness orchestration, coherence recovery helpers |
+| Kernel | Mutation, coherence tokens, drift, approvals, verify |
+| Python CLI | RPC transport, harness orchestration, recovery helpers |
 
-### 4.2 Governed agent path
+### 4.2 Governed path
 
 ```text
-file.read (taskId) → coherence token (1)
-  → patch.apply → approval if supervised (2–3)
-  → workspace.mutated (4) → verify.run (5)
-  → harness marks completed (6)
+file.read (taskId) → coherence token
+  → patch.apply → approval if supervised
+  → workspace.mutated → verify.run
+  → harness marks completed
 ```
 
-Recovery smoke: `scripts/coherence_recovery_smoke.py`. See [coherence-tokens.md](coherence-tokens.md).
+Recovery smoke: `scripts/coherence_recovery_smoke.py`.
 
 ---
 
@@ -165,132 +144,118 @@ Recovery smoke: `scripts/coherence_recovery_smoke.py`. See [coherence-tokens.md]
 
 ### 5.1 Kernel RPC
 
-Single-line JSON requests on Unix socket:
-
 ```json
 {
   "id": "uuid",
   "schemaVersion": "1.6.2",
   "method": "patch.apply",
-  "params": { },
+  "params": {},
   "token": "<session.token>"
 }
 ```
 
-Responses: `{ "id", "ok", "result" }` or structured `error` with `string_code`. Token at **top level** — not nested in `params`.
-
 Catalog: [kernel-rpc.md](kernel-rpc.md).
 
-### 5.2 Bridge HTTP
+### 5.2 Coherence (v0.1)
 
-| Endpoint | Role |
-|----------|------|
-| `POST /api/tasks` | Submit governed task |
-| `GET /api/tasks/:id/checkpoints` | Checkpoint pipeline snapshot |
-| `GET /api/checkpoints` | Active task checkpoints |
-| `POST /api/tasks/:id/run-verify` | Arm / run checkpoint 5 |
-| `POST /api/approvals/:id/resolve` | Clear checkpoint 3 |
+Issuing reads with `taskId`: `file.read`, `file.readBatch`, `file.readRange`, `file.readAround`, `file.stat`, `workspace.status`.
 
-Events stream via SSE; session ring in `~/.dietcode/session/`.
+Mutations require `coherenceTokenId` + `expectedWorkspaceRevision`. Stale → `coherence_mismatch`.
+
+Detail: [coherence-tokens.md](coherence-tokens.md).
 
 ### 5.3 Autonomy default
 
-Autonomy level **3 (supervised)**. Destructive RPCs queue `approvalRequired` until resolved in Cockpit or via RPC.
+Level **3 (supervised)**. Destructive RPCs queue `approvalRequired` until `approval.resolve`.
 
 ---
 
 ## 6. Recovery and session semantics
 
-Bridge persists:
+Kernel persists bounded state under `~/.dietcode/session/`:
 
-- `active_tasks.json`
+- `pending_approvals.json`
 - `recent_events.ndjson`
 - `recent_diffs.json`
-- `pending_approvals.json`
 
-On bridge restart, `bootstrapSessionRecovery` reloads bounded state. Tasks may show `disconnected` until operator restores — no silent auto-resume into drift or verify failure.
+On kernel restart, harnesses call `make restart-agent-server-fast` and `--wait-ready`. No silent auto-resume into drift or verify failure.
 
 Detail: [session-recovery.md](session-recovery.md).
+
+Python coherence recovery: `scripts/dietcode_coherence.py`.
 
 ---
 
 ## 7. Verification routing
 
-After mutation, `workspace.mutated` arms checkpoint 5. Harnesses resolve verify command via `dietcode_verification_authority.py`:
+After mutation, `workspace.mutated` arms checkpoint 5. `dietcode_verification_authority.py` resolves:
 
 1. `./verify.sh`
 2. `make test`
 3. `npm test`
 
-Subproject workspaces pass `cwd` relative to kernel root in `verify.run`.
-
 Detail: [verify-gate.md](verify-gate.md).
 
 ---
 
-## 8. Release baseline and evidence
+## 8. Release baseline
 
-### 8.1 coherence-core gate
+### 8.1 validate / coherence-core
 
 ```bash
-make coherence-core-v0.1
+make validate
 ```
 
 | Step | Proves |
 |------|--------|
-| `test-coherence-tokens` | Kernel coherence issuance + enforcement |
+| `test-coherence-tokens-fast` | Issuance + `coherence_mismatch` enforcement |
 | `coherence-recovery-smoke-fast` | Stale block → refresh → retry → verify |
+| `test-docs-code-drift` | Docs ↔ contracts lock |
 
-Fixtures: `scripts/fixtures/coherence_recovery/`. Detail: [testing.md](testing.md).
+### 8.2 Parallel research track
 
-### 8.2 Parallel reliability track
-
-Adversarial benchmarks (`benchmarks/agent_success/`) evaluate runtime contracts under trap-heavy fixtures. They produce mutation traces and release gates for research — **not** a substitute for `coherence-core-v0.1`. See [AGENT_RUNTIME_RELIABILITY.md](../AGENT_RUNTIME_RELIABILITY.md).
+`benchmarks/agent_success/` — frozen adversarial results. Does not gate coherence-core. See [AGENT_RUNTIME_RELIABILITY.md](../AGENT_RUNTIME_RELIABILITY.md).
 
 ---
 
-## 9. Comparison to common patterns
+## 9. Comparison
 
-| Pattern | Limitation | DietCode approach |
-|---------|------------|-------------------|
-| Chat-native IDE plugin | Mutation authority unclear | Kernel-only writes |
-| Agent exits → PR opened | Verify may not have run | Verify gate blocks completion |
+| Pattern | Limitation | DietCode |
+|---------|------------|----------|
+| Chat-native plugin | Unclear mutation authority | Kernel-only writes |
+| Agent exits → done | Verify may not run | Verify gate |
 | File watcher heuristics | Reactive, not gated | Drift gate before patch |
-| Cloud agent sandbox | Remote trust boundary | Local socket + operator approvals |
-| Unbounded conversation | No completion semantics | Governed tasks with checkpoint 6 |
+| Cloud sandbox | Remote trust boundary | Local socket + approvals |
 
 ---
 
-## 10. Threat and safety framing
+## 10. Threat framing
 
 | Risk | Mitigation |
 |------|------------|
-| Unauthorized write | Single kernel authority; supervised approvals |
-| Stale patch | Drift detection + hash validation |
-| Symlink escape | Shell and search policies ([runtime-invariants.md](runtime-invariants.md)) |
-| Silent hang | Disconnect visibility; approval expiry |
-| Unverified ship | Verify gate; waive requires explicit operator action |
-| Token leakage | `0600` socket dir; token at RPC top level |
-
-DietCode does not replace code review or org-wide security policy. It makes **agent-mediated mutation** auditable and gate-enforced on one machine.
+| Unauthorized write | Single kernel authority |
+| Stale patch | Coherence + drift + hash validation |
+| Symlink escape | Shell/search policies |
+| Unverified ship | Verify gate |
+| Token leakage | `0600` socket dir |
 
 ---
 
-## 11. Limitations and non-goals
+## 11. Limitations
 
-- **macOS only** for the kernel control plane at this baseline
-- **Not** a general-purpose IDE — UI surfaces were archived
-- **Not** model-specific — any agent client may use kernel RPC
-- **Not** fully autonomous coding — bounded autonomy by design
-- **Not** cloud-hosted multi-tenant control plane in v0.1
+- **macOS only** at this baseline
+- **Not** a general-purpose IDE — UI archived
+- **Not** model-specific — any RPC client may integrate
+- **Not** fully autonomous — bounded by design
+- **Python integration path** in-tree; TypeScript bridge removed
 
 ---
 
 ## 12. Conclusion
 
-DietCode reframes agentic coding as **governed mutation**: one authority, coherence tokens, six checkpoints, legible failure, and completion semantics tied to verification.
+DietCode reframes agentic coding as **governed mutation**: one authority, coherence tokens, six checkpoints, legible failure, completion tied to verification.
 
-The frozen baseline `coherence-core-v0.1` exists so that claims about operational coherence remain **executable**, not aspirational. Run the gate, enforce the tokens, and call a task done only when verify clears.
+Run `make validate` on your machine. Tag **coherence-core-v0.1** when green.
 
 ---
 
@@ -298,11 +263,9 @@ The frozen baseline `coherence-core-v0.1` exists so that claims about operationa
 
 | Document | Content |
 |----------|---------|
-| [philosophy.md](philosophy.md) | Values and operational worldview |
-| [brief.md](brief.md) | Executive companion |
-| [checkpoint-model.md](checkpoint-model.md) | Gate specification + feature audit |
-| [architecture.md](architecture.md) | Implementation map |
-| [coherence-tokens.md](coherence-tokens.md) | Coherence token model |
+| [philosophy.md](philosophy.md) | Values |
+| [checkpoint-model.md](checkpoint-model.md) | Gate specification |
+| [coherence-tokens.md](coherence-tokens.md) | Coherence model |
 | [kernel-rpc.md](kernel-rpc.md) | RPC reference |
-| [archive-note.md](archive-note.md) | Removed experimental surfaces |
-| [benchmarks/agent_success/WHITEPAPER.md](../benchmarks/agent_success/WHITEPAPER.md) | Adversarial evaluation instrument |
+| [testing.md](testing.md) | Validation ladder |
+| [archive-note.md](archive-note.md) | Removed surfaces |

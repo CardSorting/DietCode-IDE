@@ -1,50 +1,74 @@
-# Testing and release gates
+# Testing and validation
 
-> **“Is my install healthy?”** → `make coherence-core-v0.1`
+> **“Is this archive healthy on my machine?”** → `make validate`
 
 [← Doc index](README.md) · [getting-started](getting-started.md) · [troubleshooting](troubleshooting.md)
 
+---
+
+## Command map
+
 | I want to… | Command |
 |------------|---------|
-| Prove coherence baseline on my Mac | `make coherence-core-v0.1` |
-| Full archive validate (baseline + docs drift) | `make validate` |
-| Run only coherence token tests | `make test-coherence-tokens` |
-| Run only recovery smoke | `make coherence-recovery-smoke-fast` |
-| Quick kernel smoke | `make agent-self-test` |
-| Full agent-runtime ladder (broader) | `make verify-agent-runtime-full` |
+| Full archive validate (CI target) | `make validate` |
+| Coherence baseline only | `make coherence-core-v0.1` |
+| Coherence tokens only | `make test-coherence-tokens` |
+| Recovery smoke only | `make coherence-recovery-smoke-fast` |
+| Docs ↔ code alignment | `make test-docs-code-drift` |
+| Quick CLI smoke | `make agent-self-test` |
+| Broader RPC ladder | `make verify-agent-runtime-full` |
 
 ---
 
-## Primary gate: coherence core
+## Primary gate: validate
+
+```bash
+make validate
+```
+
+| Step | Proves |
+|------|--------|
+| `coherence-core-v0.1` | Live kernel coherence + recovery smoke |
+| `test-docs-code-drift` | Makefile targets, error codes, contract keys, doc cross-links |
+
+GitHub Actions (`.github/workflows/coherence-core.yml`) runs the same target on `macos-latest`.
+
+Tag when green: **coherence-core-v0.1**.
+
+---
+
+## Coherence-core-v0.1
 
 ```bash
 make coherence-core-v0.1
 ```
 
-| Step | What it proves |
-|------|----------------|
-| `make test-coherence-tokens` | Kernel coherence issuance + enforcement (`file.readBatch` included) |
-| `make coherence-recovery-smoke-fast` | Deterministic Python recovery vertical |
+Builds kernel once, restarts socket, then:
 
-Tag when green: **coherence-core-v0.1**. See [coherence-tokens.md](coherence-tokens.md).
+| Step | Script | Checks |
+|------|--------|--------|
+| `test-coherence-tokens-fast` | `scripts/test_coherence_tokens.py` | `file.read` + `file.readBatch` issue tokens; stale revision rejected; missing token rejected |
+| `coherence-recovery-smoke-fast` | `scripts/coherence_recovery_smoke.py` | Stale patch blocked → context refreshed → safe retry → verify passes |
 
-## Coherence token tests
+Fixtures: `scripts/fixtures/coherence_recovery/`
+
+---
+
+## Coherence token tests (with rebuild)
 
 ```bash
 make test-coherence-tokens
 ```
 
-Live kernel checks in `scripts/test_coherence_tokens.py`:
+Same as fast variant but forces `kernel` + `restart-agent-server-fast` first. Use after C++ changes.
 
-- `file.read` and `file.readBatch` issue coherence tokens when `taskId` is set
-- Stale `expectedWorkspaceRevision` rejected with `coherence_mismatch`
-- Missing token rejected on guarded patch paths
-
-Fast iteration (assumes server already matches HEAD):
+Fast iteration (server already matches HEAD):
 
 ```bash
 make test-coherence-tokens-fast
 ```
+
+---
 
 ## Coherence recovery smoke
 
@@ -52,20 +76,15 @@ make test-coherence-tokens-fast
 make coherence-recovery-smoke-fast
 ```
 
-Fixtures under `scripts/fixtures/coherence_recovery/`:
-
-| File | Role |
-|------|------|
-| `probe.py` | Mutable target for patch smoke |
-| `verify.sh` | Post-mutation verification |
-
-Orchestrator: `scripts/coherence_recovery_smoke.py` — proves stale patch blocked, context refreshed, safe retry, verify passes.
-
-Full gate (rebuild + restart kernel first):
+Full gate (rebuild + restart first):
 
 ```bash
 make coherence-recovery-smoke
 ```
+
+Orchestrator proves the Python recovery path in `scripts/dietcode_coherence.py` — not a removed bridge client.
+
+---
 
 ## Docs drift
 
@@ -73,15 +92,25 @@ make coherence-recovery-smoke
 make test-docs-code-drift
 ```
 
-Locks Makefile targets, error-code docs, tool contracts, coherence cross-doc alignment, and release-gate references.
+Locks:
 
-## Kernel harness ladder (agent runtime)
+- Makefile `REQUIRED_MAKE_TARGETS`
+- Error recovery hints ↔ `error-codes.md` ↔ runtime diagnostics
+- Coherence cross-doc alignment (`coherence_mismatch`, issuing reads)
+- Agent tooling and shell method documentation
+- README / getting-started baseline mentions
 
-These prove RPC contracts and tooling — run after kernel changes, separate from `coherence-core-v0.1`:
+Source: `scripts/agent_contracts.py`, `scripts/test_docs_code_drift.py`
+
+---
+
+## Kernel harness ladder (optional)
+
+Broader than coherence-core — run after significant RPC changes:
 
 | Target | Focus |
 |--------|-------|
-| `make agent-self-test` | CLI + socket smoke |
+| `make agent-self-test` | CLI + socket transport |
 | `make control-smoke` | Control plane smoke |
 | `make test-agent-workflow-smoke` | Patch workflows |
 | `make test-agent-shell-tooling` | Bounded shell |
@@ -89,33 +118,45 @@ These prove RPC contracts and tooling — run after kernel changes, separate fro
 | `make test-authority-boundaries` | Journal vs live authority |
 | `make verify-agent-runtime-full` | Full agent-runtime release ladder |
 
-Restart kernel before live harnesses when C++ changed:
+Restart when C++ changed:
 
 ```bash
 make restart-agent-server
 ```
 
-## Benchmark track (optional)
+---
 
-Frozen results live under `benchmarks/agent_success/`; live runners need restored `agent-bridge/`. See [benchmarks/README.md](../benchmarks/README.md) and [AGENT_RUNTIME_RELIABILITY.md](../AGENT_RUNTIME_RELIABILITY.md). Does not gate coherence core.
-
-## CI / local validate
+## Authority unit tests (offline)
 
 ```bash
-make validate
+make test-mutation-authority
+make test-diff-authority
+make test-verification-authority
 ```
 
-Runs `coherence-core-v0.1` then `test-docs-code-drift`. GitHub Actions runs the same target on macOS for pushes and pull requests (`.github/workflows/coherence-core.yml`).
+No live kernel required.
 
-If that passes, the kernel coherence model is proven for the frozen baseline.
+---
 
-## Agent runtime release ladder
+## Benchmark track (not gated)
 
-Historical RPC pass ladder (broader than coherence core):
+Frozen results under `benchmarks/agent_success/`. Live runners need restored `agent-bridge/` from git history. See [benchmarks/README.md](../benchmarks/README.md) and [AGENT_RUNTIME_RELIABILITY.md](../AGENT_RUNTIME_RELIABILITY.md).
+
+Does **not** gate coherence-core.
+
+---
+
+## Build performance
+
+Kernel build uses incremental object compilation (`build/obj/`). First compile ~45s; typical incremental ~1s. `coherence-core-v0.1` avoids redundant full rebuilds across nested make targets.
+
+---
+
+## Agent runtime release ladder (historical)
 
 ```bash
 make verify-agent-runtime-full
 make release-check-agent-runtime
 ```
 
-Contract inventory versions live in `scripts/release_versions.py` and the kernel `rpc.version` response.
+Contract versions: `scripts/release_versions.py`, kernel `rpc.version` response.

@@ -1,10 +1,12 @@
-# Workspace drift guardrails
+# Workspace drift
 
 **Checkpoint 2 · Drift** — *Did the workspace change underneath the agent?*
 
-Canonical loop: [checkpoint-model.md](./checkpoint-model.md).
+[checkpoint-model.md](checkpoint-model.md) · [coherence-tokens.md](coherence-tokens.md)
 
-DietCode tracks workspace **state validity** so the agent cannot mutate files after the world changed underneath it.
+DietCode tracks workspace **state validity** so agents cannot mutate files after the world changed underneath them.
+
+---
 
 ## Kernel RPCs
 
@@ -15,7 +17,7 @@ DietCode tracks workspace **state validity** so the agent cannot mutate files af
 | `workspace.refreshAnchor` | Read | Re-anchor tracked files + git HEAD; bumps `contextRefreshId` |
 | `workspace.continueAnyway` | Read | One-shot override (5 min) for supervised flows |
 
-### `workspace.status` tracks
+### `workspace.status` fields
 
 - `root` — active workspace path
 - `gitHead` / `gitBranch` — current git state
@@ -24,14 +26,14 @@ DietCode tracks workspace **state validity** so the agent cannot mutate files af
 - `fileAnchors` — mtime/hash anchors for agent-touched files
 - `affectedFiles` — human-readable drift list with `reason`
 - `lastVerifiedCommand` / `lastVerifiedAt` / `lastVerifyPassed`
-- `contextRefreshId` — monotonic id agents must pass after refresh
+- `contextRefreshId` — monotonic id required after refresh
 - `driftDetected` / `requiresContextRefresh`
+
+---
 
 ## Mutation gate
 
-**Core rule:** If the world changed underneath the agent, DietCode blocks **Edit** and **Destructive** RPCs until context is refreshed.
-
-Blocked responses:
+**Rule:** If the world changed underneath the agent, DietCode blocks **Edit** and **Destructive** RPCs until context is refreshed.
 
 ```json
 {
@@ -42,30 +44,48 @@ Blocked responses:
 }
 ```
 
-Unblock paths:
+Unblock:
 
-1. **Refresh context** — `workspace.refreshAnchor` then retry with `contextRefreshId`
-2. **Continue anyway** — `workspace.continueAnyway` or `continueAnyway: true` on the mutation
+1. **Refresh** — `workspace.refreshAnchor`, retry with `contextRefreshId`
+2. **Continue anyway** — `workspace.continueAnyway` or `continueAnyway: true` on mutation
 
-Kernel emits `workspace.drift.detected` when a mutation is blocked.
+Kernel emits `workspace.drift.detected` when blocked.
 
-**Layering:** For governed mutations (`taskId` set), the kernel checks coherence **before** drift so agents receive `coherence_mismatch` (precise) rather than `workspaceDriftRequired` (broad). Drift still applies when no task coherence envelope is in play. See [coherence-tokens.md](./coherence-tokens.md).
+---
+
+## Coherence before drift
+
+For governed mutations (`taskId` set), the kernel checks **coherence before drift**. Agents receive `coherence_mismatch` (precise stale context) rather than `workspaceDriftRequired` (broad change). Drift still applies when no task coherence envelope is active.
+
+See [coherence-tokens.md](coherence-tokens.md).
+
+---
 
 ## Agent loop
 
-`patch.apply` / `patch.applyBatch` handle `workspaceDriftRequired` in harnesses:
+Harness pattern for `patch.apply` / `patch.applyBatch`:
 
-1. Call `workspace.refreshAnchor`
+1. `workspace.refreshAnchor`
 2. Poll `workspace.status` until `driftDetected` is false
 3. Retry mutation with returned `contextRefreshId`
 
-Python helper: `scripts/dietcode_coherence.py` (`_complete_after_workspace_drift`).
+Python: `scripts/dietcode_coherence.py` (`_complete_after_workspace_drift`).
+
+---
 
 ## Anchoring
 
-Hashes are tracked when the agent:
+Hashes tracked when the agent:
 
 - Reads files (`file.read`, `file.readRange`, `file.readAround`, `file.readBatch`)
 - Applies patches (`patch.apply` / batch)
 
-`workspace.refreshAnchor` re-reads all tracked paths, clears external-change flags, snapshots git HEAD, and increments `contextRefreshId`.
+`workspace.refreshAnchor` re-reads tracked paths, clears external-change flags, snapshots git HEAD, increments `contextRefreshId`.
+
+---
+
+## Related
+
+- [agent-ergonomics.md](agent-ergonomics.md)
+- [kernel-rpc.md](kernel-rpc.md)
+- [error-codes.md](error-codes.md) — `coherence_mismatch`

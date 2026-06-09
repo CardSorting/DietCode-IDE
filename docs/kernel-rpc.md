@@ -1,6 +1,6 @@
 # Kernel RPC reference
 
-Headless control surface for workspace mutation. Agents and harnesses speak this protocol via `scripts/dietcode_agent_client.py`.
+Headless control surface for workspace mutation. **Primary integration:** `scripts/dietcode_agent_client.py`.
 
 | | |
 |--|--|
@@ -16,7 +16,9 @@ python3 scripts/dietcode_agent_client.py rpc rpc.ping
 python3 scripts/dietcode_agent_client.py --list-methods
 ```
 
-See [agent-environment.md](agent-environment.md) for paths and env vars.
+Paths and env: [agent-environment.md](agent-environment.md)
+
+---
 
 ## Request envelope
 
@@ -30,14 +32,18 @@ See [agent-environment.md](agent-environment.md) for paths and env vars.
 }
 ```
 
+Token at **top level** — not inside `params`.
+
+---
+
 ## Checkpoint-relevant methods
 
 ### Context (checkpoint 1)
 
 | Method | Permission | Notes |
 |--------|------------|-------|
-| `file.read` / `file.readRange` / `file.readAround` / `file.readBatch` | Read | Sets hash anchors; returns `coherence` when `taskId` set |
-| `file.stat` | Read | Metadata + content hash; optional `coherence` with `taskId` |
+| `file.read` / `file.readRange` / `file.readAround` / `file.readBatch` | Read | Hash anchors; `coherence` when `taskId` set |
+| `file.stat` | Read | Metadata + hash; optional `coherence` with `taskId` |
 | `workspace.status` | Read | Drift snapshot; optional `coherence` with `taskId` |
 | `workspace.snapshot` | Read | Point-in-time hashes |
 | `workspace.revision` | Read | Monotonic revision + receipts |
@@ -53,7 +59,7 @@ See [agent-environment.md](agent-environment.md) for paths and env vars.
 
 Edit/Destructive RPCs return `workspaceDriftRequired` when drift blocks.
 
-When `taskId` is set, mutating RPCs also require a valid **coherence token** from the latest read. Stale tokens return `coherence_mismatch` (before drift). See [coherence-tokens.md](./coherence-tokens.md).
+When `taskId` is set, mutating RPCs require a valid **coherence token**. Stale tokens return `coherence_mismatch` **before** drift. See [coherence-tokens.md](coherence-tokens.md).
 
 ### Approval (checkpoint 3)
 
@@ -63,15 +69,15 @@ When `taskId` is set, mutating RPCs also require a valid **coherence token** fro
 | `approval.get` | Read | Single pending approval |
 | `approval.resolve` | Execute | Approve executes queued mutation |
 
-Destructive methods return `approvalRequired: true` when autonomy is 3 (default).
+Destructive methods return `approvalRequired: true` at autonomy 3 (default).
 
 ### Mutation (checkpoint 4)
 
 | Method | Permission | Notes |
 |--------|------------|-------|
 | `patch.validate` | Read | Pre-flight |
-| `patch.apply` | Destructive* | `confirm: true`, `expectBeforeHash`, `taskId`, `coherenceTokenId`, `expectedWorkspaceRevision` |
-| `patch.applyBatch` | Destructive* | Same coherence fields as single apply |
+| `patch.apply` | Destructive* | `confirm`, `expectBeforeHash`, `taskId`, `coherenceTokenId`, `expectedWorkspaceRevision` |
+| `patch.applyBatch` | Destructive* | Same coherence fields |
 
 \* Queued for approval at autonomy 3. Emits `workspace.mutated` on success.
 
@@ -86,6 +92,8 @@ Allowed command prefixes (default): `make test`, `make kernel`, `git diff --chec
 
 Emits `verify.completed` or `verify.failed`.
 
+---
+
 ## Agent-safe read/search
 
 | Method | Notes |
@@ -97,7 +105,9 @@ Emits `verify.completed` or `verify.failed`.
 
 Quarantined: `search.semantic` → `semantic_disabled`. Use `search.literal`.
 
-Tool contracts: [agent-tooling.md](agent-tooling.md). Shell tools: [agent-shell-tooling.md](agent-shell-tooling.md).
+Contracts: [agent-tooling.md](agent-tooling.md). Shell: [agent-shell-tooling.md](agent-shell-tooling.md).
+
+---
 
 ## Workspace
 
@@ -108,12 +118,18 @@ Tool contracts: [agent-tooling.md](agent-tooling.md). Shell tools: [agent-shell-
 | `workspace.findFiles` | Read |
 | `workspace.listFiles` | Read |
 
+---
+
 ## Events
 
 | Method | Notes |
 |--------|-------|
-| `events.recent` | Poll kernel events (bridge uses this) |
+| `events.recent` | Poll kernel event ring |
 | `event.subscribe` | Stream subscription |
+
+Harnesses poll these for checkpoint audit trails.
+
+---
 
 ## Python CLI
 
@@ -121,16 +137,26 @@ Tool contracts: [agent-tooling.md](agent-tooling.md). Shell tools: [agent-shell-
 python3 scripts/dietcode_agent_client.py rpc <method> --params '{}'
 python3 scripts/dietcode_agent_client.py --capabilities
 python3 scripts/dietcode_agent_client.py --self-test
+python3 scripts/dietcode_agent_client.py --error-json --compact rpc patch.validate --params-file patch.json
 ```
+
+---
 
 ## Errors
 
-Every failure includes `string_code`, `message`, and usually `recovery_hint` + `nextRecommendedCommand`.
+Failures include `string_code`, `message`, and usually `recovery_hint` + `nextRecommendedCommand`.
+
+| Code | Meaning | Next |
+|------|---------|------|
+| `coherence_mismatch` | Stale task context | `file.read` with `taskId` |
 
 Catalog: [error-codes.md](error-codes.md). Invariants: [runtime-invariants.md](runtime-invariants.md).
+
+---
 
 ## Related
 
 - [architecture.md](architecture.md)
-- [coherence-tokens.md](coherence-tokens.md) — coherence token model
+- [coherence-tokens.md](coherence-tokens.md)
 - [checkpoint-model.md](checkpoint-model.md)
+- [agent-ergonomics.md](agent-ergonomics.md)

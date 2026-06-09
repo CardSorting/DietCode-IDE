@@ -1,5 +1,12 @@
 # Changelog
 
+## 2026-06-08 — Full docs rewrite (kernel/coherence-core strategy)
+
+- Rewrote README + all 23 `docs/*.md` for kernel/coherence-core archive positioning
+- Removed cockpit/bridge/IDE framing; Python CLI as sole integration path
+- `make validate` documented as primary health check across docs
+- ARCHIVE.md aligned with new documentation strategy
+
 ## 2026-06-08 — Incremental kernel build + validate speed fix
 
 - Makefile kernel build now uses per-file object compilation (`build/obj/`) instead of monolithic recompile (~45s → ~1s incremental)

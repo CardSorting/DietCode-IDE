@@ -1,6 +1,8 @@
-# Agent Shell Tooling (Pass IX)
+# Agent shell tooling
 
-Safe, deterministic shell-shaped inspection for agents. Use `shell.*` RPC methods, `dietcode-agent-client shell …`, or Python `dietcode_agent_client.py shell …` — not raw `cat`, `cd`, or unbounded `rg`.
+Bounded, deterministic shell-shaped inspection for agents via kernel `shell.*` RPC methods. Use `python3 scripts/dietcode_agent_client.py shell …` — not raw `cat`, `cd`, or unbounded `rg`.
+
+Part of the optional agent-runtime harness ladder; not required for `coherence-core-v0.1`.
 
 Verification:
 

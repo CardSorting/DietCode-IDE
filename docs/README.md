@@ -1,16 +1,28 @@
 # DietCode documentation
 
-> **A local kernel experiment for preserving operational coherence across agent read, diff, patch, approval, and verification surfaces.**
+> **Kernel/coherence-core archive** — headless `dietcode-kernel` with operational coherence enforcement across agent read, patch, approval, and verify surfaces.
 
-[← Project overview](../README.md) · Baseline: `make coherence-core-v0.1`
+[← Project overview](../README.md) · **Health check:** `make validate` · Baseline tag: **coherence-core-v0.1**
 
-<p align="center">
-  <a href="#i-want-to">I want to…</a> ·
-  <a href="#learn-the-model">Learn</a> ·
-  <a href="#run-and-validate">Run</a> ·
-  <a href="#build-agents">Build</a> ·
-  <a href="#when-something-breaks">Fix</a>
-</p>
+---
+
+## Repository strategy
+
+DietCode is intentionally **not** a product repo. It is a reproducible archive of:
+
+1. A macOS mutation kernel (`dietcode-kernel`)
+2. Coherence token enforcement (v0.1)
+3. Python harnesses that prove issuance, blocking, and recovery
+4. Frozen contract docs locked by `make test-docs-code-drift`
+
+Removed surfaces (cockpit, legacy UI, agent-bridge) are documented in [archive-note.md](archive-note.md). Research benchmarks live under `benchmarks/` and do **not** gate the archive.
+
+| Question | Answer |
+|----------|--------|
+| What ships? | Nothing — methodology + tests |
+| What proves it? | `make validate` |
+| What tag marks green? | **coherence-core-v0.1** |
+| Where is the map? | [ARCHIVE.md](../ARCHIVE.md) |
 
 ---
 
@@ -18,84 +30,78 @@
 
 | I want to… | Go here |
 |------------|---------|
-| **Understand what DietCode does** (no install) | [Root README](../README.md) → [coherence tokens](coherence-tokens.md) |
-| **Build the kernel and run coherence tests** | [getting-started.md](getting-started.md) |
-| **Confirm my machine matches the release baseline** | [testing.md](testing.md) → `make coherence-core-v0.1` |
-| **Fix a broken socket or coherence mismatch** | [troubleshooting.md](troubleshooting.md) |
-| **Call kernel RPC from Python** | [kernel-rpc.md](kernel-rpc.md) → `scripts/dietcode_agent_client.py` |
-| **Understand removed UI surfaces** | [archive-note.md](archive-note.md) |
-| **Look up an error code** | [error-codes.md](error-codes.md) |
-
----
-
-## Concept papers
-
-| Doc | When to read | Length |
-|-----|--------------|--------|
-| [brief.md](brief.md) | Executive companion — start here for the idea | ~5 min |
-| [philosophy.md](philosophy.md) | Why governed mutation; values and refusals | ~20 min |
-| [whitepaper.md](whitepaper.md) | Full runtime architecture and contracts | ~45 min |
+| Understand what this repo is (no install) | [brief.md](brief.md) → [coherence-tokens.md](coherence-tokens.md) |
+| Build kernel and run the baseline | [getting-started.md](getting-started.md) |
+| Confirm my machine matches the archive | [testing.md](testing.md) → `make validate` |
+| Fix socket / coherence / drift errors | [troubleshooting.md](troubleshooting.md) |
+| Call kernel RPC from Python | [kernel-rpc.md](kernel-rpc.md) |
+| See what was removed | [archive-note.md](archive-note.md) |
+| Look up an error code | [error-codes.md](error-codes.md) |
 
 ---
 
 ## Learn the model
 
-| Doc | When to read | Audience |
-|-----|--------------|----------|
-| [coherence-tokens.md](coherence-tokens.md) | Canonical coherence token model (v0.1) | Everyone |
-| [checkpoint-model.md](checkpoint-model.md) | Six-gate map, feature → checkpoint routing | Everyone |
-| [architecture.md](architecture.md) | Kernel + control plane wiring | Developers |
+| Doc | Audience | Time |
+|-----|----------|------|
+| [brief.md](brief.md) | Everyone — executive companion | ~5 min |
+| [philosophy.md](philosophy.md) | Why governed mutation | ~20 min |
+| [whitepaper.md](whitepaper.md) | Full runtime architecture | ~45 min |
+| [checkpoint-model.md](checkpoint-model.md) | Six-gate map | ~15 min |
+| [architecture.md](architecture.md) | Kernel wiring | ~10 min |
 
-### Checkpoint deep dives
+### Coherence and checkpoints
 
-| Gate | Plain English | Doc |
-|------|---------------|-----|
-| Coherence | Agent context bound to kernel revision | [coherence-tokens.md](coherence-tokens.md) |
-| 2 Drift | Files changed while the agent was working | [workspace-drift.md](workspace-drift.md) |
-| 3 Approval | Mutation requires explicit clearance | [approval-lifecycle.md](approval-lifecycle.md) |
-| 5–6 Verify | Tests must pass before “done” | [verify-gate.md](verify-gate.md) |
-| Recovery | Kernel restarted mid-task | [session-recovery.md](session-recovery.md) |
-| Agent loop | Polling and RPC from code | [agent-ergonomics.md](agent-ergonomics.md) |
+| Topic | Doc |
+|-------|-----|
+| Coherence tokens (v0.1) | [coherence-tokens.md](coherence-tokens.md) |
+| Drift gate (checkpoint 2) | [workspace-drift.md](workspace-drift.md) |
+| Approval (checkpoint 3) | [approval-lifecycle.md](approval-lifecycle.md) |
+| Verify + completion (5–6) | [verify-gate.md](verify-gate.md) |
+| Session reload (not a gate) | [session-recovery.md](session-recovery.md) |
+| Agent loop | [agent-ergonomics.md](agent-ergonomics.md) |
 
 ---
 
 ## Run and validate
 
-| Doc | When to read |
-|-----|--------------|
-| [getting-started.md](getting-started.md) | First build, kernel socket, coherence baseline |
-| [testing.md](testing.md) | `coherence-core-v0.1`, kernel harness ladder |
-| [agent-environment.md](agent-environment.md) | Env vars, `~/.dietcode` paths, `restart-agent-server` |
+| Doc | Purpose |
+|-----|---------|
+| [getting-started.md](getting-started.md) | First build, socket, workspace |
+| [testing.md](testing.md) | `validate`, `coherence-core-v0.1`, harness ladder |
+| [agent-environment.md](agent-environment.md) | Paths, env vars, `restart-agent-server` |
 
 ### Quick health check
 
 ```bash
-make coherence-core-v0.1
+make validate
 ```
 
-Proves kernel coherence tokens + recovery smoke + docs alignment on your Mac.
+Runs coherence-core-v0.1 + docs drift. GitHub Actions uses the same target on macOS.
 
 ---
 
 ## Build agents and integrations
 
-| Doc | When to read |
-|-----|--------------|
-| [kernel-rpc.md](kernel-rpc.md) | JSON-RPC methods, Python CLI |
-| [agent-tooling.md](agent-tooling.md) | Read/mutate tool contracts |
-| [agent-shell-tooling.md](agent-shell-tooling.md) | Bounded shell (`shell.rg`, `shell.catSmall`, …) |
-| [runtime-invariants.md](runtime-invariants.md) | Sort order, stale writes, symlink policy |
+| Doc | Purpose |
+|-----|---------|
+| [kernel-rpc.md](kernel-rpc.md) | JSON-RPC methods + Python CLI |
+| [agent-tooling.md](agent-tooling.md) | Grep/diff/patch/retrieval contracts |
+| [agent-shell-tooling.md](agent-shell-tooling.md) | Bounded `shell.*` methods |
+| [runtime-invariants.md](runtime-invariants.md) | Frozen determinism rules |
+
+Integration path: **Python only** — `scripts/dietcode_agent_client.py` and `scripts/dietcode_coherence.py`. No in-tree TypeScript bridge.
 
 ---
 
 ## When something breaks
 
-| Symptom | First step | Full guide |
-|---------|------------|------------|
-| “Kernel offline” / socket error | `make restart-agent-server-fast` | [troubleshooting.md](troubleshooting.md#kernel-socket) |
-| Patch blocked — coherence | Re-read with `taskId` | [coherence-tokens.md](coherence-tokens.md) |
-| Patch blocked — drift | Refresh workspace anchor | [workspace-drift.md](workspace-drift.md) |
-| Unknown error code | Search catalog | [error-codes.md](error-codes.md) |
+| Symptom | First step | Guide |
+|---------|------------|-------|
+| Kernel offline | `make restart-agent-server-fast` | [troubleshooting.md](troubleshooting.md) |
+| `coherence_mismatch` | Re-read with `taskId` | [coherence-tokens.md](coherence-tokens.md) |
+| Drift block | `workspace.refreshAnchor` | [workspace-drift.md](workspace-drift.md) |
+| Unknown error | Search catalog | [error-codes.md](error-codes.md) |
 
 ---
 
@@ -104,7 +110,7 @@ Proves kernel coherence tokens + recovery smoke + docs alignment on your Mac.
 | Doc | Purpose |
 |-----|---------|
 | [file-structure.md](file-structure.md) | Repository map |
-| [archive-note.md](archive-note.md) | Removed cockpit / legacy UI / bridge surfaces |
+| [archive-note.md](archive-note.md) | Removed product surfaces |
 | [troubleshooting.md](troubleshooting.md) | Full failure playbook |
 
 ---
@@ -113,15 +119,15 @@ Proves kernel coherence tokens + recovery smoke + docs alignment on your Mac.
 
 | Path | Purpose |
 |------|---------|
-| [AGENT_RUNTIME_RELIABILITY.md](../AGENT_RUNTIME_RELIABILITY.md) | Adversarial benchmark track (parallel to coherence-core) |
-| [benchmarks/README.md](../benchmarks/README.md) | Research archive — bridge-dependent runners |
-| [benchmarks/agent_success/](../benchmarks/agent_success/) | Frozen evaluation corpus + results |
+| [ARCHIVE.md](../ARCHIVE.md) | Retained vs removed index |
+| [AGENT_RUNTIME_RELIABILITY.md](../AGENT_RUNTIME_RELIABILITY.md) | Adversarial research track |
+| [benchmarks/README.md](../benchmarks/README.md) | Frozen benchmark archive |
 
 ---
 
 ## For maintainers
 
-After changing kernel RPC surfaces or Makefile targets:
+After changing kernel RPC, Makefile targets, or `agent_contracts.py`:
 
 ```bash
 make test-docs-code-drift

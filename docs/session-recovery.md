@@ -1,23 +1,27 @@
-# Session recovery (ephemeral state)
+# Session recovery
 
-**Not a checkpoint** — control-plane hygiene for kernel reload. See the noise bucket in [checkpoint-model.md](./checkpoint-model.md).
+**Not a checkpoint** — control-plane hygiene for kernel reload. See noise bucket in [checkpoint-model.md](checkpoint-model.md).
 
 DietCode is a **live control surface**, not an observability warehouse. Session state is bounded on-disk snapshots for kernel recovery and harness continuity.
 
-## What we keep vs. what we drop
+---
+
+## Keep vs drop
 
 | Keep (bounded) | Drop |
 |----------------|------|
 | Pending approvals (kernel authoritative) | Infinite event archives |
 | Recent diffs (recovery store) | Per-token forensic logs |
-| Active task summaries | Full tool-call history forever |
-| Rolling event ring (~500 kernel events) | Splunk-for-agents sludge |
+| Active task summaries (harness) | Full tool-call history forever |
+| Rolling event ring (~500 events) | Long-term agent chat logs |
+
+---
 
 ## Layout
 
 ```text
 ~/.dietcode/session/          # optional DIETCODE_SESSION_DIR
-├─ active_tasks.json          # task registry snapshot (harness)
+├─ active_tasks.json          # harness task registry snapshot
 ├─ pending_approvals.json     # kernel pending approval cache
 ├─ recent_events.ndjson       # rolling window
 └─ recent_diffs.json          # lightweight diff previews
@@ -25,9 +29,9 @@ DietCode is a **live control surface**, not an observability warehouse. Session 
 
 Kernel recovery store: `src/platform/macos/control/services/MacControlRecoveryStore.mm`
 
-## Recovery behavior
+---
 
-### Kernel restart
+## Kernel restart
 
 On restart the kernel:
 
@@ -35,11 +39,20 @@ On restart the kernel:
 2. Retains authoritative pending approvals
 3. Resumes event ring from last known sequence
 
-Harnesses should call `make restart-agent-server-fast` and `dietcode_agent_client.py --wait-ready` before live tests.
+Harnesses should run before live tests:
 
-### Agent reconnect
+```bash
+make restart-agent-server-fast
+python3 scripts/dietcode_agent_client.py --wait-ready --compact
+```
 
-Agents reconnect via the same socket path and session token. Stale tokens after kernel restart require reading the new `~/.dietcode/session.token`.
+---
+
+## Agent reconnect
+
+Agents reconnect via the same socket path and session token. After kernel restart, read fresh `~/.dietcode/session.token` if auth fails.
+
+---
 
 ## Recovery RPCs
 
@@ -47,10 +60,14 @@ Agents reconnect via the same socket path and session token. Stale tokens after 
 |-----|---------|
 | `recovery.scan` | List recoverable artifacts |
 | `recovery.list` | Enumerate recovery entries |
-| `recovery.schemaInfo` | Schema version for recovery payloads |
+| `recovery.schemaInfo` | Schema version for payloads |
+
+Internal namespace `recovery.*` — not agent-safe; harness use only.
+
+---
 
 ## Related
 
-- [approval-lifecycle.md](./approval-lifecycle.md) — pending approval semantics
-- [coherence-tokens.md](./coherence-tokens.md) — coherence recovery loop
-- [archive-note.md](./archive-note.md) — removed bridge session persistence
+- [approval-lifecycle.md](approval-lifecycle.md)
+- [coherence-tokens.md](coherence-tokens.md)
+- [archive-note.md](archive-note.md)

@@ -1,20 +1,22 @@
 # Troubleshooting
 
-> **Start here when something looks wrong.** Each section: symptom → first fix → deeper doc.
+> **Start here when something looks wrong.**
 
-[← Doc index](README.md) · [← README quick fixes](../README.md#troubleshooting)
+[← Doc index](README.md) · [← README](../README.md#troubleshooting)
+
+---
 
 ## Quick fix table
 
 | What you see | Plain English | First command |
 |--------------|---------------|---------------|
-| “Kernel offline” / socket error | The engine isn’t running | `make restart-agent-server-fast` |
-| Errors right after `git pull` | Old binary still running | `make kernel && make restart-agent-server-fast` |
-| Patch blocked — coherence | Agent context stale | Re-read with `taskId` — [coherence-tokens.md](coherence-tokens.md) |
-| Patch blocked — “drift” | Files changed while agent worked | `workspace.refreshAnchor` |
-| Approval pending | Mutation needs clearance | `approval.resolve` via RPC |
-| Agent done but verify not passed | Tests haven’t passed yet | `verify.run` |
-| Not sure install is healthy | Baseline may be broken | `make coherence-core-v0.1` |
+| Kernel offline / socket error | Engine not running | `make restart-agent-server-fast` |
+| Errors after `git pull` | Stale binary | `make kernel && make restart-agent-server-fast` |
+| Patch blocked — coherence | Stale agent context | Re-read with `taskId` — [coherence-tokens.md](coherence-tokens.md) |
+| Patch blocked — drift | Files changed mid-task | `workspace.refreshAnchor` |
+| Approval pending | Needs clearance | `approval.resolve` via RPC |
+| Agent done, verify not passed | Tests not run | `verify.run` |
+| Install health unknown | Baseline may be broken | `make validate` |
 
 ---
 
@@ -27,13 +29,13 @@ make restart-agent-server-fast
 python3 scripts/dietcode_agent_client.py --wait-ready --compact
 ```
 
-**After `git pull` — stale binary:**
+**After `git pull`:**
 
 ```bash
 make kernel && make restart-agent-server-fast
 ```
 
-Paths: socket `~/.dietcode/control.sock` · token `~/.dietcode/session.token` (mode `0600`).
+Paths: `~/.dietcode/control.sock` · `~/.dietcode/session.token` (mode `0600`).
 
 ---
 
@@ -41,7 +43,7 @@ Paths: socket `~/.dietcode/control.sock` · token `~/.dietcode/session.token` (m
 
 **Symptom:** `Invalid or missing session token`.
 
-Each kernel request must send `token` at the **top level** (not inside `params`). Restart the kernel after token rotation:
+Send `token` at the **top level** of each RPC request. Restart kernel after rotation:
 
 ```bash
 make restart-agent-server-fast
@@ -49,14 +51,14 @@ make restart-agent-server-fast
 
 ---
 
-## Missing RPC method (e.g. `workspace.status`)
+## Missing RPC method
 
-**Symptom:** `method_not_found`, `Unhandled file/workspace/search method`.
+**Symptom:** `method_not_found`.
 
-The running kernel is older than your source tree.
+Running kernel is older than source tree:
 
 ```bash
-make kernel restart-agent-server-fast
+make kernel && make restart-agent-server-fast
 ```
 
 ---
@@ -65,34 +67,32 @@ make kernel restart-agent-server-fast
 
 **Symptom:** `coherence_mismatch`, `anchored_file_changed`.
 
-**What it means:** The agent’s coherence token no longer matches kernel revision or anchored file content.
+The agent's coherence token no longer matches kernel revision or anchored content.
 
 ```bash
 python3 scripts/dietcode_agent_client.py rpc file.read \
   --params '{"path":"src/foo.ts","taskId":"task_1"}'
-# Regenerate patch with fresh coherenceTokenId + expectedWorkspaceRevision
 ```
+
+Regenerate patch with fresh `coherenceTokenId` + `expectedWorkspaceRevision`.
 
 See [coherence-tokens.md](coherence-tokens.md) and `scripts/dietcode_coherence.py`.
 
 ---
 
-## Workspace drift blocks patches
+## Workspace drift
 
-**Symptom:** `workspaceDriftRequired`, checkpoint 2 active, `workspace.drift.detected`.
+**Symptom:** `workspaceDriftRequired`, `workspace.drift.detected`.
 
 ```bash
 python3 scripts/dietcode_agent_client.py rpc workspace.refreshAnchor
 ```
 
-Or `workspace.continueAnyway` for supervised override.  
-Deep dive: [workspace-drift.md](workspace-drift.md).
+Or supervised override via `workspace.continueAnyway`. See [workspace-drift.md](workspace-drift.md).
 
 ---
 
 ## Approval stuck
-
-**Symptom:** `approvalRequired`, pending approval in kernel.
 
 ```bash
 python3 scripts/dietcode_agent_client.py rpc approval.list
@@ -100,20 +100,18 @@ python3 scripts/dietcode_agent_client.py rpc approval.resolve \
   --params '{"approvalId":"appr_1","decision":"approved","resolvedBy":"operator"}'
 ```
 
-Approvals expire after 30 minutes. See [approval-lifecycle.md](approval-lifecycle.md).
+Approvals expire after 30 minutes. [approval-lifecycle.md](approval-lifecycle.md).
 
 ---
 
 ## Verify not passed
-
-**Symptom:** Mutation applied but verify gate still active.
 
 ```bash
 python3 scripts/dietcode_agent_client.py rpc verify.run \
   --params '{"command":"make test"}'
 ```
 
-See [verify-gate.md](verify-gate.md).
+[verify-gate.md](verify-gate.md).
 
 ---
 
@@ -121,29 +119,22 @@ See [verify-gate.md](verify-gate.md).
 
 **Symptom:** `verify.run command must match AgentVerifyCommands prefixes`.
 
-Allowed defaults include `make test`, `npm test`, `./verify.sh`. Custom commands need kernel allowlist or `AgentVerifyCommands` user defaults.
+Defaults: `make test`, `make kernel`, `npm test`, `./verify.sh`. Customize via `AgentVerifyCommands` user defaults on macOS.
 
 ---
 
 ## Coherence test failures
 
 ```bash
-make test-coherence-tokens 2>&1 | python3 -c "
-import sys, json
-for line in sys.stdin:
-    if line.strip().startswith('{'):
-        o=json.loads(line)
-        if o.get('type')=='check' and not o.get('ok'):
-            print(o)
-"
+make test-coherence-tokens
 ```
 
 Common causes:
 
 - Kernel not restarted after C++ pull
-- Socket owned by stale process
+- Stale process holding socket
 
-Full gate: [testing.md](testing.md)
+Full gate: [testing.md](testing.md) → `make validate`
 
 ---
 
@@ -153,23 +144,23 @@ Full gate: [testing.md](testing.md)
 make test-docs-code-drift
 ```
 
-Run after changing Makefile targets, error codes, or agent contracts.
+Run after changing Makefile targets, error codes, or `agent_contracts.py`.
 
 ---
 
 ## Error code lookup
 
 ```bash
-rg 'string_code' docs/error-codes.md
+rg 'coherence_mismatch' docs/error-codes.md
 ```
 
-Every failure envelope should include `string_code`, `recovery_hint`, and `nextRecommendedCommand` when applicable. Catalog: [error-codes.md](error-codes.md).
+Every failure envelope should include `string_code`, `recovery_hint`, and `nextRecommendedCommand` when applicable.
 
 ---
 
 ## Still stuck
 
-1. `make coherence-core-v0.1` — reproduces the coherence baseline on your machine
-2. [getting-started.md](getting-started.md) — clean build path from scratch
-3. [architecture.md](architecture.md) — which component owns what
-4. [checkpoint-model.md](checkpoint-model.md) — which gate is blocking progress
+1. `make validate` — full archive health check
+2. `make coherence-core-v0.1` — coherence baseline only
+3. [getting-started.md](getting-started.md) — clean build path
+4. [checkpoint-model.md](checkpoint-model.md) — which gate is blocking

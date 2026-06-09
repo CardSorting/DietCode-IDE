@@ -1,6 +1,6 @@
-# Runtime Invariants (Deterministic Agent Kernel)
+# Runtime invariants
 
-Frozen invariants for local-first agent execution. Contract tests: `make test-docs-code-drift`. Kernel reference: [kernel-rpc.md](kernel-rpc.md).
+Frozen invariants for deterministic agent execution against `dietcode-kernel`. Locked by `make test-docs-code-drift` (part of `make validate`). RPC reference: [kernel-rpc.md](kernel-rpc.md).
 
 ```bash
 rg 'INVARIANT:|stale_content|beforeContentHash|sortOrder' src/ scripts/ docs/

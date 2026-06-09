@@ -96,7 +96,7 @@ Collapsing these into one opaque stack — typically a chat window with file acc
 
 **Only the kernel mutates the workspace.** Agents and harnesses request clearance via RPC. This is not a technical detail. It is a **philosophical line**: visibility and steering are separate from authority.
 
-Agents, bridges, and scripts may request mutation. They do not perform it. The tower clears; the plane does not clear itself.
+Agents, harnesses, and scripts may request mutation. They do not perform it. The tower clears; the plane does not clear itself.
 
 ---
 
@@ -156,7 +156,7 @@ These refusals are user-respecting. They trade demo magic for **operational hone
 |----------|------|
 | Individual developer | Supervise agent edits without babysitting every line |
 | Team lead | Know that “done” means verified, not merely attempted |
-| Agent author | Stable bridge contracts and checkpoint APIs instead of raw file hacks |
+| Agent author | Stable kernel RPC contracts and checkpoint APIs instead of raw file hacks |
 | Maintainer | A frozen baseline (`coherence-core-v0.1`) that proves coherence enforcement |
 
 DietCode does not promise that agents will always succeed. It promises that **success and failure will be visible at the right gate** — and that no component will silently inherit mutation authority it should not hold.
@@ -168,10 +168,10 @@ DietCode does not promise that agents will always succeed. It promises that **su
 Philosophy without evidence is marketing. DietCode binds its claims to runnable proof:
 
 ```bash
-make coherence-core-v0.1
+make validate
 ```
 
-This gate validates kernel coherence token issuance, enforcement, and deterministic recovery smoke. The tag `coherence-core-v0.1` marks a frozen baseline for the coherence layer.
+This gate validates kernel coherence token issuance, enforcement, deterministic recovery smoke, and docs alignment. The tag `coherence-core-v0.1` marks the frozen coherence baseline.
 
 A parallel research track — adversarial benchmarks under `benchmarks/agent_success/` — evaluates runtime reliability under stress. It informs design; it is not the coherence-core gate. See [AGENT_RUNTIME_RELIABILITY.md](../AGENT_RUNTIME_RELIABILITY.md).
 

@@ -1,8 +1,8 @@
-# Agent Tooling (Deterministic Grep / Diff / Patch / Retrieval)
+# Agent tooling
 
-Plain-text contracts for local-first agent workflows. No semantic search, embeddings, or fuzzy matching.
+Deterministic grep, diff, patch, and retrieval contracts for kernel RPC clients. No semantic search, embeddings, or fuzzy matching in agent-safe mode.
 
-**Contract source:** `scripts/agent_contracts.py`. This document is the operational reference for grep/diff/patch/retrieval contracts. Release gate: [testing.md](testing.md).
+**Contract source:** `scripts/agent_contracts.py` · **Integration:** `scripts/dietcode_agent_client.py` · **Gate:** [testing.md](testing.md) → `make validate`
 
 ```bash
 rg 'TOOLING:|GREP_RESPONSE_KEYS|PATCH_VALIDATION_KEYS' scripts/ docs/
@@ -182,14 +182,14 @@ CLI additions: `--search-literal`, improved JSON parse errors, stderr `hint:` li
 
 ## Internal (non-agent-safe) namespaces
 
-`analysis.*` and `language.*` remain **outside** `tool.registry`. They are IDE-assisted surfaces (workspace analysis, LSP hover/completions) and are not classified as deterministic agent-safe tooling.
+`analysis.*` and `language.*` remain **outside** `tool.registry`. They are kernel-internal analysis surfaces (workspace heuristics, language metadata) — not classified as deterministic agent-safe tooling in the coherence-core archive.
 
 `tool.capabilities` exposes `internalNamespaces`:
 
 | Prefix | Reason |
 |--------|--------|
 | `analysis.` | Heuristic workspace/file analysis |
-| `language.` | LSP-backed editor assistance |
+| `language.` | Language metadata / internal assistance |
 | `chip.` | Internal chip executor metadata |
 | `combo.` | Multi-step combo runtime |
 | `recovery.` | Backup/rollback operator surface |

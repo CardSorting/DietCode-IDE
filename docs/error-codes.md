@@ -130,8 +130,6 @@ See [Runtime Invariants](runtime-invariants.md) and [Troubleshooting](troublesho
 
 **Recovery:** use `search.literal`, `search.tokens`, `workspace.grep`, or `search.references`. Each error includes `recovery_hint` and `nextRecommendedCommand` in the envelope.
 
-**Pass XI — bridge provenance:** when errors pass through the Agent Bridge, `DietCodeBridgeError` adds `recoverySource` and `nextCommandSource` (`runtime` when the RPC supplied hints; `bridge_fallback` only when absent). Always preserve `rawError` for audit.
-
 | string_code | recovery_hint | nextRecommendedCommand |
 |-------------|---------------|------------------------|
 | `stale_content` | `revalidate_patch_with_patch.validate` | `patch.validate` |

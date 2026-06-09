@@ -2,35 +2,41 @@
 
 **Checkpoint 3 · Approval** — *Is this mutation allowed?*
 
-Canonical loop: [checkpoint-model.md](./checkpoint-model.md).
+[checkpoint-model.md](checkpoint-model.md) · [kernel-rpc.md](kernel-rpc.md)
 
-DietCode kernel supervises destructive workspace mutations through a pending-approval registry. Agents never mutate the workspace without kernel authority.
+The kernel supervises destructive workspace mutations through a pending-approval registry. Agents never mutate without kernel authority.
+
+---
 
 ## Flow
 
 ```text
-agent proposes mutation (destructive RPC)
+agent proposes destructive RPC
     ↓
 kernel queues PendingApproval
     ↓
-kernel emits approval.required (events)
+kernel emits approval.required
     ↓
-operator or harness resolves via approval.resolve RPC
+operator or harness resolves via approval.resolve
     ↓
 kernel executes (approve) or cancels (reject)
     ↓
 kernel emits approval.resolved
 ```
 
+---
+
 ## Autonomy levels
 
 | Level | Behavior |
 |-------|----------|
-| 1 | Auto-allow destructive mutations (testing / trusted) |
-| 2 | Heuristic safe-list; kernel queues unsafe destructive ops |
-| 3 | Supervised — destructive mutations require explicit approval (kernel default) |
+| 1 | Auto-allow destructive mutations (testing) |
+| 2 | Heuristic safe-list; unsafe ops queued |
+| 3 | Supervised — explicit approval required (**default**) |
 
-`dietcode-kernel` starts with autonomy **3**.
+`dietcode-kernel` starts at autonomy **3**.
+
+---
 
 ## PendingApproval shape
 
@@ -48,15 +54,15 @@ kernel emits approval.resolved
 }
 ```
 
+---
+
 ## Kernel RPCs
 
 | RPC | Purpose |
 |-----|---------|
 | `approval.list` | List pending / resolved approvals |
 | `approval.get` | Fetch one approval by id |
-| `approval.resolve` | Approve or reject; executes queued mutation on approve |
-
-### Resolve example
+| `approval.resolve` | Approve or reject; executes on approve |
 
 ```bash
 python3 scripts/dietcode_agent_client.py rpc approval.resolve \
@@ -65,16 +71,22 @@ python3 scripts/dietcode_agent_client.py rpc approval.resolve \
 
 Harness auto-approve: `scripts/dietcode_coherence.py` (`resolve_kernel_approval`).
 
+---
+
 ## Timeouts
 
-Pending approvals expire after **30 minutes**. Expired approvals return `approval_expired` — not an implicit approve.
+Pending approvals expire after **30 minutes**. Expired approvals return `approval_expired` — not implicit approve.
 
-## Coherence interaction
+---
 
-Approval runs after coherence and drift gates pass. A patch blocked by `coherence_mismatch` never reaches the approval queue.
+## Gate ordering
+
+Approval runs after coherence and drift gates. A patch blocked by `coherence_mismatch` never reaches the approval queue.
+
+---
 
 ## Related
 
-- [kernel-rpc.md](./kernel-rpc.md)
-- [agent-ergonomics.md](./agent-ergonomics.md)
-- [error-codes.md](./error-codes.md)
+- [agent-ergonomics.md](agent-ergonomics.md)
+- [error-codes.md](error-codes.md)
+- [coherence-tokens.md](coherence-tokens.md)

@@ -1,20 +1,35 @@
 # DietCode archive index
 
-DietCode is a **kernel/coherence-core** repository. This file maps what was removed, what remains, and how to validate the retained artifact.
+**Kernel/coherence-core repository** — methodology, kernel, harnesses, tests, and documentation for operational coherence enforcement. Not a shipping product.
+
+---
 
 ## What this repo is
 
-A local macOS experiment for preserving **operational coherence** across agent read, diff, patch, approval, and verification surfaces — implemented as headless `dietcode-kernel` plus Python harnesses.
+A local macOS experiment preserving **operational coherence** across agent read, diff, patch, approval, and verification — implemented as headless `dietcode-kernel` plus Python harnesses.
 
-## Validate the retained baseline
+```text
+agent → dietcode_agent_client.py → dietcode-kernel → workspace
+```
+
+---
+
+## Validate the archive
 
 ```bash
 make validate
 ```
 
-(`validate` = `coherence-core-v0.1` + `test-docs-code-drift`; builds and restarts the kernel as needed.)
+| Step | Proves |
+|------|--------|
+| `coherence-core-v0.1` | Live coherence tokens + recovery smoke |
+| `test-docs-code-drift` | Docs ↔ contracts ↔ Makefile |
 
 Tag when green: **coherence-core-v0.1**
+
+CI: `.github/workflows/coherence-core.yml` (macOS, `make validate`)
+
+---
 
 ## Retained tree
 
@@ -22,48 +37,46 @@ Tag when green: **coherence-core-v0.1**
 |------|------|
 | `src/kernel/` | Kernel entry, workspace session |
 | `src/platform/macos/control/` | JSON-RPC, coherence tokens, gates |
-| `src/filesystem/` | File + git services used by kernel |
+| `src/platform/macos/services/` | Subprocess, diff/symbol analysis (RPC deps) |
+| `src/filesystem/` | File + git services |
 | `src/domain/control/` | Shared control-plane types |
 | `scripts/dietcode_agent_client.py` | Python RPC CLI |
 | `scripts/dietcode_coherence.py` | Coherence recovery helpers |
-| `scripts/test_coherence_tokens.py` | Live coherence enforcement tests |
+| `scripts/test_coherence_tokens.py` | Live coherence tests |
 | `scripts/coherence_recovery_smoke.py` | Recovery vertical slice |
-| `scripts/fixtures/coherence_recovery/` | Recovery smoke fixtures |
+| `scripts/fixtures/coherence_recovery/` | Recovery fixtures |
 | `docs/` | Coherence model + kernel reference |
 
-## Removed product surfaces
+---
 
-Documented in [docs/archive-note.md](docs/archive-note.md):
+## Removed
 
-- `cockpit/` — React UI + HTTP bridge
-- `legacy_ui/` — AppKit editor shell
-- `agent-bridge/` — TypeScript client workflows
-- `integrations/` — Hermes plugin wiring
+| Category | Paths |
+|----------|-------|
+| Product surfaces | `cockpit/`, `legacy_ui/`, `agent-bridge/`, `integrations/` |
+| Editor scaffold | `src/editor/`, `src/search/`, `src/syntax/`, `src/ui/`, `src/core/`, `src/utils/` |
+| App packaging | `DietCode.app`, `Info.plist`, agent-chat scripts |
 
-## Removed editor scaffold (pass 4)
+Detail: [docs/archive-note.md](docs/archive-note.md)
 
-Pre-kernel IDE experiment code no longer compiled or tested:
+---
 
-- `src/editor/`, `src/search/`, `src/syntax/`, `src/ui/`, `src/core/`
-- `src/utils/`, `src/filesystem/FileWatcher.*`
-- `tests/test_editor.cpp`
-- `resources/Info.plist`, agent-chat/Hermes packaging scripts
-
-The kernel build no longer links LSP client or file-watcher stubs.
-
-## Research artifacts (not gated)
+## Research (not gated)
 
 | Path | Status |
 |------|--------|
 | `benchmarks/agent_success/` | Frozen results; live runner needs restored `agent-bridge/` |
 | `AGENT_RUNTIME_RELIABILITY.md` | Research program overview |
 
-See [benchmarks/README.md](benchmarks/README.md).
+---
 
-## Docs entry points
+## Documentation entry points
 
-- [README.md](README.md) — project overview
-- [docs/README.md](docs/README.md) — documentation index
-- [docs/coherence-tokens.md](docs/coherence-tokens.md) — coherence model
-- [docs/kernel-rpc.md](docs/kernel-rpc.md) — RPC reference
-- [docs/testing.md](docs/testing.md) — validation ladder
+| Doc | Purpose |
+|-----|---------|
+| [README.md](README.md) | Project overview |
+| [docs/README.md](docs/README.md) | Full doc index |
+| [docs/brief.md](docs/brief.md) | Five-minute companion |
+| [docs/coherence-tokens.md](docs/coherence-tokens.md) | Coherence model |
+| [docs/getting-started.md](docs/getting-started.md) | Build and run |
+| [docs/testing.md](docs/testing.md) | Validation ladder |
