@@ -1,5 +1,11 @@
 # Changelog
 
+## 2026-06-08 — Concept papers deepened (brief, philosophy, whitepaper v1.1)
+
+- Archive-as-deliverable framing, coherence-before-drift exposition, validate proof hierarchy
+- Philosophy: archive honesty, zombie-product refusal, evidence falsification table
+- Whitepaper: archive strategy §1, validation matrix, expanded coherence §5
+
 ## 2026-06-08 — Full docs rewrite (kernel/coherence-core strategy)
 
 - Rewrote README + all 23 `docs/*.md` for kernel/coherence-core archive positioning

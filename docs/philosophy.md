@@ -1,9 +1,9 @@
-# The Philosophy of Governed Mutation
+# The philosophy of governed mutation
 
-**Why DietCode treats AI code editing as an operations problem — not a creativity problem.**
+**Why DietCode treats AI code editing as an operations problem — and why the retained artifact is an archive, not a product.**
 
-Version 1.0 · June 2026  
-Companion: [brief.md](brief.md) · Technical whitepaper: [whitepaper.md](whitepaper.md)
+Version 1.1 · June 2026  
+Companion: [brief.md](brief.md) · Technical whitepaper: [whitepaper.md](whitepaper.md) · Archive index: [ARCHIVE.md](../ARCHIVE.md)
 
 ---
 
@@ -17,31 +17,56 @@ DietCode exists to answer one question repeatedly and in public:
 
 That question is operational. It is not answered by a better prompt, a larger model, or a prettier chat interface.
 
+The repository's current form — a **kernel/coherence-core archive** — is itself a philosophical statement: the valuable output is not a feature roadmap. It is a **falsifiable control loop** you can run on your machine and tag when green.
+
 ---
 
 ## 2. Air-traffic control, not autopilot
 
 The most accurate metaphor for DietCode is **air-traffic control for AI edits**.
 
-This is not decorative language. It encodes a specific worldview:
-
 | ATC concept | DietCode equivalent |
 |-------------|---------------------|
-| Multiple actors (pilots, ground crew, airlines) | Human operator, agent, CI, external tools |
-| Control tower | Kernel + governed control plane |
-| Clearance before movement | Approval, drift, and verify gates |
-| Centralized authority over airspace | Single mutation authority over the workspace |
-| Visibility (radar, radio, status boards) | Kernel RPC status, coherence events, harness NDJSON |
-| “Landed” is a defined state | `completed` requires verify pass or explicit waive |
-| Incidents are reported, not hidden | Disconnects, expiry, drift blocks surface immediately |
+| Multiple actors | Human operator, agent, CI, external tools |
+| Control tower | `dietcode-kernel` + control plane |
+| Clearance before movement | Coherence, drift, approval, verify gates |
+| Centralized authority | Single mutation authority over the workspace |
+| Visibility | Kernel RPC, harness NDJSON, `string_code` errors |
+| “Landed” | `completed` requires verify pass or explicit waive |
+| Incidents reported | Disconnects, expiry, blocks surface immediately |
 
 DietCode is deliberately **not** the plane. It is not the airport terminal. It is the tower that sequences dangerous operations so that movement is **governed**, not merely **possible**.
 
 Most agent products optimize for takeoff: fast generation, fluent explanation, impressive demos. DietCode optimizes for **clearance and landing** — the parts that determine whether anyone actually wants the flight to happen.
 
+The archive keeps the tower. It removes the terminal gift shop.
+
 ---
 
-## 3. Bounded autonomy, not full autonomy
+## 3. Archive as operational honesty
+
+A common failure mode in research-to-product transitions is **zombie productization**: dead UI surfaces, stale Makefile targets, and docs that describe software you can no longer build.
+
+DietCode refuses that posture.
+
+| Honest choice | Why |
+|---------------|-----|
+| Remove cockpit, bridge, editor scaffold | They proved visibility; they are not the kernel claim |
+| Freeze `coherence-core-v0.1` | One baseline tag, one validate command |
+| Keep benchmarks as research artifacts | Stress results inform design; they do not gate the archive |
+| Lock docs to code | `make test-docs-code-drift` prevents narrative drift |
+
+An archive is not a retreat. It is a **commitment to reproducibility**. If the coherence model is real, it should survive without a React dashboard.
+
+Philosophically:
+
+> **A claim you cannot rebuild is indistinguishable from marketing.**
+
+`make validate` is the anti-marketing move.
+
+---
+
+## 4. Bounded autonomy, not full autonomy
 
 The industry default treats “agent finished” as synonymous with “job done.” DietCode rejects that equivalence.
 
@@ -51,17 +76,30 @@ The industry default treats “agent finished” as synonymous with “job done.
 - The control plane may block, pause, or require human resolution at defined gates.
 - Completion is a **system state**, not an LLM exit code.
 
-This is not pessimism about AI capability. It is realism about **shared state**. A codebase is a concurrent system. The agent is never the only writer. Git pulls, formatters, tests, and human edits all interleave. Any runtime that assumes exclusive access is lying to the operator.
-
-The philosophical position is simple:
+This is realism about **shared state**. A codebase is a concurrent system. The agent is never the only writer. Git pulls, formatters, tests, and human edits all interleave.
 
 > **Autonomy without observability is negligence. Observability without authority is theater.**
 
-DietCode provides both: the operator can see the gate that blocked progress, and the kernel enforces that block until the condition is resolved.
+DietCode provides both: the operator can see which gate blocked progress, and the kernel enforces that block until the condition is resolved.
 
 ---
 
-## 4. Failure is signal, not embarrassment
+## 5. Coherence before drift (the v0.1 insight)
+
+Many systems treat “something changed” as one undifferentiated failure. DietCode separates:
+
+| Layer | Question | Precision |
+|-------|----------|-----------|
+| **Coherence** | Is *this task's observed context* still valid? | File-level anchors, revision counters |
+| **Drift** | Did the *workspace* change underneath the agent? | Git dirty state, external edits, refresh anchors |
+
+Coherence mismatch is **surgical** — it names `changedPaths` and tells the agent to re-read. Drift is **broad** — it forces workspace re-anchoring.
+
+This layering is the core methodological contribution preserved in v0.1. The archive exists to keep that distinction executable, not merely documented.
+
+---
+
+## 6. Failure is signal, not embarrassment
 
 Many products smooth failure — retry silently, collapse errors into chat, or imply progress when the control loop has stalled. DietCode takes the opposite stance:
 
@@ -71,40 +109,38 @@ When the loop breaks, the operator should see:
 
 - a disconnect, not a hung spinner;
 - an expired approval, not an assumed yes;
-- a drift block, not a mysterious patch rejection;
+- `coherence_mismatch`, not a mysterious patch rejection;
 - a verify failure, not a premature “completed” badge.
 
-This follows from a deeper commitment: **the system must never imply an agent is operating safely when it is not.** Trust is built by accurate state, not by optimistic UI.
+> **The system must never imply an agent is operating safely when it is not.**
 
-Hiding failure feels helpful in a demo. It is destructive in production. DietCode is built for the second context.
+Hiding failure feels helpful in a demo. It is destructive when agents touch production code.
 
 ---
 
-## 5. Separation as a moral architecture
+## 7. Separation as a moral architecture
 
 DietCode separates concerns that other systems merge:
 
 ```text
-workspace authority   — who may change files
-orchestration         — how a task progresses
-human oversight       — when a human must decide
-verification          — whether the result is valid
-visualization         — what the operator sees
+workspace authority   — who may change files (kernel only)
+orchestration         — how a task progresses (harness + RPC)
+human oversight       — when a human must decide (approval gate)
+verification          — whether the result is valid (verify gate)
+observability         — what happened (events, errors — not gates)
 ```
 
-Collapsing these into one opaque stack — typically a chat window with file access — creates a category error. The user believes they are conversing. The system is mutating shared infrastructure. Those are different activities with different risk profiles.
+Collapsing authority and conversation into one opaque stack creates a category error. The user believes they are conversing. The system is mutating shared infrastructure.
 
-**Only the kernel mutates the workspace.** Agents and harnesses request clearance via RPC. This is not a technical detail. It is a **philosophical line**: visibility and steering are separate from authority.
+**Only the kernel mutates the workspace.** Agents, harnesses, and scripts request clearance via RPC.
 
-Agents, harnesses, and scripts may request mutation. They do not perform it. The tower clears; the plane does not clear itself.
+Agents may request mutation. They do not perform it. The tower clears; the plane does not clear itself.
 
 ---
 
-## 6. Checkpoints are questions, not features
+## 8. Checkpoints are questions, not features
 
 A checkpoint is not a button or a panel. It is a **question the control plane must answer** before proceeding or before calling a task done.
-
-Six questions cover the governed loop:
 
 1. Did the agent read valid state?
 2. Did the workspace change underneath it?
@@ -113,75 +149,80 @@ Six questions cover the governed loop:
 5. Did the result pass?
 6. Can this task be called done?
 
-If a proposed feature does not answer one of these questions, it does not earn a new gate. It belongs in observability, recovery, or transport hygiene — the **noise bucket** — where it supports the loop without diluting it.
+If a proposed feature does not answer one of these questions, it does not earn a new gate. It belongs in observability, recovery, or transport hygiene — the **noise bucket**.
 
-This discipline prevents product entropy. Every popular tool eventually accumulates toggles, modes, and side quests. DietCode’s checkpoint model is a filter: *which question are we helping the operator answer?*
-
----
-
-## 7. Local-first is a trust boundary
-
-DietCode runs on your Mac. The workspace is on disk beside you. The kernel socket is local. The default path does not require cloud custody of your repository.
-
-Local-first is not nostalgia. It is a **trust boundary**:
-
-- Mutation authority stays in a process you can inspect and restart.
-- Verification runs your commands (`make test`, `npm test`, `./verify.sh`).
-- Approvals are yours — not a vendor’s policy engine in another region.
-
-Cloud-assisted models may connect as optional agents. The **control loop** does not depend on them. External agent runtimes are clients of the kernel — not the product identity.
+This discipline is how the archive stayed small. UI panels were useful experiments. They were not new questions.
 
 ---
 
-## 8. What DietCode refuses
+## 9. Local-first is a trust boundary
 
-Philosophy is as much about refusal as aspiration. DietCode refuses to:
+DietCode runs on your Mac. The workspace is on disk beside you. The kernel socket is local.
+
+| Property | Implication |
+|----------|-------------|
+| Local process | You can inspect, restart, and diff the kernel |
+| Local verify | `make test`, `./verify.sh`, `npm test` — your commands decide |
+| Local approvals | No vendor policy engine in another region |
+
+Cloud-assisted models may connect as optional agents. The **control loop** does not depend on them. External runtimes are RPC clients — not the product identity.
+
+---
+
+## 10. What DietCode refuses
 
 | Refusal | Reason |
 |---------|--------|
-| Pretend chat is low-risk | Chat is the entry point to mutation, not a casual channel |
+| Pretend chat is low-risk | Chat is an entry point to mutation |
 | Conflate patch success with task success | Applying a diff ≠ solving the problem |
 | Auto-approve on timeout | Silence is not consent |
-| Auto-resume into drift or verify failure | Recovery requires operator intent |
-| Add gates without questions | Checkpoints stay six until the model changes |
-| Position as an IDE replacement | The artifact is the kernel/coherence methodology |
+| Auto-resume into drift or verify failure | Recovery requires intent |
+| Add gates without questions | Checkpoints stay six |
+| Maintain zombie product surfaces | Archive honesty over demo continuity |
+| Position as an IDE replacement | The artifact is methodology + proof |
+| Gate the archive on bridge-dependent benchmarks | Research ≠ baseline |
 
-These refusals are user-respecting. They trade demo magic for **operational honesty**.
+These refusals trade demo magic for **operational honesty**.
 
 ---
 
-## 9. Who this philosophy serves
+## 11. Who this philosophy serves
 
-| Operator | Need |
-|----------|------|
+| Reader | Need |
+|--------|------|
 | Individual developer | Supervise agent edits without babysitting every line |
 | Team lead | Know that “done” means verified, not merely attempted |
-| Agent author | Stable kernel RPC contracts and checkpoint APIs instead of raw file hacks |
-| Maintainer | A frozen baseline (`coherence-core-v0.1`) that proves coherence enforcement |
+| Agent author | Stable kernel RPC + coherence recovery instead of raw file hacks |
+| Maintainer | Frozen baseline (`coherence-core-v0.1`) provable via `make validate` |
+| Researcher | Separable claims: coherence enforcement vs adversarial stress |
 
-DietCode does not promise that agents will always succeed. It promises that **success and failure will be visible at the right gate** — and that no component will silently inherit mutation authority it should not hold.
+DietCode does not promise agents will always succeed. It promises that **success and failure will be visible at the right gate**.
 
 ---
 
-## 10. Relation to evidence
+## 12. Relation to evidence
 
-Philosophy without evidence is marketing. DietCode binds its claims to runnable proof:
+Philosophy without evidence is marketing. DietCode binds claims to runnable proof:
 
 ```bash
 make validate
 ```
 
-This gate validates kernel coherence token issuance, enforcement, deterministic recovery smoke, and docs alignment. The tag `coherence-core-v0.1` marks the frozen coherence baseline.
+| Step | What it falsifies if it fails |
+|------|-------------------------------|
+| `test-coherence-tokens-fast` | Token issuance or enforcement is broken |
+| `coherence-recovery-smoke-fast` | Stale-context recovery path is broken |
+| `test-docs-code-drift` | Documentation no longer matches contracts |
 
-A parallel research track — adversarial benchmarks under `benchmarks/agent_success/` — evaluates runtime reliability under stress. It informs design; it is not the coherence-core gate. See [AGENT_RUNTIME_RELIABILITY.md](../AGENT_RUNTIME_RELIABILITY.md).
+Tag when green: **coherence-core-v0.1**.
+
+Parallel research under `benchmarks/agent_success/` evaluates runtime contracts under adversarial fixtures. It informs design; it is **not** the archive gate. See [AGENT_RUNTIME_RELIABILITY.md](../AGENT_RUNTIME_RELIABILITY.md).
 
 ---
 
-## 11. Summary
+## 13. Summary
 
-DietCode’s philosophy in one paragraph:
-
-> AI agents will edit code. Humans and teams still own the consequences. DietCode is the local control tower that sequences reads, approvals, patches, and verification through six visible checkpoints — with a single mutation authority, legible failure, and completion semantics that do not confuse “the model stopped” with “the job succeeded.” Bounded autonomy is the goal. Air-traffic control is the model. Operational honesty is the obligation.
+> AI agents will edit code. Humans and teams still own the consequences. DietCode is a local control tower — preserved as an archive — that sequences reads, approvals, patches, and verification through six visible checkpoints, with a single mutation authority, coherence tokens before drift, legible failure, and completion semantics that do not confuse “the model stopped” with “the job succeeded.” Bounded autonomy is the goal. Air-traffic control is the model. Operational honesty — including the refusal to pretend this is still a shipping app — is the obligation.
 
 ---
 
@@ -189,7 +230,9 @@ DietCode’s philosophy in one paragraph:
 
 | Doc | Role |
 |-----|------|
-| [brief.md](brief.md) | Short companion — read this first if you have five minutes |
-| [whitepaper.md](whitepaper.md) | Full technical whitepaper |
-| [checkpoint-model.md](checkpoint-model.md) | Canonical six-gate specification |
+| [brief.md](brief.md) | Five-minute executive companion |
+| [whitepaper.md](whitepaper.md) | Full technical specification |
+| [checkpoint-model.md](checkpoint-model.md) | Six-gate specification |
+| [coherence-tokens.md](coherence-tokens.md) | v0.1 coherence primitive |
+| [archive-note.md](archive-note.md) | What was removed and why |
 | [README.md](../README.md) | Project entry point |

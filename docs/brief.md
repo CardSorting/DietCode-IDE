@@ -1,14 +1,53 @@
 # DietCode in brief
 
-**A five-minute companion to the kernel/coherence-core archive.**
+**Executive companion to the kernel/coherence-core archive.**
 
-[Philosophy →](philosophy.md) · [Whitepaper →](whitepaper.md) · [README →](../README.md)
+[Philosophy →](philosophy.md) · [Whitepaper →](whitepaper.md) · [README →](../README.md) · [ARCHIVE →](../ARCHIVE.md)
 
 ---
 
 ## One sentence
 
-**DietCode is a local kernel/coherence-core archive** that preserves operational coherence across agent read, diff, patch, approval, and verification — enforced by `dietcode-kernel`, not by chat UI.
+**DietCode is a frozen macOS archive** that proves operational coherence across agent read, patch, approval, and verify — through `dietcode-kernel` and runnable harnesses, not through a product UI.
+
+---
+
+## What you get
+
+This repository does not ship an application. It ships a **reproducible claim**:
+
+> On a local Mac, a headless kernel can enforce task-scoped coherence tokens, block stale mutations, sequence approvals, and require verification before completion — and you can prove it with one command.
+
+```bash
+make validate
+```
+
+Tag when green: **coherence-core-v0.1**.
+
+| Deliverable | Path |
+|-------------|------|
+| Mutation kernel | `build/dietcode-kernel` |
+| Coherence enforcement | `MacControlCoherenceTokens.mm` + live tests |
+| Recovery proof | `scripts/coherence_recovery_smoke.py` |
+| Integration surface | `scripts/dietcode_agent_client.py` |
+| Contract lock | `make test-docs-code-drift` |
+
+---
+
+## Why an archive, not a product
+
+DietCode began as a governed-mutation experiment with multiple surfaces — AppKit editor, React cockpit, TypeScript agent-bridge, Hermes integrations. Those surfaces helped prove that operators could **see** checkpoint state during realistic workflows.
+
+The experiment succeeded at its core claim: **operational coherence works** when one authority enforces tokens, drift layering, approvals, and verify gates. The product shells did not need to remain in-tree to preserve that proof.
+
+The archive strategy keeps what is **executable and falsifiable**:
+
+- Kernel + control plane
+- Coherence v0.1 implementation
+- Python harnesses and fixtures
+- Documentation locked to code
+
+Everything else is documented as removed or frozen research. See [archive-note.md](archive-note.md).
 
 ---
 
@@ -22,36 +61,24 @@ When agents edit code, operators usually cannot tell:
 - whether tests ran;
 - whether “done” means **verified** or merely **stopped**.
 
-DietCode answers these as **checkpoints** on a single mutation authority.
+DietCode answers these as **checkpoints** on a single mutation authority — inspectable via RPC and harness NDJSON, not inferred from chat tone.
 
 ---
 
-## The archive strategy
+## The core mechanism: operational coherence
 
-| Retained | Removed |
-|----------|---------|
-| `dietcode-kernel` + control plane | Cockpit React UI |
-| Coherence tokens + tests | Legacy AppKit editor |
-| Python RPC harnesses | TypeScript agent-bridge |
-| Docs + contract lock | Hermes integrations |
+**Coherence** is the v0.1 primitive beneath drift. Drift asks: *did something change?* Coherence asks: *is this task still mutating from what it actually read?*
 
-The repo proves a **frozen baseline** (`coherence-core-v0.1`), not a shipping app. See [archive-note.md](archive-note.md).
+| Layer | Question | Typical block |
+|-------|----------|---------------|
+| Coherence | Is task context still valid? | `coherence_mismatch` |
+| Drift | Did the workspace change broadly? | `workspaceDriftRequired` |
+| Approval | Is this mutation cleared? | `approvalRequired` |
+| Verify | Did the result pass? | `verify.failed` |
 
----
+Task-scoped reads (`file.read`, `file.readBatch`, … with `taskId`) issue tokens. Mutations must carry `coherenceTokenId` + `expectedWorkspaceRevision`.
 
-## The answer
-
-| Idea | Meaning |
-|------|---------|
-| **One mutation authority** | Only the kernel writes files |
-| **Coherence tokens** | Task-scoped reads bind context before drift/approval |
-| **Six checkpoints** | Context → Drift → Approval → Mutation → Verify → Completion |
-| **Legible failure** | `coherence_mismatch`, drift blocks, verify failures — surfaced |
-| **Local-first** | macOS socket + your verify commands |
-
-```text
-agent or script → dietcode_agent_client.py → dietcode-kernel → your project
-```
+Detail: [coherence-tokens.md](coherence-tokens.md)
 
 ---
 
@@ -68,46 +95,57 @@ agent or script → dietcode_agent_client.py → dietcode-kernel → your projec
 
 **Rule:** Agent exit ≠ done. Completion requires verify pass or explicit waive.
 
-Detail: [checkpoint-model.md](checkpoint-model.md)
+```text
+agent or script → dietcode_agent_client.py → dietcode-kernel → your project
+```
 
 ---
 
 ## What it is not
 
-- Not an IDE or web UI
-- Not a chat window that silently edits files
-- Not “done” when the model stops
-- Not gated by adversarial benchmarks (those are frozen research)
+| Not this | Because |
+|----------|---------|
+| IDE / web UI | UI surfaces removed; kernel is the artifact |
+| Chat product | No in-tree conversational layer |
+| Cloud platform | Local socket + local verify commands |
+| Benchmark suite | `benchmarks/` is frozen research, not the gate |
+| “Done” on model stop | Completion is a kernel/harness state |
 
 ---
 
 ## Who it is for
 
-| You | DietCode helps you |
-|-----|-------------------|
-| **Researcher** | Study governed mutation with runnable proof |
-| **Agent author** | Integrate via kernel RPC + Python helpers |
-| **Maintainer** | Freeze and tag **coherence-core-v0.1** |
+| Reader | Value |
+|--------|-------|
+| **Researcher** | Runnable governed-mutation model with frozen baseline |
+| **Agent author** | Kernel RPC + `dietcode_coherence.py` recovery patterns |
+| **Maintainer** | `make validate` + tag **coherence-core-v0.1** |
+| **Skeptic** | Falsifiable tests — claims fail loudly, not quietly |
 
 ---
 
-## Proof it works
+## Proof hierarchy
 
-```bash
-make validate
-```
+| Command | Scope |
+|---------|-------|
+| `make validate` | **Primary** — coherence baseline + docs drift (CI) |
+| `make coherence-core-v0.1` | Coherence tokens + recovery smoke only |
+| `make verify-agent-runtime-full` | Optional broader RPC ladder |
+| `benchmarks/agent_success/` | Frozen adversarial research — not gated |
 
-Or the baseline only:
+---
 
-```bash
-make coherence-core-v0.1
-```
-
-Daily development:
+## Daily use
 
 ```bash
 make kernel && make restart-agent-server-fast
 python3 scripts/dietcode_agent_client.py --wait-ready --compact
+```
+
+After changes to kernel C++ or contracts:
+
+```bash
+make validate
 ```
 
 ---
@@ -120,6 +158,8 @@ python3 scripts/dietcode_agent_client.py --wait-ready --compact
 | Files changed mid-task | Drift gate blocks patch |
 | Approval pending | `approvalRequired` until resolved |
 | Tests fail | Verify gate blocks completion |
+
+Legible failure is a feature, not a bug. See [philosophy.md](philosophy.md).
 
 ---
 
@@ -137,4 +177,4 @@ python3 scripts/dietcode_agent_client.py --wait-ready --compact
 
 ## Summary
 
-> Agents will edit code. You still own the consequences. This archive sequences edits through a local kernel — one authority, coherence tokens, six checkpoints, honest completion. Run `make validate` to prove the baseline on your machine.
+> Agents will edit code. You still own the consequences. This archive preserves the kernel and harnesses that sequence those edits through one authority, coherence tokens, six checkpoints, and honest completion. It does not ask you to trust a demo — it asks you to run `make validate`.
