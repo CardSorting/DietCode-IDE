@@ -15,32 +15,75 @@
 </p>
 
 <p align="center">
+  <a href="#start-here">Start here</a> ·
   <a href="#what-this-repository-is">What it is</a> ·
   <a href="#quick-start">Quick start</a> ·
-  <a href="#coherence-model">Coherence</a> ·
   <a href="#documentation">Docs</a> ·
   <a href="#troubleshooting">Help</a>
 </p>
 
 ---
 
+## Start here
+
+Pick the path that matches why you opened this repo.
+
+| You are… | Do this first | Then read |
+|----------|---------------|-----------|
+| **New — want the idea in 5 minutes** | [docs/brief.md](docs/brief.md) | [docs/coherence-tokens.md](docs/coherence-tokens.md) |
+| **New — want to run it now** | [Quick start](#quick-start) below | [docs/getting-started.md](docs/getting-started.md) |
+| **Skeptical — prove the claims** | `make validate` | [docs/testing.md](docs/testing.md) |
+| **Building an agent integration** | [docs/kernel-rpc.md](docs/kernel-rpc.md) | [docs/agent-ergonomics.md](docs/agent-ergonomics.md) |
+| **Understanding the archive strategy** | [ARCHIVE.md](ARCHIVE.md) | [docs/archive-note.md](docs/archive-note.md) |
+| **Going deep on design** | [docs/philosophy.md](docs/philosophy.md) | [docs/whitepaper.md](docs/whitepaper.md) |
+
+**One command health check** (builds kernel, runs coherence tests, locks docs):
+
+```bash
+make validate
+```
+
+Tag when green: **coherence-core-v0.1**.
+
+---
+
 ## What this repository is
 
-DietCode is a **frozen kernel/coherence-core archive** for macOS. It preserves a working methodology — not a shipping product — for governing agent-mediated code mutation through a single local authority.
+DietCode is a **frozen kernel/coherence-core archive** for macOS. It preserves a reproducible methodology — not a shipping product — for governing agent-mediated code mutation through a single local authority.
 
-| Layer | Role |
-|-------|------|
-| **Kernel** (`build/dietcode-kernel`) | Sole process that may change files; issues coherence tokens |
-| **Control plane** (`src/platform/macos/control/`) | JSON-RPC server, drift/approval/verify gates |
-| **Harnesses** (`scripts/`) | Python CLI, coherence tests, recovery smoke, contract lock |
+### What you get
+
+| Deliverable | Location |
+|-------------|----------|
+| Mutation kernel | `build/dietcode-kernel` |
+| Coherence enforcement (v0.1) | `src/platform/macos/control/` |
+| Python RPC CLI | `scripts/dietcode_agent_client.py` |
+| Recovery helpers | `scripts/dietcode_coherence.py` |
+| Live proof tests | `scripts/test_coherence_tokens.py`, `coherence_recovery_smoke.py` |
+| Runnable baseline | `make validate` → tag **coherence-core-v0.1** |
 
 ```text
 agent or script → dietcode_agent_client.py → dietcode-kernel → your project
 ```
 
-**This is not** an IDE, web app, cockpit, or cloud agent platform. Experimental UI and TypeScript bridge surfaces were removed; the retained artifact is the kernel, coherence enforcement, tests, fixtures, and documentation that prove **coherence-core-v0.1**.
+### What you do not get
 
-Strategy index: [ARCHIVE.md](ARCHIVE.md) · Doc index: [docs/README.md](docs/README.md)
+| Not included | Notes |
+|--------------|-------|
+| IDE / web UI | Cockpit and AppKit editor removed |
+| TypeScript agent-bridge | Python integration path only |
+| Cloud platform | Local socket + local verify commands |
+| Gated benchmarks | `benchmarks/` is frozen research |
+
+Full map of retained vs removed: [ARCHIVE.md](ARCHIVE.md).
+
+### The three layers
+
+| Layer | Role |
+|-------|------|
+| **Kernel** | Sole process that may change files; issues coherence tokens |
+| **Control plane** | JSON-RPC server, drift / approval / verify gates |
+| **Harnesses** | Python CLI, coherence tests, recovery smoke, contract lock |
 
 ---
 
@@ -48,22 +91,31 @@ Strategy index: [ARCHIVE.md](ARCHIVE.md) · Doc index: [docs/README.md](docs/REA
 
 Operational coherence binds agent context to kernel revision **before** drift, approval, patch, and verify gates evaluate a mutation.
 
+| Layer | Question | Typical block |
+|-------|----------|---------------|
+| **Coherence** | Is this task's observed context still valid? | `coherence_mismatch` |
+| **Drift** | Did the workspace change underneath it? | `workspaceDriftRequired` |
+| **Approval** | Is this mutation cleared? | `approvalRequired` |
+| **Verify** | Did the result pass? | `verify.failed` |
+
 | Step | Kernel enforcement |
 |------|-------------------|
 | **Read** | `file.read` / `file.readBatch` with `taskId` issues a coherence token |
 | **Patch** | `patch.apply` requires `coherenceTokenId` + `expectedWorkspaceRevision` |
 | **Stale** | `coherence_mismatch` blocks the write; refresh context and retry |
-| **Recovery** | `scripts/dietcode_coherence.py` + `coherence_recovery_smoke.py` prove the retry path |
+| **Recovery** | `dietcode_coherence.py` + `coherence_recovery_smoke.py` prove the retry path |
 
-Deep dive: [docs/coherence-tokens.md](docs/coherence-tokens.md) · [docs/workspace-drift.md](docs/workspace-drift.md) · [docs/checkpoint-model.md](docs/checkpoint-model.md)
+Concept papers: [docs/brief.md](docs/brief.md) · Technical: [docs/coherence-tokens.md](docs/coherence-tokens.md) · Gates: [docs/checkpoint-model.md](docs/checkpoint-model.md)
 
 ---
 
 ## Quick start
 
-**Prerequisites:** macOS, Xcode CLT (`clang++`, `make`), Python 3.11+ — [docs/getting-started.md](docs/getting-started.md)
+**Prerequisites:** macOS · Xcode CLT (`clang++`, `make`) · Python 3.11+
 
-### 1. Build and validate
+Detailed walkthrough: [docs/getting-started.md](docs/getting-started.md)
+
+### Step 1 — Clone and validate
 
 ```bash
 git clone <repo>
@@ -71,11 +123,11 @@ cd DietCode-IDE
 make validate
 ```
 
-`make validate` builds the kernel (incremental object compile), runs **coherence-core-v0.1** (live coherence token tests + recovery smoke), then **test-docs-code-drift**. This is the CI target (`.github/workflows/coherence-core.yml`).
+First kernel build takes ~45s; incremental rebuilds are ~1s. `make validate` is the CI target (`.github/workflows/coherence-core.yml`).
 
-Tag when green: **coherence-core-v0.1**.
+**Success looks like:** final line `validate — coherence-core-v0.1 + docs drift: OK`
 
-### 2. Start the kernel
+### Step 2 — Start the kernel
 
 ```bash
 make restart-agent-server-fast
@@ -83,30 +135,45 @@ python3 scripts/dietcode_agent_client.py --wait-ready --compact
 python3 scripts/dietcode_agent_client.py rpc rpc.ping
 ```
 
-Socket: `~/.dietcode/control.sock` · Token: `~/.dietcode/session.token`
+| Path | Role |
+|------|------|
+| `~/.dietcode/control.sock` | Unix socket |
+| `~/.dietcode/session.token` | RPC auth token |
 
-### 3. Exercise RPC
+After `git pull` with C++ changes: `make kernel && make restart-agent-server-fast`
+
+### Step 3 — Open a workspace and call RPC
 
 ```bash
 python3 scripts/dietcode_agent_client.py rpc workspace.openFolder \
   --params '{"path":"/path/to/your/project"}'
 ```
 
-Full reference: [docs/kernel-rpc.md](docs/kernel-rpc.md)
+RPC reference: [docs/kernel-rpc.md](docs/kernel-rpc.md) · Env vars: [docs/agent-environment.md](docs/agent-environment.md)
+
+### Step 4 — Read the model (optional but recommended)
+
+| Time | Document |
+|------|----------|
+| 5 min | [docs/brief.md](docs/brief.md) — executive companion |
+| 15 min | [docs/coherence-tokens.md](docs/coherence-tokens.md) + [docs/checkpoint-model.md](docs/checkpoint-model.md) |
+| 20 min | [docs/philosophy.md](docs/philosophy.md) — why governed mutation |
+| 45 min | [docs/whitepaper.md](docs/whitepaper.md) — full technical spec |
 
 ---
 
 ## Core commands
 
-| Command | What it does |
-|---------|--------------|
-| `make kernel` | Build `build/dietcode-kernel` (incremental; ~1s after first compile) |
-| `make validate` | **Primary health check** — coherence baseline + docs drift |
-| `make coherence-core-v0.1` | Live coherence tokens + recovery smoke only |
-| `make test-coherence-tokens` | Coherence issuance/enforcement (rebuild + restart) |
-| `make coherence-recovery-smoke-fast` | Recovery vertical slice (assumes server ready) |
-| `make restart-agent-server-fast` | Restart kernel socket without rebuild |
-| `make test-docs-code-drift` | Docs ↔ contracts ↔ Makefile alignment |
+| Command | When to use |
+|---------|-------------|
+| `make validate` | **Primary** — full archive health (CI equivalent) |
+| `make kernel` | Build `build/dietcode-kernel` |
+| `make coherence-core-v0.1` | Coherence baseline only (no docs drift) |
+| `make test-coherence-tokens` | Live token tests (rebuild + `restart-agent-server`) |
+| `make coherence-recovery-smoke-fast` | Recovery smoke (server already running) |
+| `make restart-agent-server-fast` | Restart socket without rebuild |
+| `make restart-agent-server` | Rebuild kernel + restart socket |
+| `make test-docs-code-drift` | Docs ↔ contracts alignment only |
 
 Full ladder: [docs/testing.md](docs/testing.md)
 
@@ -114,16 +181,46 @@ Full ladder: [docs/testing.md](docs/testing.md)
 
 ## Documentation
 
-| Job | Start here |
-|-----|------------|
-| **Understand the archive strategy** | [ARCHIVE.md](ARCHIVE.md) · [docs/archive-note.md](docs/archive-note.md) |
-| **Five-minute overview** | [docs/brief.md](docs/brief.md) |
-| **Coherence model** | [docs/coherence-tokens.md](docs/coherence-tokens.md) |
-| **Build and run** | [docs/getting-started.md](docs/getting-started.md) |
-| **RPC reference** | [docs/kernel-rpc.md](docs/kernel-rpc.md) |
-| **Validate / CI** | [docs/testing.md](docs/testing.md) |
-
 Complete index: [docs/README.md](docs/README.md)
+
+### Concept papers (start here for the idea)
+
+| Doc | Time | What it covers |
+|-----|------|----------------|
+| [docs/brief.md](docs/brief.md) | ~5 min | Archive strategy, coherence layering, proof hierarchy |
+| [docs/philosophy.md](docs/philosophy.md) | ~20 min | Governed mutation worldview, archive honesty |
+| [docs/whitepaper.md](docs/whitepaper.md) | ~45 min | Full runtime spec, validation matrix, architecture |
+
+### Coherence and checkpoints
+
+| Doc | Topic |
+|-----|-------|
+| [docs/coherence-tokens.md](docs/coherence-tokens.md) | Token issuance, `coherence_mismatch`, recovery |
+| [docs/checkpoint-model.md](docs/checkpoint-model.md) | Six-gate map |
+| [docs/workspace-drift.md](docs/workspace-drift.md) | Drift gate (checkpoint 2) |
+| [docs/approval-lifecycle.md](docs/approval-lifecycle.md) | Approval gate (checkpoint 3) |
+| [docs/verify-gate.md](docs/verify-gate.md) | Verify + completion (checkpoints 5–6) |
+
+### Run, integrate, reference
+
+| Doc | Topic |
+|-----|-------|
+| [docs/getting-started.md](docs/getting-started.md) | Build, socket, validate |
+| [docs/testing.md](docs/testing.md) | `make validate`, harness ladder |
+| [docs/kernel-rpc.md](docs/kernel-rpc.md) | JSON-RPC methods + Python CLI |
+| [docs/agent-ergonomics.md](docs/agent-ergonomics.md) | Agent loop and blocking responses |
+| [docs/agent-tooling.md](docs/agent-tooling.md) | Grep/diff/patch contracts |
+| [docs/troubleshooting.md](docs/troubleshooting.md) | Failure playbook |
+| [docs/error-codes.md](docs/error-codes.md) | `string_code` catalog |
+
+### Archive and structure
+
+| Doc | Topic |
+|-----|-------|
+| [ARCHIVE.md](ARCHIVE.md) | Retained vs removed index |
+| [docs/archive-note.md](docs/archive-note.md) | Why surfaces were removed |
+| [docs/file-structure.md](docs/file-structure.md) | Repository map |
+| [docs/architecture.md](docs/architecture.md) | Kernel wiring |
 
 ---
 
@@ -132,22 +229,24 @@ Complete index: [docs/README.md](docs/README.md)
 | Symptom | First command |
 |---------|---------------|
 | Kernel offline | `make restart-agent-server-fast` |
-| Stale binary after `git pull` | `make kernel && make restart-agent-server-fast` |
+| Errors after `git pull` | `make kernel && make restart-agent-server-fast` |
 | Coherence blocks patch | Re-read with `taskId` — [docs/coherence-tokens.md](docs/coherence-tokens.md) |
-| Install health unknown | `make validate` |
+| Drift blocks patch | `workspace.refreshAnchor` — [docs/workspace-drift.md](docs/workspace-drift.md) |
+| Not sure install is healthy | `make validate` |
 
-Playbook: [docs/troubleshooting.md](docs/troubleshooting.md) · Codes: [docs/error-codes.md](docs/error-codes.md)
+Playbook: [docs/troubleshooting.md](docs/troubleshooting.md) · Error codes: [docs/error-codes.md](docs/error-codes.md)
 
 ---
 
 ## Repository layout
 
 ```text
-src/kernel/                     Kernel entry + workspace session
-src/platform/macos/control/     JSON-RPC, coherence tokens, gates
-scripts/                        CLI, coherence harnesses, fixtures
-docs/                           Coherence model + kernel reference
-benchmarks/                     Frozen research (not gated)
+build/dietcode-kernel           # Headless kernel binary
+src/kernel/                     # Entry + workspace session
+src/platform/macos/control/     # JSON-RPC, coherence tokens, gates
+scripts/                        # CLI, coherence harnesses, fixtures
+docs/                           # Coherence model + kernel reference
+benchmarks/                     # Frozen research (not gated)
 ```
 
 Detail: [docs/file-structure.md](docs/file-structure.md)
