@@ -765,6 +765,22 @@ def _execute_bridge_call(
                 retry_safe=True,
                 raw_error=data,
             )
+        elif data.get("coherenceStale"):
+            _emit_task_event(
+                "context.stale",
+                action=action_label,
+                path=data.get("path"),
+                reason=data.get("reason"),
+                changedPaths=data.get("changedPaths"),
+            )
+        elif data.get("operatorInterventionRequired"):
+            _emit_task_event(
+                "coherence.operator_required",
+                action=action_label,
+                path=data.get("path"),
+                reason=data.get("reason"),
+                changedPaths=data.get("changedPaths"),
+            )
         elif data.get("applied") or data.get("mutationReceipt"):
             receipt = data.get("mutationReceipt") if isinstance(data.get("mutationReceipt"), dict) else {}
             _emit_task_event(

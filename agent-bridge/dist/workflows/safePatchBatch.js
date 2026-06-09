@@ -1,10 +1,46 @@
 import { randomUUID } from 'node:crypto';
 import { applyPatchBatch, validatePatch } from '../adapters/patchAdapter.js';
+import { readFileWithCoherence } from '../adapters/fileAdapter.js';
 import { fetchFileStat } from '../adapters/diagnosticsAdapter.js';
 import { fetchOperationStatus, fetchWorkspaceRevision } from '../adapters/runtimeAdapter.js';
 import { isBridgeError } from '../contracts/BridgeError.js';
+import { resolveBridgeRecovery } from '../contracts/BridgeError.js';
+import { createTaskCoherenceLogger } from '../telemetry/coherenceEvents.js';
+import { parseCoherenceMismatch } from './coherenceRecovery.js';
+function resolveBatchOptions(options) {
+    const taskId = options.taskId ?? (process.env.DIETCODE_TASK_ID?.trim() || undefined);
+    const onCoherenceEvent = options.onCoherenceEvent ?? createTaskCoherenceLogger();
+    return { ...options, taskId, onCoherenceEvent };
+}
+async function resolveCoherenceForBatch(transport, paths, options) {
+    if (!options.taskId) {
+        return {};
+    }
+    if (options.coherenceTokenId && options.expectedWorkspaceRevision != null) {
+        return {
+            coherenceTokenId: options.coherenceTokenId,
+            expectedWorkspaceRevision: options.expectedWorkspaceRevision,
+        };
+    }
+    let latest;
+    for (const relPath of paths) {
+        const read = await readFileWithCoherence(transport, relPath, options.taskId);
+        latest = {
+            tokenId: read.coherence.tokenId,
+            workspaceRevision: read.coherence.workspaceRevision,
+        };
+    }
+    return latest
+        ? {
+            coherenceTokenId: latest.tokenId,
+            expectedWorkspaceRevision: latest.workspaceRevision,
+        }
+        : {};
+}
 export async function safePatchBatch(transport, patches, options = {}) {
-    const idempotencyKey = options.idempotencyKey ?? `bridge-batch:${randomUUID()}`;
+    const resolved = resolveBatchOptions(options);
+    const idempotencyKey = resolved.idempotencyKey ?? `bridge-batch:${randomUUID()}`;
+    const emit = resolved.onCoherenceEvent;
     const rpcPatches = [];
     const hashesBefore = new Map();
     for (const entry of patches) {
@@ -29,9 +65,12 @@ export async function safePatchBatch(transport, patches, options = {}) {
         hashesBefore.set(entry.path, validation.beforeContentHash);
     }
     const revisionBefore = await fetchWorkspaceRevision(transport);
+    const uniquePaths = [...new Set(patches.map((entry) => entry.path))];
+    const coherenceFields = await resolveCoherenceForBatch(transport, uniquePaths, resolved);
     try {
         const applied = await applyPatchBatch(transport, rpcPatches, {
-            ...options,
+            ...resolved,
+            ...coherenceFields,
             idempotencyKey,
         });
         const receipt = applied.result.batchMutationReceipt;
@@ -64,6 +103,31 @@ export async function safePatchBatch(transport, patches, options = {}) {
         }
         const filesVerifiedUnchanged = await verifyFilesUnchanged(transport, hashesBefore);
         const failedPath = isBridgeError(error) ? inferFailedPath(error, rpcPatches) : rpcPatches[0]?.path;
+        if (isBridgeError(error) && error.code === 'coherence_mismatch') {
+            const detail = parseCoherenceMismatch(error.rawError);
+            const stalePath = failedPath ?? rpcPatches[0]?.path ?? '';
+            emit?.({
+                type: 'context.stale',
+                path: stalePath,
+                taskId: resolved.taskId,
+                reason: detail.reason,
+                changedPaths: detail.changedPaths,
+            });
+            const recovery = resolveBridgeRecovery('coherence_mismatch', error.rawError, { retrySafe: true });
+            return {
+                applied: false,
+                atomic: true,
+                rolledBack: true,
+                failedPath,
+                idempotencyKey,
+                recoveryHint: recovery.recoveryHint,
+                nextRecommendedCommand: recovery.nextRecommendedCommand,
+                filesVerifiedUnchanged,
+                coherenceStale: true,
+                reason: detail.reason,
+                changedPaths: detail.changedPaths,
+            };
+        }
         return {
             applied: false,
             atomic: true,

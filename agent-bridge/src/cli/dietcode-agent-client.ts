@@ -4,7 +4,8 @@ import { readFile } from 'node:fs/promises';
 import { DietCodeBridgeClient } from '../client/DietCodeBridgeClient.js';
 import { resolveAppPath } from '../client/config.js';
 import { isBridgeError } from '../contracts/BridgeError.js';
-import type { PatchBatchEntry } from '../contracts/types.js';
+import type { PatchBatchEntry, PatchOptions } from '../contracts/types.js';
+import { buildLineReplacementPatchFromContent } from '../utils/unifiedDiff.js';
 
 interface CliOptions {
   pretty: boolean;
@@ -18,6 +19,10 @@ interface CliOptions {
   workspaceRoot?: string;
   maxResults?: number;
   idempotencyKey?: string;
+  taskId?: string;
+  coherenceRetry?: boolean;
+  lineSearch?: string;
+  lineReplace?: string;
 }
 
 function parseFlags(argv: string[]): { flags: CliOptions; args: string[] } {
@@ -54,6 +59,14 @@ function parseFlags(argv: string[]): { flags: CliOptions; args: string[] } {
       flags.maxResults = Number(argv[++i]);
     } else if (arg === '--idempotency-key' && argv[i + 1]) {
       flags.idempotencyKey = argv[++i];
+    } else if (arg === '--task-id' && argv[i + 1]) {
+      flags.taskId = argv[++i];
+    } else if (arg === '--coherence-retry') {
+      flags.coherenceRetry = true;
+    } else if (arg === '--line-search' && argv[i + 1]) {
+      flags.lineSearch = argv[++i];
+    } else if (arg === '--line-replace' && argv[i + 1]) {
+      flags.lineReplace = argv[++i];
     } else {
       args.push(arg);
     }
@@ -109,6 +122,10 @@ Options:
   --workspace PATH Workspace root to open when none is active
   --max-results N  Cap search result count
   --idempotency-key KEY  Replay-safe key for patch commands
+  --task-id ID           Governed task id (defaults to DIETCODE_TASK_ID)
+  --coherence-retry      Enable one automatic coherence recovery retry (safe-file)
+  --line-search TEXT     With --coherence-retry: line to find in file
+  --line-replace TEXT    With --coherence-retry: replacement line
 `);
 }
 
@@ -142,7 +159,23 @@ async function main(): Promise<number> {
     let result: unknown;
     const searchOptions =
       flags.maxResults && flags.maxResults > 0 ? { maxResults: flags.maxResults } : undefined;
-    const patchOptions = flags.idempotencyKey ? { idempotencyKey: flags.idempotencyKey } : undefined;
+    const patchOptions: PatchOptions = {
+      ...(flags.idempotencyKey ? { idempotencyKey: flags.idempotencyKey } : {}),
+      ...(flags.taskId || process.env.DIETCODE_TASK_ID
+        ? { taskId: flags.taskId ?? process.env.DIETCODE_TASK_ID?.trim() }
+        : {}),
+    };
+    if (flags.coherenceRetry && flags.lineSearch && flags.lineReplace) {
+      patchOptions.lineReplacement = {
+        search: flags.lineSearch,
+        replace: flags.lineReplace,
+      };
+    } else if (flags.coherenceRetry && flags.lineSearch) {
+      const search = flags.lineSearch;
+      const replace = flags.lineReplace ?? flags.lineSearch;
+      patchOptions.buildPatchFromContent = ({ path, content }) =>
+        buildLineReplacementPatchFromContent(path, content, search, replace);
+    }
 
     switch (command) {
       case 'profile':

@@ -11,6 +11,28 @@ logger = logging.getLogger(__name__)
 _IDE_READY_ATTR = "_dietcode_ide_ready"
 
 
+def _emit_coherence_task_event(payload: dict[str, Any]) -> None:
+    try:
+        from plugins.dietcode.lib.agent.ide_bridge_client import _emit_task_event
+
+        if payload.get("operatorInterventionRequired"):
+            _emit_task_event(
+                "coherence.operator_required",
+                path=payload.get("path"),
+                reason=payload.get("reason"),
+                changedPaths=payload.get("changedPaths"),
+            )
+        elif payload.get("coherenceStale"):
+            _emit_task_event(
+                "context.stale",
+                path=payload.get("path"),
+                reason=payload.get("reason"),
+                changedPaths=payload.get("changedPaths"),
+            )
+    except Exception as exc:
+        logger.debug("DietCode IDE coherence task event skipped: %s", exc)
+
+
 def _set_manager_ready(ready: bool) -> None:
     try:
         from hermes_cli.plugins import get_plugin_manager
@@ -144,5 +166,19 @@ def _post_tool_call(
             )
         elif payload.get("stale"):
             logger.warning("DietCode IDE stale patch on %s — revalidate before retry", action)
+        elif payload.get("coherenceStale"):
+            changed = payload.get("changedPaths") or []
+            logger.warning(
+                "DietCode IDE coherence stale on %s — re-read changed paths before retry: %s",
+                action,
+                changed,
+            )
+            _emit_coherence_task_event(payload)
+        elif payload.get("operatorInterventionRequired"):
+            logger.warning(
+                "DietCode IDE coherence recovery exhausted on %s — operator intervention required",
+                action,
+            )
+            _emit_coherence_task_event(payload)
     except Exception as exc:
         logger.debug("DietCode IDE post_tool_call skipped: %s", exc)

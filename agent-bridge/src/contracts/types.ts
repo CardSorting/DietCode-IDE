@@ -170,6 +170,10 @@ export interface SafeBatchPatchFailure {
   atomic: true;
   rolledBack: true;
   stale?: boolean;
+  coherenceStale?: boolean;
+  operatorInterventionRequired?: boolean;
+  reason?: string;
+  changedPaths?: string[];
   failedPath?: string;
   idempotencyKey: string;
   recoveryHint: string;
@@ -223,6 +227,7 @@ export interface PatchOptions {
   taskId?: string;
   coherenceTokenId?: string;
   expectedWorkspaceRevision?: number;
+  lineReplacement?: { search: string; replace: string };
   /** Rebuild unified diff from live file content after coherence_mismatch. */
   buildPatchFromContent?: (args: { path: string; content: string }) => string;
   /** NDJSON-style recovery telemetry for governed tasks. */

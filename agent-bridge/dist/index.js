@@ -10,4 +10,6 @@ export { normalizeBridgeResult, normalizeRpcSuccess, extractPartialMeta, hasPart
 export { validateMutationReceipt, validateBatchMutationReceipt, validateToolCapabilities, validateRuntimeDiagnostics, } from './contracts/validators.js';
 export { readFileWithCoherence } from './adapters/fileAdapter.js';
 export { parseCoherenceMismatch, refreshCoherenceContext, buildCoherenceStaleRecovery, buildCoherenceOperatorRequired, } from './workflows/coherenceRecovery.js';
+export { buildLineReplacementPatch, buildLineReplacementPatchFromContent, } from './utils/unifiedDiff.js';
+export { createTaskCoherenceLogger } from './telemetry/coherenceEvents.js';
 //# sourceMappingURL=index.js.map

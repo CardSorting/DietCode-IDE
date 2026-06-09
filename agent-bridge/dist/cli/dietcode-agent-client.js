@@ -3,6 +3,7 @@ import { readFile } from 'node:fs/promises';
 import { DietCodeBridgeClient } from '../client/DietCodeBridgeClient.js';
 import { resolveAppPath } from '../client/config.js';
 import { isBridgeError } from '../contracts/BridgeError.js';
+import { buildLineReplacementPatchFromContent } from '../utils/unifiedDiff.js';
 function parseFlags(argv) {
     const flags = {
         pretty: false,
@@ -46,6 +47,18 @@ function parseFlags(argv) {
         }
         else if (arg === '--idempotency-key' && argv[i + 1]) {
             flags.idempotencyKey = argv[++i];
+        }
+        else if (arg === '--task-id' && argv[i + 1]) {
+            flags.taskId = argv[++i];
+        }
+        else if (arg === '--coherence-retry') {
+            flags.coherenceRetry = true;
+        }
+        else if (arg === '--line-search' && argv[i + 1]) {
+            flags.lineSearch = argv[++i];
+        }
+        else if (arg === '--line-replace' && argv[i + 1]) {
+            flags.lineReplace = argv[++i];
         }
         else {
             args.push(arg);
@@ -97,6 +110,10 @@ Options:
   --workspace PATH Workspace root to open when none is active
   --max-results N  Cap search result count
   --idempotency-key KEY  Replay-safe key for patch commands
+  --task-id ID           Governed task id (defaults to DIETCODE_TASK_ID)
+  --coherence-retry      Enable one automatic coherence recovery retry (safe-file)
+  --line-search TEXT     With --coherence-retry: line to find in file
+  --line-replace TEXT    With --coherence-retry: replacement line
 `);
 }
 async function main() {
@@ -123,7 +140,23 @@ async function main() {
         const [command, subcommand, ...rest] = args;
         let result;
         const searchOptions = flags.maxResults && flags.maxResults > 0 ? { maxResults: flags.maxResults } : undefined;
-        const patchOptions = flags.idempotencyKey ? { idempotencyKey: flags.idempotencyKey } : undefined;
+        const patchOptions = {
+            ...(flags.idempotencyKey ? { idempotencyKey: flags.idempotencyKey } : {}),
+            ...(flags.taskId || process.env.DIETCODE_TASK_ID
+                ? { taskId: flags.taskId ?? process.env.DIETCODE_TASK_ID?.trim() }
+                : {}),
+        };
+        if (flags.coherenceRetry && flags.lineSearch && flags.lineReplace) {
+            patchOptions.lineReplacement = {
+                search: flags.lineSearch,
+                replace: flags.lineReplace,
+            };
+        }
+        else if (flags.coherenceRetry && flags.lineSearch) {
+            const search = flags.lineSearch;
+            const replace = flags.lineReplace ?? flags.lineSearch;
+            patchOptions.buildPatchFromContent = ({ path, content }) => buildLineReplacementPatchFromContent(path, content, search, replace);
+        }
         switch (command) {
             case 'profile':
                 result = client.getRuntimeProfile();

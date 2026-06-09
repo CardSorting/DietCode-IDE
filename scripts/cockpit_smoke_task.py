@@ -6,7 +6,6 @@ from __future__ import annotations
 import argparse
 import json
 import sys
-import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -16,9 +15,9 @@ if str(_SCRIPT_DIR) not in sys.path:
     sys.path.insert(0, str(_SCRIPT_DIR))
 
 from dietcode_agent_client import connect, load_token, send_rpc  # noqa: E402
+from dietcode_coherence import apply_patch_with_coherence, read_with_coherence  # noqa: E402
 
 PROBE_NAME = "probe.py"
-APPROVAL_TIMEOUT = float(__import__("os").environ.get("COCKPIT_SMOKE_APPROVAL_TIMEOUT", "120"))
 
 
 def _iso_now() -> str:
@@ -53,39 +52,6 @@ def _build_patch(probe_rel: str) -> str:
         "-VALUE = 1\n"
         "+VALUE = 2\n"
     )
-
-
-def _approval_status(result: dict[str, Any]) -> str | None:
-    if not result.get("ok"):
-        return None
-    body = result.get("result") or {}
-    if isinstance(body.get("status"), str):
-        return body["status"]
-    approval = body.get("approval")
-    if isinstance(approval, dict) and isinstance(approval.get("status"), str):
-        return approval["status"]
-    return None
-
-
-def _wait_for_approval(sock, token: str, approval_id: str, task_id: str) -> bool:
-    deadline = time.monotonic() + APPROVAL_TIMEOUT
-    while time.monotonic() < deadline:
-        polled = send_rpc(sock, token, "approval.get", {"approvalId": approval_id})
-        status = _approval_status(polled)
-        if status == "approved":
-            emit_event("approval.resolved", task_id, approvalId=approval_id, decision="approved")
-            return True
-        if status in {"rejected", "expired", "failed"}:
-            emit_event(
-                "task.failed",
-                task_id,
-                exitCode=2,
-                error=f"Approval {approval_id} ended with status {status}",
-            )
-            return False
-        time.sleep(0.35)
-    emit_event("task.failed", task_id, exitCode=2, error="Approval wait timed out")
-    return False
 
 
 def run_smoke_task(*, task_id: str, message: str, workspace: Path, mode: str) -> int:
@@ -124,10 +90,8 @@ def run_smoke_task(*, task_id: str, message: str, workspace: Path, mode: str) ->
             driftDetected=bool(status.get("result", {}).get("driftDetected")),
         )
 
-        read = send_rpc(sock, token, "file.read", {"path": probe_rel, "taskId": task_id})
-        if not read.get("ok"):
-            raise RuntimeError(f"file.read failed: {read}")
-        coherence = (read.get("result") or {}).get("coherence") or {}
+        read = read_with_coherence(sock, token, probe_rel, task_id)
+        coherence = read.get("coherence") or {}
         emit_event("context.read", task_id, action="file.read", path=probe_rel)
 
         patch = _build_patch(probe_rel)
@@ -138,31 +102,22 @@ def run_smoke_task(*, task_id: str, message: str, workspace: Path, mode: str) ->
         if not validation.get("ok"):
             raise RuntimeError(f"patch validation rejected: {validation}")
 
-        apply_params: dict[str, Any] = {
-            "path": probe_rel,
-            "patch": patch,
-            "confirm": True,
-            "expectBeforeHash": validation["beforeContentHash"],
-            "taskId": task_id,
-        }
-        if coherence.get("tokenId"):
-            apply_params["coherenceTokenId"] = coherence["tokenId"]
-        if coherence.get("workspaceRevision") is not None:
-            apply_params["expectedWorkspaceRevision"] = coherence["workspaceRevision"]
-        applied = send_rpc(sock, token, "patch.apply", apply_params)
+        applied = apply_patch_with_coherence(
+            sock,
+            token,
+            task_id=task_id,
+            path=probe_rel,
+            patch=patch,
+            coherence=coherence,
+            expect_before_hash=validation["beforeContentHash"],
+            emit=emit_event,
+            resolved_by="cockpit-smoke-task",
+        )
         if not applied.get("ok"):
             raise RuntimeError(f"patch.apply failed: {applied}")
 
         result = applied.get("result") or {}
-        if result.get("approvalRequired"):
-            approval = result.get("approval") or {}
-            approval_id = approval.get("approvalId")
-            if not approval_id:
-                raise RuntimeError("approvalRequired without approvalId")
-            emit_event("approval.required", task_id, approvalId=approval_id)
-            if not _wait_for_approval(sock, token, str(approval_id), task_id):
-                return 2
-        elif not result.get("applied") and not result.get("complete"):
+        if not (result.get("applied") or result.get("complete") or result.get("patched")):
             raise RuntimeError(f"patch.apply did not apply: {result}")
 
         probe_text = (workspace / PROBE_NAME).read_text(encoding="utf-8")

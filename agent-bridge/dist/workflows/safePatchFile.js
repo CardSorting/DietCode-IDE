@@ -4,10 +4,22 @@ import { readFileWithCoherence } from '../adapters/fileAdapter.js';
 import { fetchOperationStatus, fetchWorkspaceRevision } from '../adapters/runtimeAdapter.js';
 import { isBridgeError } from '../contracts/BridgeError.js';
 import { bridgeError } from '../contracts/errors.js';
+import { createTaskCoherenceLogger } from '../telemetry/coherenceEvents.js';
 import { recordMutationPatchApplied } from '../telemetry/mutationTelemetry.js';
+import { buildLineReplacementPatchFromContent } from '../utils/unifiedDiff.js';
 import { buildCoherenceOperatorRequired, buildCoherenceStaleRecovery, parseCoherenceMismatch, refreshCoherenceContext, } from './coherenceRecovery.js';
 import { buildStaleRecoveryResponse } from './stalePatchRecovery.js';
 import { verifyAfterMutation } from './verifyAfterMutation.js';
+function resolvePatchOptions(options) {
+    const taskId = options.taskId ?? (process.env.DIETCODE_TASK_ID?.trim() || undefined);
+    const onCoherenceEvent = options.onCoherenceEvent ?? createTaskCoherenceLogger();
+    let buildPatchFromContent = options.buildPatchFromContent;
+    if (!buildPatchFromContent && options.lineReplacement) {
+        const { search, replace } = options.lineReplacement;
+        buildPatchFromContent = ({ path, content }) => buildLineReplacementPatchFromContent(path, content, search, replace);
+    }
+    return { ...options, taskId, onCoherenceEvent, buildPatchFromContent };
+}
 async function resolveCoherenceForApply(transport, path, options) {
     if (!options.taskId) {
         return {};
@@ -25,8 +37,9 @@ async function resolveCoherenceForApply(transport, path, options) {
     };
 }
 export async function safePatchFile(transport, path, unifiedDiff, options = {}) {
-    const idempotencyKey = options.idempotencyKey ?? `bridge-patch:${randomUUID()}`;
-    const emit = (event) => options.onCoherenceEvent?.(event);
+    const resolved = resolvePatchOptions(options);
+    const idempotencyKey = resolved.idempotencyKey ?? `bridge-patch:${randomUUID()}`;
+    const emit = (event) => resolved.onCoherenceEvent?.(event);
     const applyOnce = async (diff, patchOptions) => {
         const validation = await validatePatch(transport, path, diff);
         if (!validation.ok) {
@@ -71,7 +84,7 @@ export async function safePatchFile(transport, path, unifiedDiff, options = {}) 
         }
     };
     try {
-        return await applyOnce(unifiedDiff, options);
+        return await applyOnce(unifiedDiff, resolved);
     }
     catch (error) {
         if (isBridgeError(error) && error.code === 'coherence_mismatch') {
@@ -79,29 +92,29 @@ export async function safePatchFile(transport, path, unifiedDiff, options = {}) 
             emit({
                 type: 'context.stale',
                 path,
-                taskId: options.taskId,
+                taskId: resolved.taskId,
                 reason: detail.reason,
                 changedPaths: detail.changedPaths,
             });
-            if (!options.taskId || !options.buildPatchFromContent) {
+            if (!resolved.taskId || !resolved.buildPatchFromContent) {
                 return buildCoherenceStaleRecovery(path, idempotencyKey, detail, error.rawError);
             }
             const refreshPaths = detail.changedPaths.length > 0 ? detail.changedPaths : [path];
-            const refreshed = await refreshCoherenceContext(transport, options.taskId, refreshPaths, emit);
-            const regenerated = options.buildPatchFromContent({
+            const refreshed = await refreshCoherenceContext(transport, resolved.taskId, refreshPaths, emit);
+            const regenerated = resolved.buildPatchFromContent({
                 path,
                 content: refreshed.text,
             });
             emit({
                 type: 'coherence.retry',
                 path,
-                taskId: options.taskId,
+                taskId: resolved.taskId,
                 attempt: 1,
                 tokenId: refreshed.coherence.tokenId,
             });
             try {
                 return await applyOnce(regenerated, {
-                    ...options,
+                    ...resolved,
                     coherenceTokenId: refreshed.coherence.tokenId,
                     expectedWorkspaceRevision: refreshed.coherence.workspaceRevision,
                 });
@@ -112,7 +125,7 @@ export async function safePatchFile(transport, path, unifiedDiff, options = {}) 
                     emit({
                         type: 'coherence.operator_required',
                         path,
-                        taskId: options.taskId,
+                        taskId: resolved.taskId,
                         reason: retryDetail.reason,
                         changedPaths: retryDetail.changedPaths,
                     });

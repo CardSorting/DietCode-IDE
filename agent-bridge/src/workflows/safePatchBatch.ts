@@ -1,9 +1,11 @@
 import { randomUUID } from 'node:crypto';
 
 import { applyPatchBatch, validatePatch, type BatchPatchRpcEntry } from '../adapters/patchAdapter.js';
+import { readFileWithCoherence } from '../adapters/fileAdapter.js';
 import { fetchFileStat } from '../adapters/diagnosticsAdapter.js';
 import { fetchOperationStatus, fetchWorkspaceRevision } from '../adapters/runtimeAdapter.js';
 import { isBridgeError } from '../contracts/BridgeError.js';
+import { resolveBridgeRecovery } from '../contracts/BridgeError.js';
 import type { RpcCaller } from '../client/RpcTransport.js';
 import type {
   BatchMutationReceipt,
@@ -11,13 +13,53 @@ import type {
   PatchBatchEntry,
   SafeBatchPatchResult,
 } from '../contracts/types.js';
+import { createTaskCoherenceLogger } from '../telemetry/coherenceEvents.js';
+import { parseCoherenceMismatch } from './coherenceRecovery.js';
+
+function resolveBatchOptions(options: BatchPatchOptions): BatchPatchOptions {
+  const taskId = options.taskId ?? (process.env.DIETCODE_TASK_ID?.trim() || undefined);
+  const onCoherenceEvent = options.onCoherenceEvent ?? createTaskCoherenceLogger();
+  return { ...options, taskId, onCoherenceEvent };
+}
+
+async function resolveCoherenceForBatch(
+  transport: RpcCaller,
+  paths: string[],
+  options: BatchPatchOptions,
+): Promise<Pick<BatchPatchOptions, 'coherenceTokenId' | 'expectedWorkspaceRevision'>> {
+  if (!options.taskId) {
+    return {};
+  }
+  if (options.coherenceTokenId && options.expectedWorkspaceRevision != null) {
+    return {
+      coherenceTokenId: options.coherenceTokenId,
+      expectedWorkspaceRevision: options.expectedWorkspaceRevision,
+    };
+  }
+  let latest: { tokenId: string; workspaceRevision: number } | undefined;
+  for (const relPath of paths) {
+    const read = await readFileWithCoherence(transport, relPath, options.taskId);
+    latest = {
+      tokenId: read.coherence.tokenId,
+      workspaceRevision: read.coherence.workspaceRevision,
+    };
+  }
+  return latest
+    ? {
+        coherenceTokenId: latest.tokenId,
+        expectedWorkspaceRevision: latest.workspaceRevision,
+      }
+    : {};
+}
 
 export async function safePatchBatch(
   transport: RpcCaller,
   patches: PatchBatchEntry[],
   options: BatchPatchOptions = {},
 ): Promise<SafeBatchPatchResult> {
-  const idempotencyKey = options.idempotencyKey ?? `bridge-batch:${randomUUID()}`;
+  const resolved = resolveBatchOptions(options);
+  const idempotencyKey = resolved.idempotencyKey ?? `bridge-batch:${randomUUID()}`;
+  const emit = resolved.onCoherenceEvent;
   const rpcPatches: BatchPatchRpcEntry[] = [];
   const hashesBefore = new Map<string, string>();
 
@@ -44,10 +86,13 @@ export async function safePatchBatch(
   }
 
   const revisionBefore = await fetchWorkspaceRevision(transport);
+  const uniquePaths = [...new Set(patches.map((entry) => entry.path))];
+  const coherenceFields = await resolveCoherenceForBatch(transport, uniquePaths, resolved);
 
   try {
     const applied = await applyPatchBatch(transport, rpcPatches, {
-      ...options,
+      ...resolved,
+      ...coherenceFields,
       idempotencyKey,
     });
 
@@ -82,6 +127,32 @@ export async function safePatchBatch(
 
     const filesVerifiedUnchanged = await verifyFilesUnchanged(transport, hashesBefore);
     const failedPath = isBridgeError(error) ? inferFailedPath(error, rpcPatches) : rpcPatches[0]?.path;
+
+    if (isBridgeError(error) && error.code === 'coherence_mismatch') {
+      const detail = parseCoherenceMismatch(error.rawError);
+      const stalePath = failedPath ?? rpcPatches[0]?.path ?? '';
+      emit?.({
+        type: 'context.stale',
+        path: stalePath,
+        taskId: resolved.taskId,
+        reason: detail.reason,
+        changedPaths: detail.changedPaths,
+      });
+      const recovery = resolveBridgeRecovery('coherence_mismatch', error.rawError, { retrySafe: true });
+      return {
+        applied: false,
+        atomic: true,
+        rolledBack: true,
+        failedPath,
+        idempotencyKey,
+        recoveryHint: recovery.recoveryHint,
+        nextRecommendedCommand: recovery.nextRecommendedCommand,
+        filesVerifiedUnchanged,
+        coherenceStale: true,
+        reason: detail.reason,
+        changedPaths: detail.changedPaths,
+      };
+    }
 
     return {
       applied: false,

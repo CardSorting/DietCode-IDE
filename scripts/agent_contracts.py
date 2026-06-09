@@ -264,6 +264,7 @@ ERROR_RECOVERY_HINTS = {
     "symlink_target": {"recovery_hint": "use_non_symlink_target_path", "nextRecommendedCommand": "file.stat"},
     "patch_failed": {"recovery_hint": "run_patch_preview_or_patch_validate", "nextRecommendedCommand": "patch.validate"},
     "nested_call_timeout": {"recovery_hint": "reduce_concurrency_or_retry_later", "nextRecommendedCommand": "operation.status"},
+    "coherence_mismatch": {"recovery_hint": "refresh_context_and_retry_mutation", "nextRecommendedCommand": "file.read"},
     "shell_timeout": {"recovery_hint": "narrow_search_or_retry_later", "nextRecommendedCommand": "shell.rg"},
     "shell_truncated": {"recovery_hint": "narrow_range_or_paginate", "nextRecommendedCommand": "shell.sedRange"},
     "shell_binary_file": {"recovery_hint": "use_file_stat_or_skip_binary", "nextRecommendedCommand": "file.stat"},

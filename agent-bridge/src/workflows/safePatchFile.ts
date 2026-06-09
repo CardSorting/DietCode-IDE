@@ -7,7 +7,9 @@ import { isBridgeError } from '../contracts/BridgeError.js';
 import { bridgeError } from '../contracts/errors.js';
 import type { RpcCaller } from '../client/RpcTransport.js';
 import type { MutationReceipt, PatchOptions, SafePatchResult } from '../contracts/types.js';
+import { createTaskCoherenceLogger } from '../telemetry/coherenceEvents.js';
 import { recordMutationPatchApplied } from '../telemetry/mutationTelemetry.js';
+import { buildLineReplacementPatchFromContent } from '../utils/unifiedDiff.js';
 import {
   buildCoherenceOperatorRequired,
   buildCoherenceStaleRecovery,
@@ -16,6 +18,18 @@ import {
 } from './coherenceRecovery.js';
 import { buildStaleRecoveryResponse } from './stalePatchRecovery.js';
 import { verifyAfterMutation } from './verifyAfterMutation.js';
+
+function resolvePatchOptions(options: PatchOptions): PatchOptions {
+  const taskId = options.taskId ?? (process.env.DIETCODE_TASK_ID?.trim() || undefined);
+  const onCoherenceEvent = options.onCoherenceEvent ?? createTaskCoherenceLogger();
+  let buildPatchFromContent = options.buildPatchFromContent;
+  if (!buildPatchFromContent && options.lineReplacement) {
+    const { search, replace } = options.lineReplacement;
+    buildPatchFromContent = ({ path, content }) =>
+      buildLineReplacementPatchFromContent(path, content, search, replace);
+  }
+  return { ...options, taskId, onCoherenceEvent, buildPatchFromContent };
+}
 
 async function resolveCoherenceForApply(
   transport: RpcCaller,
@@ -44,9 +58,10 @@ export async function safePatchFile(
   unifiedDiff: string,
   options: PatchOptions = {},
 ): Promise<SafePatchResult> {
-  const idempotencyKey = options.idempotencyKey ?? `bridge-patch:${randomUUID()}`;
+  const resolved = resolvePatchOptions(options);
+  const idempotencyKey = resolved.idempotencyKey ?? `bridge-patch:${randomUUID()}`;
   const emit = (event: Parameters<NonNullable<PatchOptions['onCoherenceEvent']>>[0]) =>
-    options.onCoherenceEvent?.(event);
+    resolved.onCoherenceEvent?.(event);
 
   const applyOnce = async (diff: string, patchOptions: PatchOptions): Promise<SafePatchResult> => {
     const validation = await validatePatch(transport, path, diff);
@@ -103,30 +118,30 @@ export async function safePatchFile(
   };
 
   try {
-    return await applyOnce(unifiedDiff, options);
+    return await applyOnce(unifiedDiff, resolved);
   } catch (error) {
     if (isBridgeError(error) && error.code === 'coherence_mismatch') {
       const detail = parseCoherenceMismatch(error.rawError);
       emit({
         type: 'context.stale',
         path,
-        taskId: options.taskId,
+        taskId: resolved.taskId,
         reason: detail.reason,
         changedPaths: detail.changedPaths,
       });
 
-      if (!options.taskId || !options.buildPatchFromContent) {
+      if (!resolved.taskId || !resolved.buildPatchFromContent) {
         return buildCoherenceStaleRecovery(path, idempotencyKey, detail, error.rawError);
       }
 
       const refreshPaths = detail.changedPaths.length > 0 ? detail.changedPaths : [path];
       const refreshed = await refreshCoherenceContext(
         transport,
-        options.taskId,
+        resolved.taskId,
         refreshPaths,
         emit,
       );
-      const regenerated = options.buildPatchFromContent({
+      const regenerated = resolved.buildPatchFromContent({
         path,
         content: refreshed.text,
       });
@@ -134,14 +149,14 @@ export async function safePatchFile(
       emit({
         type: 'coherence.retry',
         path,
-        taskId: options.taskId,
+        taskId: resolved.taskId,
         attempt: 1,
         tokenId: refreshed.coherence.tokenId,
       });
 
       try {
         return await applyOnce(regenerated, {
-          ...options,
+          ...resolved,
           coherenceTokenId: refreshed.coherence.tokenId,
           expectedWorkspaceRevision: refreshed.coherence.workspaceRevision,
         });
@@ -151,7 +166,7 @@ export async function safePatchFile(
           emit({
             type: 'coherence.operator_required',
             path,
-            taskId: options.taskId,
+            taskId: resolved.taskId,
             reason: retryDetail.reason,
             changedPaths: retryDetail.changedPaths,
           });

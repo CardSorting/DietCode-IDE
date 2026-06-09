@@ -36,7 +36,10 @@ IDE_BRIDGE_GUIDANCE = (
     "— validate → expectBeforeHash → apply with mutation receipt.\n"
     "4. On timeout: `dietcode_ide(action='operation_status', idempotency_key=...)`.\n"
     "5. On `stale_content`: re-read with `stat` or `shell_head` — never blind retry.\n"
-    "6. `dietcode_ide(action='timeline')` / `activity` — runtime journal observability.\n"
+    "6. On `coherence_mismatch` (governed `taskId`): re-read `changedPaths` with "
+    "`file.read` + `taskId`, regenerate the patch from live content, retry once. "
+    "If still stale, stop for operator intervention.\n"
+    "7. `dietcode_ide(action='timeline')` / `activity` — runtime journal observability.\n"
     "\n"
     "Operator console: `/dietcode ide` or `/dietcode doctor`.\n"
 )

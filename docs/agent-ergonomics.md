@@ -58,6 +58,7 @@ When `DIETCODE_TASK_ID` is set (governed tasks), the bridge injects `taskId` int
 |------|--------------------------|---------|
 | `workspace_drift` | `workspace.status` | Refresh context before retry |
 | `stale_content` | `patch.validate` | Re-read before patch |
+| `coherence_mismatch` | `file.read` | Task-scoped stale write — re-read `changedPaths`, regenerate patch, retry once |
 | `approval_required` | `approval.get` | Wait for human |
 | `approval_rejected` | `workspace.revision` | Revise plan |
 
@@ -85,6 +86,31 @@ Agents should prefer workspace-native `verify.sh` — same convention as agent c
 5. Do not claim "done" until snapshot.canComplete === true
 ```
 
+## Coherence tokens (governed tasks)
+
+When `taskId` is set on reads (`file.read`, `workspace.status`, …), the kernel issues a **coherence token** — proof of what the agent observed. Mutations must carry `coherenceTokenId` + `expectedWorkspaceRevision` or the kernel returns `coherence_mismatch` (before drift).
+
+**Recovery loop** (bridge + Python harness):
+
+```text
+patch.apply → coherence_mismatch
+  → emit context.stale
+  → file.read changedPaths with taskId
+  → emit context.refreshed
+  → regenerate patch from live content
+  → emit coherence.retry (one attempt)
+  → success OR coherence.operator_required
+```
+
+| Event | Meaning |
+|-------|---------|
+| `context.stale` | Observed anchors no longer match disk |
+| `context.refreshed` | Re-read issued new coherence token |
+| `coherence.retry` | Automatic retry with fresh token |
+| `coherence.operator_required` | Second mismatch — stop and escalate |
+
+See [coherence-tokens.md](./coherence-tokens.md) for kernel caps and anchor format.
+
 ## Hermes `dietcode_ide` events
 
 Governed tasks emit NDJSON to `DIETCODE_TASK_EVENT_LOG`:
@@ -92,6 +118,10 @@ Governed tasks emit NDJSON to `DIETCODE_TASK_EVENT_LOG`:
 | Event | Checkpoint |
 |-------|------------|
 | `workspace.drift.detected` | 2 |
+| `context.stale` | — (coherence) |
+| `context.refreshed` | — (coherence) |
+| `coherence.retry` | — (coherence) |
+| `coherence.operator_required` | — (coherence) |
 | `approval.required` | 3 |
 | `file.diff` | 4 |
 | `tool.call.completed` | — (observability) |

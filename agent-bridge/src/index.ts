@@ -66,3 +66,8 @@ export {
   buildCoherenceStaleRecovery,
   buildCoherenceOperatorRequired,
 } from './workflows/coherenceRecovery.js';
+export {
+  buildLineReplacementPatch,
+  buildLineReplacementPatchFromContent,
+} from './utils/unifiedDiff.js';
+export { createTaskCoherenceLogger } from './telemetry/coherenceEvents.js';
