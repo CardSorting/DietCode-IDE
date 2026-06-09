@@ -693,6 +693,9 @@ static const void* kDietCodeReadQueueKey = &kDietCodeReadQueueKey;
         }
         
         if ([permission isEqualToString:@"Edit"] || [permission isEqualToString:@"Destructive"]) {
+            if ([self queueCoherenceMismatchIfNeeded:method params:params reqId:reqId clientFd:clientFd]) {
+                return;
+            }
             if ([self queueWorkspaceDriftBlockIfNeeded:method params:params reqId:reqId clientFd:clientFd]) {
                 return;
             }
@@ -1502,7 +1505,7 @@ static const void* kDietCodeReadQueueKey = &kDietCodeReadQueueKey;
         else if ([stringCode isEqualToString:@"lock_conflict"] || [stringCode isEqualToString:@"dirty_buffer_conflict"]) numericCode = @(4002);
         else if ([stringCode isEqualToString:@"budget_exceeded"]) numericCode = @(4003);
         else if ([stringCode isEqualToString:@"semantic_disabled"] || [stringCode isEqualToString:@"ranked_search_disabled"]) numericCode = @(4008);
-        else if ([stringCode isEqualToString:@"verification_failed"] || [stringCode isEqualToString:@"verify_failed"] || [stringCode isEqualToString:@"patch_failed"] || [stringCode isEqualToString:@"stale_content"] || [stringCode isEqualToString:@"symlink_target"]) numericCode = @(4004);
+        else if ([stringCode isEqualToString:@"verification_failed"] || [stringCode isEqualToString:@"verify_failed"] || [stringCode isEqualToString:@"patch_failed"] || [stringCode isEqualToString:@"stale_content"] || [stringCode isEqualToString:@"symlink_target"] || [stringCode isEqualToString:@"coherence_mismatch"]) numericCode = @(4004);
         else if ([stringCode isEqualToString:@"rollback_conflict"] || [stringCode isEqualToString:@"rollback_failed"]) numericCode = @(4005);
         else if ([stringCode isEqualToString:@"permission_denied"]) numericCode = @(4006);
         else if ([stringCode isEqualToString:@"task_not_active"]) numericCode = @(4007);
@@ -1528,6 +1531,17 @@ static const void* kDietCodeReadQueueKey = &kDietCodeReadQueueKey;
     }];
     if (phase.length > 0) error[@"phase"] = phase;
     if (queue.length > 0) error[@"queue"] = queue;
+
+    if ([stringCode isEqualToString:@"coherence_mismatch"]) {
+        NSDictionary* detail = _workspaceState.lastCoherenceMismatchDetail;
+        if (detail.count > 0) {
+            error[@"coherence"] = detail;
+            if (detail[@"reason"]) error[@"reason"] = detail[@"reason"];
+            if (detail[@"changedPaths"]) error[@"changedPaths"] = detail[@"changedPaths"];
+            if (detail[@"currentWorkspaceRevision"]) error[@"currentWorkspaceRevision"] = detail[@"currentWorkspaceRevision"];
+            if (detail[@"requiredAction"]) error[@"requiredAction"] = detail[@"requiredAction"];
+        }
+    }
 
     NSDictionary* resp = @{
         @"id": resolvedReqId,

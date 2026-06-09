@@ -127,10 +127,12 @@ CONTROL_MM := \
 	src/platform/macos/control/services/MacControlSearchService.mm \
 	src/platform/macos/control/services/MacControlPatchService.mm \
 	src/platform/macos/control/services/MacControlWorkspaceState.mm \
+	src/platform/macos/control/services/MacControlCoherenceTokens.mm \
 	src/platform/macos/control/services/MacControlMemoryService.mm \
 	src/platform/macos/control/services/MacControlApprovalService.mm \
 	src/platform/macos/control/categories/MacControlServer+Approval.mm \
 	src/platform/macos/control/categories/MacControlServer+WorkspaceDrift.mm \
+	src/platform/macos/control/categories/MacControlServer+Coherence.mm \
 	src/platform/macos/control/categories/MacControlServer+VerifyGate.mm \
 	src/platform/macos/control/categories/MacControlServer+Memory.mm \
 	src/platform/macos/control/categories/MacControlServer+Runtime.mm \
@@ -427,6 +429,20 @@ test-runtime-native-integration: restart-agent-server
 # Pass VIII: fast iteration — assumes server/binary already match HEAD.
 test-runtime-native-integration-fast:
 	DIETCODE_REPO_ROOT=$(CURDIR) python3 scripts/test_runtime_native_integration.py --compact
+
+test-coherence-tokens: restart-agent-server
+	DIETCODE_REPO_ROOT=$(CURDIR) python3 scripts/dietcode_agent_client.py --wait-ready --compact --error-json --quiet
+	DIETCODE_REPO_ROOT=$(CURDIR) python3 scripts/test_coherence_tokens.py --compact
+
+test-coherence-tokens-fast:
+	DIETCODE_REPO_ROOT=$(CURDIR) python3 scripts/test_coherence_tokens.py --compact
+
+coherence-recovery-smoke: restart-agent-server
+	DIETCODE_REPO_ROOT=$(CURDIR) python3 scripts/dietcode_agent_client.py --wait-ready --compact --error-json --quiet
+	DIETCODE_REPO_ROOT=$(CURDIR) PYTHONUNBUFFERED=1 python3 scripts/coherence_recovery_smoke.py --compact
+
+coherence-recovery-smoke-fast:
+	DIETCODE_REPO_ROOT=$(CURDIR) PYTHONUNBUFFERED=1 python3 scripts/coherence_recovery_smoke.py --compact
 
 test-ergonomics: app
 	python3 scripts/dietcode_agent_client.py --wait-ready --compact --error-json --quiet

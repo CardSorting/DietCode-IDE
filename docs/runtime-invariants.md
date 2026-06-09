@@ -16,6 +16,7 @@ make verify-agent-runtime
 | File text read | Editor buffer preferred; disk fallback via `TextForSearchAtPath` | `readSource` on `file.stat` / `patch.validate` |
 | Content identity | `StableHashForString` (16 hex, FNV-1a) | `contentHash`, `beforeContentHash` |
 | Stale writes | `expectBeforeHash` on `patch.apply` rejects drift | `stale_content` error |
+| Task-scoped writes | `coherenceTokenId` + `expectedWorkspaceRevision` when `taskId` set | `coherence_mismatch` error — [coherence-tokens.md](coherence-tokens.md) |
 | Mutation proof | `mutationReceipt` on successful `patch.apply` | `validate_mutation_receipt()` |
 
 Agents must treat `beforeContentHash` from `patch.validate` as the precondition for `patch.apply`.

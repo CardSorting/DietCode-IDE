@@ -137,6 +137,9 @@
         NSString* taskId = params[@"taskId"];
         if (![taskId isKindOfClass:[NSString class]]) taskId = @"";
         NSDictionary* result = [self runVerificationCommand:command cwd:cwd];
+        if ([result[@"passed"] boolValue]) {
+            [_workspaceState bumpVerifyRevision];
+        }
         [self notifyVerifyResult:result taskId:taskId];
         *outResult = result;
         return;

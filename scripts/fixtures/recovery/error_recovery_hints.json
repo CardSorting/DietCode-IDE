@@ -20,6 +20,10 @@
     "recovery_hint": "run_patch_preview_or_patch_validate",
     "nextRecommendedCommand": "patch.validate"
   },
+  "coherence_mismatch": {
+    "recovery_hint": "refresh_context_and_retry_mutation",
+    "nextRecommendedCommand": "file.read"
+  },
   "nested_call_timeout": {
     "recovery_hint": "reduce_concurrency_or_retry_later",
     "nextRecommendedCommand": "operation.status"

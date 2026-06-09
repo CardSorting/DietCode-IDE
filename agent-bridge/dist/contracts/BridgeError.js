@@ -54,6 +54,11 @@ const ERROR_RECOVERY = {
         nextRecommendedCommand: 'workspace.status',
         retrySafe: true,
     },
+    coherence_mismatch: {
+        recoveryHint: 'refresh_context_and_retry_mutation',
+        nextRecommendedCommand: 'file.read',
+        retrySafe: true,
+    },
     approval_required: {
         recoveryHint: 'await_cockpit_approval_resolution',
         nextRecommendedCommand: 'approval.get',

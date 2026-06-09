@@ -36,9 +36,9 @@ See [agent-environment.md](agent-environment.md) for paths and env vars.
 
 | Method | Permission | Notes |
 |--------|------------|-------|
-| `file.read` / `file.readRange` | Read | Sets hash anchors |
-| `file.stat` | Read | Metadata + content hash |
-| `workspace.status` | Read | Drift snapshot, anchors, verify history |
+| `file.read` / `file.readRange` | Read | Sets hash anchors; returns `coherence` when `taskId` set |
+| `file.stat` | Read | Metadata + content hash; optional `coherence` with `taskId` |
+| `workspace.status` | Read | Drift snapshot; optional `coherence` with `taskId` |
 | `workspace.snapshot` | Read | Point-in-time hashes |
 | `workspace.revision` | Read | Monotonic revision + receipts |
 | `patch.validate` | Read | `beforeContentHash` for optimistic apply |
@@ -52,6 +52,8 @@ See [agent-environment.md](agent-environment.md) for paths and env vars.
 | `workspace.continueAnyway` | Read | Operator override with `contextRefreshId` |
 
 Edit/Destructive RPCs return `workspaceDriftRequired` when drift blocks.
+
+When `taskId` is set, mutating RPCs also require a valid **coherence token** from the latest read. See [coherence-tokens.md](./coherence-tokens.md).
 
 ### Approval (checkpoint 3)
 
@@ -68,8 +70,8 @@ Destructive methods return `approvalRequired: true` when autonomy is 3 (default)
 | Method | Permission | Notes |
 |--------|------------|-------|
 | `patch.validate` | Read | Pre-flight |
-| `patch.apply` | Destructive* | `confirm: true`, `expectBeforeHash`, `taskId` |
-| `patch.applyBatch` | Destructive* | Atomic multi-file |
+| `patch.apply` | Destructive* | `confirm: true`, `expectBeforeHash`, `taskId`, `coherenceTokenId`, `expectedWorkspaceRevision` |
+| `patch.applyBatch` | Destructive* | Same coherence fields as single apply |
 
 \* Queued for approval at autonomy 3. Emits `workspace.mutated` on success.
 

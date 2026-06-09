@@ -54,7 +54,7 @@ Start with the **six checkpoints** — every other doc maps to one of them.
 
 | Gate | Plain English | Doc |
 |------|---------------|-----|
-| 2 Drift | Files changed while the agent was working | [workspace-drift.md](workspace-drift.md) |
+| 2 Drift | Files changed while the agent was working | [workspace-drift.md](workspace-drift.md) · [coherence-tokens.md](coherence-tokens.md) |
 | 3 Approval | You must approve before the edit lands | [approval-lifecycle.md](approval-lifecycle.md) |
 | 5–6 Verify | Tests must pass before “done” | [verify-gate.md](verify-gate.md) |
 | Recovery | Bridge restarted mid-task | [session-recovery.md](session-recovery.md) |

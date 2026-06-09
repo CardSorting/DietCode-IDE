@@ -1,5 +1,5 @@
 /** Public bridge types — no raw RPC method names in agent-facing surfaces. */
-export type BridgeErrorCode = 'stale_content' | 'semantic_disabled' | 'ranked_search_disabled' | 'symlink_target' | 'patch_failed' | 'nested_call_timeout' | 'runtime_unavailable' | 'unsupported_runtime_capability' | 'transport_error' | 'invalid_params' | 'approval_required' | 'approval_invalid' | 'approval_rejected' | 'approval_timeout' | 'workspace_drift' | 'unknown';
+export type BridgeErrorCode = 'stale_content' | 'semantic_disabled' | 'ranked_search_disabled' | 'symlink_target' | 'patch_failed' | 'nested_call_timeout' | 'runtime_unavailable' | 'unsupported_runtime_capability' | 'transport_error' | 'invalid_params' | 'approval_required' | 'approval_invalid' | 'approval_rejected' | 'approval_timeout' | 'workspace_drift' | 'coherence_mismatch' | 'unknown';
 export type RecoverySource = 'runtime' | 'bridge_fallback';
 export type HashAuthority = 'live_validate' | 'live_stat';
 export interface BridgeError {
@@ -90,7 +90,33 @@ export interface StalePatchRecovery {
     nextCommandSource: RecoverySource;
     idempotencyKey: string;
 }
-export type SafePatchResult = SafePatchSuccess | StalePatchRecovery;
+export interface CoherenceStaleRecovery {
+    applied: false;
+    coherenceStale: true;
+    operatorInterventionRequired: false;
+    path: string;
+    reason: string;
+    changedPaths: string[];
+    recoveryHint: string;
+    nextRecommendedCommand: string;
+    recoverySource: RecoverySource;
+    nextCommandSource: RecoverySource;
+    idempotencyKey: string;
+}
+export interface CoherenceOperatorRequired {
+    applied: false;
+    coherenceStale: true;
+    operatorInterventionRequired: true;
+    path: string;
+    reason: string;
+    changedPaths: string[];
+    recoveryHint: string;
+    nextRecommendedCommand: string;
+    recoverySource: RecoverySource;
+    nextCommandSource: RecoverySource;
+    idempotencyKey: string;
+}
+export type SafePatchResult = SafePatchSuccess | StalePatchRecovery | CoherenceStaleRecovery | CoherenceOperatorRequired;
 export interface SafeBatchPatchSuccess {
     applied: true;
     atomic: true;
@@ -123,11 +149,37 @@ export interface SearchOptions {
     exclude?: string[];
     includeRaw?: boolean;
 }
+export interface CoherenceToken {
+    tokenId: string;
+    workspaceRevision: number;
+    verifyRevision: number;
+    anchors: Record<string, string>;
+}
+export type CoherenceRecoveryEventType = 'context.stale' | 'context.refreshed' | 'coherence.retry' | 'coherence.operator_required';
+export interface CoherenceRecoveryEvent {
+    type: CoherenceRecoveryEventType;
+    path: string;
+    taskId?: string;
+    reason?: string;
+    changedPaths?: string[];
+    attempt?: number;
+    tokenId?: string;
+}
 export interface PatchOptions {
     dryRun?: boolean;
     idempotencyKey?: string;
     requestTimeoutMs?: number;
     includeRaw?: boolean;
+    taskId?: string;
+    coherenceTokenId?: string;
+    expectedWorkspaceRevision?: number;
+    /** Rebuild unified diff from live file content after coherence_mismatch. */
+    buildPatchFromContent?: (args: {
+        path: string;
+        content: string;
+    }) => string;
+    /** NDJSON-style recovery telemetry for governed tasks. */
+    onCoherenceEvent?: (event: CoherenceRecoveryEvent) => void;
 }
 export interface BatchPatchOptions extends PatchOptions {
     confirm?: boolean;

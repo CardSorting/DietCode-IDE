@@ -50,6 +50,8 @@ Unblock paths:
 
 Kernel emits `workspace.drift.detected` when a mutation is blocked.
 
+**Layering:** For governed mutations (`taskId` set), the kernel checks coherence **before** drift so agents receive `coherence_mismatch` (precise) rather than `workspaceDriftRequired` (broad). Drift still applies when no task coherence envelope is in play.
+
 ## Cockpit
 
 When drift is detected, the cockpit shows:

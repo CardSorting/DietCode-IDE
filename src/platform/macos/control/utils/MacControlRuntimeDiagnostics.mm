@@ -101,6 +101,10 @@ NSDictionary* MacControlRpcErrorDiagnosticMetadata(NSString* stringCode) {
         category = @"validation";
         recoveryHint = @"revalidate_patch_with_patch.validate";
         nextRecommendedCommand = @"patch.validate";
+    } else if ([code isEqualToString:@"coherence_mismatch"]) {
+        category = @"validation";
+        recoveryHint = @"refresh_context_and_retry_mutation";
+        nextRecommendedCommand = @"file.read";
     } else if ([code isEqualToString:@"symlink_target"]) {
         category = @"validation";
         recoveryHint = @"use_non_symlink_target_path";

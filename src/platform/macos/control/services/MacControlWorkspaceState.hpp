@@ -4,6 +4,7 @@
 
 @class DietCodeControlWindowBridge;
 @class MacControlMemoryService;
+@class MacControlCoherenceRegistry;
 
 // INVARIANT: Monotonic workspace revision + operation registry for transaction kernel.
 @interface MacControlWorkspaceState : NSObject
@@ -11,6 +12,8 @@
 @property (nonatomic, weak) MacControlMemoryService* memoryService;
 
 @property (nonatomic, readonly) NSInteger revisionId;
+@property (nonatomic, readonly) NSInteger verifyRevision;
+@property (nonatomic, readonly, copy) NSDictionary* lastCoherenceMismatchDetail;
 @property (nonatomic, readonly, copy) NSDictionary* lastMutationReceipt;
 @property (nonatomic, readonly, copy) NSArray<NSString*>* lastChangedFiles;
 @property (nonatomic, readonly, copy) NSString* lastMutationSource;
@@ -71,5 +74,20 @@
                workspace:(NSString*)workspacePath
                errorCode:(NSString**)outErrCode
             errorMessage:(NSString**)outErrMsg;
+
+- (void)bumpRevision;
+- (void)bumpVerifyRevision;
+
+- (NSDictionary*)issueCoherenceForTask:(NSString*)taskId
+                                 paths:(NSArray<NSString*>*)paths
+                             workspace:(NSString*)workspacePath
+                          windowBridge:(DietCodeControlWindowBridge*)windowBridge;
+
+- (NSDictionary*)coherencePayloadForTask:(NSString*)taskId;
+
+- (BOOL)validateCoherenceForMutation:(NSDictionary*)params
+                           workspace:(NSString*)workspacePath
+                        windowBridge:(DietCodeControlWindowBridge*)windowBridge
+                           outMessage:(NSString**)outMessage;
 
 @end

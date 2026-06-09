@@ -1,6 +1,7 @@
 #import "MacControlWorkspaceState.hpp"
 #import "MacControlMemoryService.hpp"
 #import "MacControlWindowBridge.hpp"
+#import "MacControlCoherenceTokens.hpp"
 #import "MacControlSupport.hpp"
 #import "MacControlPathSecurity.hpp"
 #import "MacControlSerialization.hpp"
@@ -20,6 +21,9 @@
     NSDate* _anchorRefreshedAt;
     BOOL _continueAnywayActive;
     NSDate* _continueAnywayExpiresAt;
+    NSInteger _verifyRevisionCounter;
+    MacControlCoherenceRegistry* _coherenceRegistry;
+    NSDictionary* _lastCoherenceMismatchDetail;
 }
 
 - (instancetype)init {
@@ -32,6 +36,8 @@
         _trackedFileHashes = [NSMutableDictionary dictionary];
         _externallyChangedPaths = [NSMutableSet set];
         _contextRefreshId = 1;
+        _verifyRevisionCounter = 0;
+        _coherenceRegistry = [[MacControlCoherenceRegistry alloc] init];
     }
     return self;
 }
@@ -64,6 +70,18 @@ static NSString* ISODateFromNSDate(NSDate* date) {
     return _revisionCounter;
 }
 
+- (NSInteger)verifyRevision {
+    return _verifyRevisionCounter;
+}
+
+- (NSDictionary*)lastCoherenceMismatchDetail {
+    return _lastCoherenceMismatchDetail ?: @{};
+}
+
+- (void)bumpVerifyRevision {
+    _verifyRevisionCounter += 1;
+}
+
 - (NSDictionary*)lastMutationReceipt {
     return _lastMutationReceipt ?: @{};
 }
@@ -87,6 +105,8 @@ static NSString* ISODateFromNSDate(NSDate* date) {
 - (NSDictionary*)revisionPayloadWithWorkspace:(NSString*)workspacePath {
     return @{
         @"revisionId": @(_revisionCounter),
+        @"workspaceRevision": @(_revisionCounter),
+        @"verifyRevision": @(_verifyRevisionCounter),
         @"workspacePath": workspacePath ?: @"",
         @"changedFiles": self.lastChangedFiles,
         @"lastMutationReceipt": self.lastMutationReceipt,
@@ -436,6 +456,8 @@ static NSString* ReadHashForPath(NSString* absPath, DietCodeControlWindowBridge*
         @"mode": @"workspace_status",
         @"root": workspacePath ?: @"",
         @"revisionId": @(_revisionCounter),
+        @"workspaceRevision": @(_revisionCounter),
+        @"verifyRevision": @(_verifyRevisionCounter),
         @"gitHead": gitHead,
         @"gitBranch": branch,
         @"anchorGitHead": _anchorGitHead ?: @"",
@@ -581,6 +603,43 @@ static NSString* ReadHashForPath(NSString* absPath, DietCodeControlWindowBridge*
     }
     _agentShellCwd = [absolutePath copy];
     return YES;
+}
+
+- (NSDictionary*)issueCoherenceForTask:(NSString*)taskId
+                                 paths:(NSArray<NSString*>*)paths
+                             workspace:(NSString*)workspacePath
+                          windowBridge:(DietCodeControlWindowBridge*)windowBridge {
+    return [_coherenceRegistry issueForTask:taskId
+                                      paths:paths
+                          workspaceRevision:_revisionCounter
+                             verifyRevision:_verifyRevisionCounter
+                                  workspace:workspacePath
+                               windowBridge:windowBridge];
+}
+
+- (NSDictionary*)coherencePayloadForTask:(NSString*)taskId {
+    return [_coherenceRegistry payloadForTask:taskId
+                            workspaceRevision:_revisionCounter
+                               verifyRevision:_verifyRevisionCounter];
+}
+
+- (BOOL)validateCoherenceForMutation:(NSDictionary*)params
+                           workspace:(NSString*)workspacePath
+                        windowBridge:(DietCodeControlWindowBridge*)windowBridge
+                           outMessage:(NSString**)outMessage {
+    _lastCoherenceMismatchDetail = nil;
+    NSDictionary* detail = nil;
+    BOOL ok = [_coherenceRegistry validateMutationParams:params
+                                     workspaceRevision:_revisionCounter
+                                        verifyRevision:_verifyRevisionCounter
+                                             workspace:workspacePath
+                                          windowBridge:windowBridge
+                                              outDetail:&detail
+                                              outMessage:outMessage];
+    if (!ok && detail) {
+        _lastCoherenceMismatchDetail = detail;
+    }
+    return ok;
 }
 
 @end

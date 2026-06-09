@@ -56,7 +56,7 @@ describe('bridge.staleRecovery', () => {
 
     const result = await safePatchFile(transport, PATH, DIFF, { idempotencyKey: 'stale-key' });
     assert.equal(result.applied, false);
-    if (!result.applied && result.stale) {
+    if (!result.applied && 'stale' in result && result.stale) {
       assert.equal(result.expectedBeforeHash, BEFORE_HASH);
       assert.equal(result.currentContentHash, CURRENT_HASH);
       assert.equal(result.nextRecommendedCommand, 'patch.validate');

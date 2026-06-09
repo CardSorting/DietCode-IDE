@@ -17,6 +17,7 @@ const KNOWN_CODES = new Set<string>([
   'approval_rejected',
   'approval_timeout',
   'workspace_drift',
+  'coherence_mismatch',
 ]);
 
 export function bridgeError(

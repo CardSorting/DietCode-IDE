@@ -119,7 +119,7 @@ describe('bridge.authority.safePatch', () => {
 
     const result = await safePatchFile(transport, PATH, DIFF, { idempotencyKey: 'stale-no-retry' });
     assert.equal(result.applied, false);
-    if (!result.applied && result.stale) {
+    if (!result.applied && 'stale' in result && result.stale) {
       assert.equal(result.recoverySource, 'runtime');
       assert.equal(result.nextRecommendedCommand, 'patch.validate');
     }

@@ -114,7 +114,7 @@ def run_smoke_task(*, task_id: str, message: str, workspace: Path, mode: str) ->
             ) from exc
         probe_rel = _probe_rel_path(workspace, kernel_root)
 
-        status = send_rpc(sock, token, "workspace.status", {})
+        status = send_rpc(sock, token, "workspace.status", {"taskId": task_id})
         if not status.get("ok"):
             raise RuntimeError(f"workspace.status failed: {status}")
         emit_event(
@@ -124,9 +124,10 @@ def run_smoke_task(*, task_id: str, message: str, workspace: Path, mode: str) ->
             driftDetected=bool(status.get("result", {}).get("driftDetected")),
         )
 
-        read = send_rpc(sock, token, "file.read", {"path": probe_rel})
+        read = send_rpc(sock, token, "file.read", {"path": probe_rel, "taskId": task_id})
         if not read.get("ok"):
             raise RuntimeError(f"file.read failed: {read}")
+        coherence = (read.get("result") or {}).get("coherence") or {}
         emit_event("context.read", task_id, action="file.read", path=probe_rel)
 
         patch = _build_patch(probe_rel)
@@ -144,6 +145,10 @@ def run_smoke_task(*, task_id: str, message: str, workspace: Path, mode: str) ->
             "expectBeforeHash": validation["beforeContentHash"],
             "taskId": task_id,
         }
+        if coherence.get("tokenId"):
+            apply_params["coherenceTokenId"] = coherence["tokenId"]
+        if coherence.get("workspaceRevision") is not None:
+            apply_params["expectedWorkspaceRevision"] = coherence["workspaceRevision"]
         applied = send_rpc(sock, token, "patch.apply", apply_params)
         if not applied.get("ok"):
             raise RuntimeError(f"patch.apply failed: {applied}")

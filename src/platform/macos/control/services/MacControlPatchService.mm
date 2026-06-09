@@ -194,6 +194,17 @@ static BOOL ApplyUnifiedPatchToDisk(NSString* absPath, NSString* beforeText, NSS
 
     NSString* ws = [_windowBridge workspacePath];
     NSString* absPath = AbsolutePathForRPCPath(targetPath, ws);
+    if (_workspaceState) {
+        NSString* coherenceMsg = nil;
+        if (![_workspaceState validateCoherenceForMutation:params
+                                                 workspace:ws
+                                              windowBridge:_windowBridge
+                                                outMessage:&coherenceMsg]) {
+            if (errorCodeOut) *errorCodeOut = @"coherence_mismatch";
+            if (errorOut) *errorOut = coherenceMsg ?: @"Coherence token is stale.";
+            return nil;
+        }
+    }
     NSString* idempotencyKey = params[@"idempotencyKey"];
     if (_workspaceState && idempotencyKey.length > 0) {
         NSDictionary* prior = [_workspaceState operationStatusForKey:idempotencyKey];
@@ -343,6 +354,19 @@ static BOOL ApplyUnifiedPatchToDisk(NSString* absPath, NSString* beforeText, NSS
         return nil;
     }
 
+    NSString* ws = [_windowBridge workspacePath];
+    if (_workspaceState) {
+        NSString* coherenceMsg = nil;
+        if (![_workspaceState validateCoherenceForMutation:params
+                                                 workspace:ws
+                                              windowBridge:_windowBridge
+                                                outMessage:&coherenceMsg]) {
+            if (errorCodeOut) *errorCodeOut = @"coherence_mismatch";
+            if (errorOut) *errorOut = coherenceMsg ?: @"Coherence token is stale.";
+            return nil;
+        }
+    }
+
     if (_workspaceState && idempotencyKey.length > 0) {
         NSDictionary* prior = [_workspaceState operationStatusForKey:idempotencyKey];
         if ([prior[@"status"] isEqualToString:@"expired"]) {
@@ -369,7 +393,6 @@ static BOOL ApplyUnifiedPatchToDisk(NSString* absPath, NSString* beforeText, NSS
         return nil;
     }
     
-    NSString* ws = [_windowBridge workspacePath];
     NSUInteger combinedBytes = 0;
     NSMutableArray* results = [NSMutableArray array];
     NSMutableArray* records = [NSMutableArray array];

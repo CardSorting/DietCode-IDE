@@ -40,6 +40,7 @@ src/platform/macos/control/
 └── services/
     ├── MacControlMethodCatalog.mm
     ├── MacControlApprovalService.mm
+    ├── MacControlCoherenceTokens.mm
     └── MacControlWorkspaceState.mm
 ```
 

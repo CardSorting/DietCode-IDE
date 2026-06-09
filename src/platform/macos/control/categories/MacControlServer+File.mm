@@ -15,6 +15,21 @@
 static const NSInteger kMaxReadAroundContextLines = 500;
 static const NSInteger kMaxBatchFilePaths = 100;
 
+static void AttachCoherenceToResult(NSMutableDictionary* result,
+                                    NSDictionary* params,
+                                    NSArray<NSString*>* paths,
+                                    MacControlWorkspaceState* workspaceState,
+                                    NSString* workspacePath,
+                                    DietCodeControlWindowBridge* windowBridge) {
+    NSString* taskId = params[@"taskId"];
+    if (![taskId isKindOfClass:[NSString class]] || taskId.length == 0) return;
+    NSDictionary* coherence = [workspaceState issueCoherenceForTask:taskId
+                                                              paths:paths
+                                                          workspace:workspacePath
+                                                       windowBridge:windowBridge];
+    if (coherence) result[@"coherence"] = coherence;
+}
+
 @implementation DietCodeControlServer (File)
 
 - (void)executeFileMethod:(NSString*)method 
@@ -67,11 +82,17 @@ static const NSInteger kMaxBatchFilePaths = 100;
     }
 
     if ([method isEqualToString:@"workspace.status"]) {
-        *outResult = [_workspaceState statusPayloadWithWorkspace:[self safeWorkspacePath] ?: @""
+        NSMutableDictionary* status = [[_workspaceState statusPayloadWithWorkspace:[self safeWorkspacePath] ?: @""
                                                       windowBridge:_windowBridge
                                                            gitInfo:[self safeGitStatusInfo] ?: @{}
                                                      verifyStatus:[self verificationStatus] ?: @{}
-                                               lastVerifyFinishedAt:_lastVerifyFinishedAt];
+                                               lastVerifyFinishedAt:_lastVerifyFinishedAt] mutableCopy];
+        NSString* taskId = params[@"taskId"];
+        if ([taskId isKindOfClass:[NSString class]] && taskId.length > 0) {
+            NSDictionary* coherence = [_workspaceState coherencePayloadForTask:taskId];
+            if (coherence) status[@"coherence"] = coherence;
+        }
+        *outResult = status;
         return;
     }
 
@@ -419,6 +440,7 @@ static const NSInteger kMaxBatchFilePaths = 100;
             if (attrs.fileModificationDate) {
                 stat[@"modifiedAt"] = ISODateString(attrs.fileModificationDate);
             }
+            AttachCoherenceToResult(stat, params, @[params[@"path"] ?: targetPath], _workspaceState, ws, _windowBridge);
             *outResult = stat;
             return;
         }
@@ -429,7 +451,9 @@ static const NSInteger kMaxBatchFilePaths = 100;
                 return;
             }
             [_workspaceState trackHashesForPaths:@[params[@"path"] ?: targetPath] workspace:ws windowBridge:_windowBridge];
-            *outResult = @{ @"path": targetPath, @"text": text, @"lineCount": @(lines.count), @"sizeBytes": @(sizeBytes) };
+            NSMutableDictionary* readResult = [@{ @"path": targetPath, @"text": text, @"lineCount": @(lines.count), @"sizeBytes": @(sizeBytes) } mutableCopy];
+            AttachCoherenceToResult(readResult, params, @[params[@"path"] ?: targetPath], _workspaceState, ws, _windowBridge);
+            *outResult = readResult;
             return;
         }
         if ([method isEqualToString:@"file.readRange"]) {
@@ -447,7 +471,9 @@ static const NSInteger kMaxBatchFilePaths = 100;
                 return;
             }
             [_workspaceState trackHashesForPaths:@[params[@"path"] ?: targetPath] workspace:ws windowBridge:_windowBridge];
-            *outResult = @{ @"path": targetPath, @"startLine": @(startLine), @"endLine": @(endLine), @"text": rangeText };
+            NSMutableDictionary* rangeResult = [@{ @"path": targetPath, @"startLine": @(startLine), @"endLine": @(endLine), @"text": rangeText } mutableCopy];
+            AttachCoherenceToResult(rangeResult, params, @[params[@"path"] ?: targetPath], _workspaceState, ws, _windowBridge);
+            *outResult = rangeResult;
             return;
         }
         if ([method isEqualToString:@"file.readAround"]) {
@@ -463,7 +489,9 @@ static const NSInteger kMaxBatchFilePaths = 100;
                 return;
             }
             [_workspaceState trackHashesForPaths:@[params[@"path"] ?: targetPath] workspace:ws windowBridge:_windowBridge];
-            *outResult = @{ @"path": targetPath, @"startLine": @(startLine), @"endLine": @(endLine), @"text": rangeText };
+            NSMutableDictionary* aroundResult = [@{ @"path": targetPath, @"startLine": @(startLine), @"endLine": @(endLine), @"text": rangeText } mutableCopy];
+            AttachCoherenceToResult(aroundResult, params, @[params[@"path"] ?: targetPath], _workspaceState, ws, _windowBridge);
+            *outResult = aroundResult;
             return;
         }
         if ([method isEqualToString:@"file.getChunks"]) {

@@ -25,6 +25,13 @@ export async function applyPatch(transport, path, unifiedDiff, expectBeforeHash,
         expectBeforeHash,
         idempotencyKey: options.idempotencyKey,
     };
+    if (options.taskId)
+        patchParams.taskId = options.taskId;
+    if (options.coherenceTokenId)
+        patchParams.coherenceTokenId = options.coherenceTokenId;
+    if (options.expectedWorkspaceRevision != null) {
+        patchParams.expectedWorkspaceRevision = options.expectedWorkspaceRevision;
+    }
     let envelope = await transport.call('patch.apply', patchParams, {
         timeoutMs: options.requestTimeoutMs,
     });
@@ -54,6 +61,13 @@ export async function applyPatchBatch(transport, patches, options = {}) {
         confirm: options.confirm ?? true,
         idempotencyKey: options.idempotencyKey,
     };
+    if (options.taskId)
+        batchParams.taskId = options.taskId;
+    if (options.coherenceTokenId)
+        batchParams.coherenceTokenId = options.coherenceTokenId;
+    if (options.expectedWorkspaceRevision != null) {
+        batchParams.expectedWorkspaceRevision = options.expectedWorkspaceRevision;
+    }
     let envelope = await transport.call('patch.applyBatch', batchParams, {
         timeoutMs: options.requestTimeoutMs,
     });

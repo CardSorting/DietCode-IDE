@@ -39,7 +39,7 @@ When `DIETCODE_TASK_ID` is set, the bridge injects `taskId` into destructive RPC
 | Export | Purpose |
 |--------|---------|
 | `DietCodeBridge` | Connection + `call(method, params)` |
-| `safePatchFile` | validate → apply with approval/drift handling |
+| `safePatchFile` | validate → apply with approval/drift/coherence recovery |
 | `shellPwd` / `shellRg` / `shellSedRange` / `shellCatSmall` | Bounded shell (see [agent-shell-tooling.md](agent-shell-tooling.md)) |
 
 Bridge errors include `recoveryHint` aligned with [error-codes.md](error-codes.md).

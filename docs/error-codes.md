@@ -119,6 +119,7 @@ See [Runtime Invariants](runtime-invariants.md) and [Troubleshooting](troublesho
 | `verify_failed` | 4004 | Alias of verification failure |
 | `patch_failed` | 4004 | Patch could not be applied |
 | `stale_content` | 4004 | Target file changed since validation (`expectBeforeHash` mismatch). **Next:** `patch.validate` |
+| `coherence_mismatch` | 4004 | Task coherence token stale — observed state no longer matches workspace. **Next:** re-read with `taskId`, retry with fresh token |
 | `symlink_target` | 4004 | Patch attempted through symlink path. **Next:** `file.stat` on real path |
 | `rollback_conflict` | 4005 | Rollback state mismatch |
 | `rollback_failed` | 4005 | Rollback operation failed |
@@ -134,6 +135,7 @@ See [Runtime Invariants](runtime-invariants.md) and [Troubleshooting](troublesho
 | string_code | recovery_hint | nextRecommendedCommand |
 |-------------|---------------|------------------------|
 | `stale_content` | `revalidate_patch_with_patch.validate` | `patch.validate` |
+| `coherence_mismatch` | `refresh_context_and_retry_mutation` | `file.read` |
 | `symlink_target` | `use_non_symlink_target_path` | `file.stat` |
 | `semantic_disabled` | `use_search_literal_or_search_tokens` | `search.literal` |
 | `ranked_search_disabled` | `use_workspace_grep_or_search_literal` | `workspace.grep` |

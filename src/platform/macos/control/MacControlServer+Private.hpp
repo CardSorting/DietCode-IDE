@@ -90,6 +90,7 @@
 - (NSInteger)safeAgentAutonomyLevel;
 - (BOOL)isDestructiveRequestSafe:(NSString*)method params:(NSDictionary*)params;
 - (void)sendSuccess:(NSString*)reqId result:(NSDictionary*)result clientFd:(int)clientFd;
+- (void)sendError:(NSString*)reqId code:(id)code message:(NSString*)message clientFd:(int)clientFd;
 
 @end
 
@@ -137,6 +138,10 @@
 @interface DietCodeControlServer (WorkspaceDrift)
 - (NSDictionary*)currentWorkspaceStatusPayload;
 - (BOOL)queueWorkspaceDriftBlockIfNeeded:(NSString*)method params:(NSDictionary*)params reqId:(NSString*)reqId clientFd:(int)clientFd;
+@end
+
+@interface DietCodeControlServer (Coherence)
+- (BOOL)queueCoherenceMismatchIfNeeded:(NSString*)method params:(NSDictionary*)params reqId:(NSString*)reqId clientFd:(int)clientFd;
 @end
 
 @interface DietCodeControlServer (VerifyGate)

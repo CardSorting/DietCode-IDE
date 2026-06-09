@@ -299,6 +299,8 @@ SEMANTIC_QUARANTINE_ERROR_CODES = frozenset({
 # CONTRACT: workspace.revision response keys.
 WORKSPACE_REVISION_KEYS = frozenset({
     "revisionId",
+    "workspaceRevision",
+    "verifyRevision",
     "workspacePath",
     "changedFiles",
     "lastMutationReceipt",
@@ -306,6 +308,14 @@ WORKSPACE_REVISION_KEYS = frozenset({
     "externalChangeDetected",
     "externallyChangedPaths",
     "mode",
+})
+
+# CONTRACT: coherence token payload on read/status responses (v0.1).
+COHERENCE_RESPONSE_KEYS = frozenset({
+    "tokenId",
+    "workspaceRevision",
+    "verifyRevision",
+    "anchors",
 })
 
 # CONTRACT: workspace.snapshot response keys.

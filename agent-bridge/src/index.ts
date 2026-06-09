@@ -54,4 +54,15 @@ export type {
   MutationReceipt,
   BatchMutationReceipt,
   StalePatchRecovery,
+  CoherenceToken,
+  CoherenceRecoveryEvent,
+  CoherenceStaleRecovery,
+  CoherenceOperatorRequired,
 } from './contracts/types.js';
+export { readFileWithCoherence } from './adapters/fileAdapter.js';
+export {
+  parseCoherenceMismatch,
+  refreshCoherenceContext,
+  buildCoherenceStaleRecovery,
+  buildCoherenceOperatorRequired,
+} from './workflows/coherenceRecovery.js';

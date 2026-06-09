@@ -42,7 +42,7 @@ export async function applyPatch(
   expectBeforeHash: string,
   options: PatchOptions = {},
 ): Promise<BridgeResult<Record<string, unknown>>> {
-  const patchParams = {
+  const patchParams: Record<string, unknown> = {
     path,
     patch: unifiedDiff,
     confirm: true,
@@ -50,6 +50,11 @@ export async function applyPatch(
     expectBeforeHash,
     idempotencyKey: options.idempotencyKey,
   };
+  if (options.taskId) patchParams.taskId = options.taskId;
+  if (options.coherenceTokenId) patchParams.coherenceTokenId = options.coherenceTokenId;
+  if (options.expectedWorkspaceRevision != null) {
+    patchParams.expectedWorkspaceRevision = options.expectedWorkspaceRevision;
+  }
   let envelope = await transport.call('patch.apply', patchParams, {
     timeoutMs: options.requestTimeoutMs,
   });
@@ -99,12 +104,17 @@ export async function applyPatchBatch(
   patches: BatchPatchRpcEntry[],
   options: BatchPatchOptions = {},
 ): Promise<BridgeResult<Record<string, unknown>>> {
-  const batchParams = {
+  const batchParams: Record<string, unknown> = {
     patches,
     dryRun: options.dryRun ?? false,
     confirm: options.confirm ?? true,
     idempotencyKey: options.idempotencyKey,
   };
+  if (options.taskId) batchParams.taskId = options.taskId;
+  if (options.coherenceTokenId) batchParams.coherenceTokenId = options.coherenceTokenId;
+  if (options.expectedWorkspaceRevision != null) {
+    batchParams.expectedWorkspaceRevision = options.expectedWorkspaceRevision;
+  }
   let envelope = await transport.call('patch.applyBatch', batchParams, {
     timeoutMs: options.requestTimeoutMs,
   });

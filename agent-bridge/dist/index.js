@@ -8,4 +8,6 @@ export { DietCodeBridgeError, isBridgeError, toBridgeError, resolveBridgeRecover
 export { bridgeError, mapRpcError, unsupportedCapabilityError } from './contracts/errors.js';
 export { normalizeBridgeResult, normalizeRpcSuccess, extractPartialMeta, hasPartialSuccessKeys, } from './contracts/schemas.js';
 export { validateMutationReceipt, validateBatchMutationReceipt, validateToolCapabilities, validateRuntimeDiagnostics, } from './contracts/validators.js';
+export { readFileWithCoherence } from './adapters/fileAdapter.js';
+export { parseCoherenceMismatch, refreshCoherenceContext, buildCoherenceStaleRecovery, buildCoherenceOperatorRequired, } from './workflows/coherenceRecovery.js';
 //# sourceMappingURL=index.js.map
